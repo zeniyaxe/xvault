@@ -1,100 +1,699 @@
-#xvault-corner{position:fixed;z-index:2147483646;right:18px;bottom:18px;width:54px;height:54px;border-radius:18px;border:1px solid #ffffff22;background:linear-gradient(145deg,#1b1c20ee,#07080afa);box-shadow:0 18px 55px #0007,inset 0 1px #fff1;color:#fff;display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(18px);font:800 12px system-ui;transition:.24s cubic-bezier(.2,.8,.2,1)}#xvault-corner:hover{transform:translateY(-3px) scale(1.04)}#xvault-corner .xv-ring{position:absolute;inset:7px;border:1px solid #ffffff25;border-radius:14px}#xvault-corner i{position:absolute;right:-6px;top:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:99px;background:#fff;color:#08090b;font:800 9px system-ui;display:grid;place-items:center;font-style:normal}.xvault-download{width:34px;height:34px;border:0;border-radius:50%;background:transparent;color:rgb(113,118,123);display:grid;place-items:center;cursor:pointer;transition:.18s}.xvault-download:hover{background:#fff1;color:#fff;transform:translateY(-1px)}.xvault-download svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}.xvault-download.busy svg{animation:xvspin .7s linear infinite}@keyframes xvspin{to{transform:rotate(360deg)}}#xvault-toast{position:fixed;z-index:2147483647;left:50%;bottom:25px;opacity:0;transform:translate(-50%,18px) scale(.96);background:#121419f2;color:#fff;border:1px solid #fff2;padding:11px 16px;border-radius:14px;box-shadow:0 18px 60px #0008;backdrop-filter:blur(18px);font:600 13px system-ui;transition:.24s;pointer-events:none}#xvault-toast.show{opacity:1;transform:translate(-50%,0) scale(1)}
+#xvault-corner {
+  position: fixed;
+  z-index: 2147483646;
+  right: 18px;
+  bottom: 18px;
+  width: 54px;
+  height: 54px;
+  border-radius: 18px;
+  border: 1px solid #ffffff22;
+  background: linear-gradient(145deg, #1b1c20ee, #07080afa);
+  box-shadow:
+    0 18px 55px #0007,
+    inset 0 1px #fff1;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  backdrop-filter: blur(18px);
+  font: 800 12px system-ui;
+  transition: 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#xvault-corner:hover {
+  transform: translateY(-3px) scale(1.04);
+}
+#xvault-corner .xv-ring {
+  position: absolute;
+  inset: 7px;
+  border: 1px solid #ffffff25;
+  border-radius: 14px;
+}
+#xvault-corner i {
+  position: absolute;
+  right: -6px;
+  top: -6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: #fff;
+  color: #08090b;
+  font: 800 9px system-ui;
+  display: grid;
+  place-items: center;
+  font-style: normal;
+}
+.xvault-download {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: rgb(113, 118, 123);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: 0.18s;
+}
+.xvault-download:hover {
+  background: #fff1;
+  color: #fff;
+  transform: translateY(-1px);
+}
+.xvault-download svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.xvault-download.busy svg {
+  animation: xvspin 0.7s linear infinite;
+}
+@keyframes xvspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+#xvault-toast {
+  position: fixed;
+  z-index: 2147483647;
+  left: 50%;
+  bottom: 25px;
+  opacity: 0;
+  transform: translate(-50%, 18px) scale(0.96);
+  background: #121419f2;
+  color: #fff;
+  border: 1px solid #fff2;
+  padding: 11px 16px;
+  border-radius: 14px;
+  box-shadow: 0 18px 60px #0008;
+  backdrop-filter: blur(18px);
+  font: 600 13px system-ui;
+  transition: 0.24s;
+  pointer-events: none;
+}
+#xvault-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}
 
-#xvault-corner{touch-action:none;user-select:none;will-change:transform,right,bottom,opacity}
-#xvault-corner.dragging{cursor:grabbing!important;transition:box-shadow .16s ease,filter .16s ease!important;filter:brightness(1.18);box-shadow:0 28px 90px rgba(0,0,0,.62),0 0 0 2px rgba(255,255,255,.12)!important}
-#xvault-corner em{position:absolute;inset:-4px;border-radius:21px;pointer-events:none;opacity:0;background:conic-gradient(#fff var(--p,0%),transparent 0);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 0);mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 0);transition:opacity .25s ease}
-#xvault-corner.downloading em{opacity:.8;animation:xvpulse 1.8s ease-in-out infinite}
-#xvault-corner.downloading .xv-ring{animation:xvrotate 2.4s linear infinite}
-@keyframes xvrotate{to{transform:rotate(360deg)}}@keyframes xvpulse{50%{filter:drop-shadow(0 0 8px rgba(255,255,255,.55))}}
+#xvault-corner {
+  touch-action: none;
+  user-select: none;
+  will-change: transform, right, bottom, opacity;
+}
+#xvault-corner.dragging {
+  cursor: grabbing !important;
+  transition:
+    box-shadow 0.16s ease,
+    filter 0.16s ease !important;
+  filter: brightness(1.18);
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.62),
+    0 0 0 2px rgba(255, 255, 255, 0.12) !important;
+}
+#xvault-corner em {
+  position: absolute;
+  inset: -4px;
+  border-radius: 21px;
+  pointer-events: none;
+  opacity: 0;
+  background: conic-gradient(#fff var(--p, 0%), transparent 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+  transition: opacity 0.25s ease;
+}
+#xvault-corner.downloading em {
+  opacity: 0.8;
+  animation: xvpulse 1.8s ease-in-out infinite;
+}
+#xvault-corner.downloading .xv-ring {
+  animation: xvrotate 2.4s linear infinite;
+}
+@keyframes xvrotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes xvpulse {
+  50% {
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.55));
+  }
+}
 
 /* XVault v6 floating control */
-#xvault-corner{
-  --xv-scale:1;
-  width:58px!important;height:58px!important;border-radius:19px!important;
-  display:flex!important;align-items:center!important;justify-content:center!important;
-  transform:scale(var(--xv-scale))!important;transform-origin:center!important;
-  overflow:visible!important;isolation:isolate!important;
+#xvault-corner {
+  --xv-scale: 1;
+  width: 58px !important;
+  height: 58px !important;
+  border-radius: 19px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transform: scale(var(--xv-scale)) !important;
+  transform-origin: center !important;
+  overflow: visible !important;
+  isolation: isolate !important;
   background:
-    radial-gradient(circle at 30% 20%,rgba(255,255,255,.13),transparent 34%),
-    linear-gradient(145deg,rgba(28,30,35,.97),rgba(7,8,10,.98))!important;
-  box-shadow:0 22px 70px rgba(0,0,0,.48),inset 0 1px 0 rgba(255,255,255,.1)!important;
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.13), transparent 34%),
+    linear-gradient(145deg, rgba(28, 30, 35, 0.97), rgba(7, 8, 10, 0.98)) !important;
+  box-shadow:
+    0 22px 70px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
 }
-#xvault-corner:hover{transform:translateY(-3px) scale(calc(var(--xv-scale) * 1.045))!important}
-#xvault-corner.dragging{transform:scale(calc(var(--xv-scale) * 1.06))!important}
-#xvault-corner .xv-logo{
-  position:relative;z-index:3;display:flex;align-items:center;justify-content:center;
-  width:100%;height:100%;line-height:1!important;text-align:center!important;
-  font:900 12px/1 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif!important;
-  letter-spacing:-.7px;transform:translateY(.2px);pointer-events:none;
+#xvault-corner:hover {
+  transform: translateY(-3px) scale(calc(var(--xv-scale) * 1.045)) !important;
 }
-#xvault-corner .xv-ring{
-  position:absolute!important;inset:7px!important;border-radius:14px!important;
-  border:1px solid rgba(255,255,255,.17)!important;pointer-events:none;
-  box-shadow:inset 0 0 18px rgba(255,255,255,.018);
+#xvault-corner.dragging {
+  transform: scale(calc(var(--xv-scale) * 1.06)) !important;
 }
-#xvault-corner .xv-badge{
-  position:absolute;z-index:5;right:-7px;top:-7px;min-width:21px;height:21px;padding:0 5px;
-  border-radius:999px;background:#f5f6f7;color:#08090b;border:2px solid #0b0c0f;
-  display:flex;align-items:center;justify-content:center;font:850 9px/1 system-ui;
-  box-shadow:0 7px 24px rgba(0,0,0,.45);
+#xvault-corner .xv-logo {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  line-height: 1 !important;
+  text-align: center !important;
+  font:
+    900 12px/1 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif !important;
+  letter-spacing: -0.7px;
+  transform: translateY(0.2px);
+  pointer-events: none;
 }
-#xvault-corner .xv-progress{
-  --p:0%;position:absolute;inset:-4px;border-radius:23px;pointer-events:none;opacity:0;
-  background:conic-gradient(#fff var(--p),rgba(255,255,255,.06) 0);
-  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 0);
-  mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 0);
-  transition:opacity .25s ease;
+#xvault-corner .xv-ring {
+  position: absolute !important;
+  inset: 7px !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(255, 255, 255, 0.17) !important;
+  pointer-events: none;
+  box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.018);
 }
-#xvault-corner.downloading .xv-progress{opacity:.9;animation:xvGlow 1.8s ease-in-out infinite}
-#xvault-corner.downloading .xv-logo{animation:xvBreath 1.8s ease-in-out infinite}
-@keyframes xvGlow{50%{filter:drop-shadow(0 0 8px rgba(255,255,255,.45))}}
-@keyframes xvBreath{50%{opacity:.72;transform:translateY(.2px) scale(.96)}}
-.xvault-download{position:relative;overflow:visible!important}
-.xvault-download .xvdl-ring{position:absolute;inset:3px;border-radius:50%;border:1px solid transparent;pointer-events:none}
-.xvault-download[data-archive-state="downloaded"]{color:#67c88a;box-shadow:inset 0 -2px #67c88a}
-.xvault-download[data-archive-state="downloading"],.xvault-download[data-archive-state="partial"]{color:#e3b65e;box-shadow:inset 0 -2px #e3b65e}
-.xvault-download[data-archive-state="failed"]{color:#ed7b75;box-shadow:inset 0 -2px #ed7b75}
-.xvault-download[data-archive-state="missing"]{color:#d99b75;box-shadow:inset 0 -2px #d99b75}
-.xvault-download[data-archive-state="archived"]{color:#9ab9c9;box-shadow:inset 0 -2px #9ab9c9}
-.xvault-download.busy .xvdl-ring{border-top-color:currentColor;border-right-color:currentColor;animation:xvspin .65s linear infinite}
-#xvault-stale{
-  position:fixed;z-index:2147483647;right:18px;bottom:18px;width:255px;padding:14px;
-  border:1px solid rgba(255,255,255,.13);border-radius:17px;background:rgba(13,15,18,.96);
-  color:#f5f6f7;box-shadow:0 24px 80px rgba(0,0,0,.55);backdrop-filter:blur(22px);
-  font:600 12px/1.3 ui-sans-serif,system-ui;animation:xvStaleIn .28s cubic-bezier(.2,.8,.2,1);
+#xvault-corner .xv-badge {
+  position: absolute;
+  z-index: 5;
+  right: -7px;
+  top: -7px;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #f5f6f7;
+  color: #08090b;
+  border: 2px solid #0b0c0f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 850 9px/1 system-ui;
+  box-shadow: 0 7px 24px rgba(0, 0, 0, 0.45);
 }
-#xvault-stale b,#xvault-stale span{display:block}#xvault-stale span{color:#9298a2;margin:5px 0 11px}
-#xvault-stale button{width:100%;border:0;border-radius:11px;padding:9px;background:#f4f5f7;color:#08090b;font-weight:800;cursor:pointer}
-@keyframes xvStaleIn{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:none}}
+#xvault-corner .xv-progress {
+  --p: 0%;
+  position: absolute;
+  inset: -4px;
+  border-radius: 23px;
+  pointer-events: none;
+  opacity: 0;
+  background: conic-gradient(#fff var(--p), rgba(255, 255, 255, 0.06) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+  transition: opacity 0.25s ease;
+}
+#xvault-corner.downloading .xv-progress {
+  opacity: 0.9;
+  animation: xvGlow 1.8s ease-in-out infinite;
+}
+#xvault-corner.downloading .xv-logo {
+  animation: xvBreath 1.8s ease-in-out infinite;
+}
+@keyframes xvGlow {
+  50% {
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.45));
+  }
+}
+@keyframes xvBreath {
+  50% {
+    opacity: 0.72;
+    transform: translateY(0.2px) scale(0.96);
+  }
+}
+.xvault-download {
+  position: relative;
+  overflow: visible !important;
+}
+.xvault-download .xvdl-ring {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  pointer-events: none;
+}
+.xvault-download[data-archive-state='downloaded'] {
+  color: #67c88a;
+  box-shadow: inset 0 -2px #67c88a;
+}
+.xvault-download[data-archive-state='downloading'],
+.xvault-download[data-archive-state='partial'] {
+  color: #e3b65e;
+  box-shadow: inset 0 -2px #e3b65e;
+}
+.xvault-download[data-archive-state='failed'] {
+  color: #ed7b75;
+  box-shadow: inset 0 -2px #ed7b75;
+}
+.xvault-download[data-archive-state='missing'] {
+  color: #d99b75;
+  box-shadow: inset 0 -2px #d99b75;
+}
+.xvault-download[data-archive-state='archived'] {
+  color: #9ab9c9;
+  box-shadow: inset 0 -2px #9ab9c9;
+}
+.xvault-download.busy .xvdl-ring {
+  border-top-color: currentColor;
+  border-right-color: currentColor;
+  animation: xvspin 0.65s linear infinite;
+}
+#xvault-stale {
+  position: fixed;
+  z-index: 2147483647;
+  right: 18px;
+  bottom: 18px;
+  width: 255px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 17px;
+  background: rgba(13, 15, 18, 0.96);
+  color: #f5f6f7;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(22px);
+  font:
+    600 12px/1.3 ui-sans-serif,
+    system-ui;
+  animation: xvStaleIn 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#xvault-stale b,
+#xvault-stale span {
+  display: block;
+}
+#xvault-stale span {
+  color: #9298a2;
+  margin: 5px 0 11px;
+}
+#xvault-stale button {
+  width: 100%;
+  border: 0;
+  border-radius: 11px;
+  padding: 9px;
+  background: #f4f5f7;
+  color: #08090b;
+  font-weight: 800;
+  cursor: pointer;
+}
+@keyframes xvStaleIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
 
 /* XVault v7 floating orb */
-#xvault-corner{--xv-scale:1;--xv-opacity:1;position:fixed!important;z-index:2147483644!important;right:18px;bottom:18px;width:68px!important;height:68px!important;padding:0!important;border:1px solid rgba(255,255,255,.15)!important;border-radius:23px!important;background:radial-gradient(circle at 28% 18%,rgba(255,255,255,.19),transparent 33%),linear-gradient(145deg,rgba(26,28,33,.98),rgba(6,7,9,.98))!important;display:grid!important;place-items:center!important;overflow:visible!important;color:white!important;box-shadow:0 26px 88px rgba(0,0,0,.56),inset 0 1px rgba(255,255,255,.12)!important;backdrop-filter:blur(22px)!important;transform:scale(var(--xv-scale))!important;opacity:var(--xv-opacity)!important;transform-origin:center!important;transition:transform .28s cubic-bezier(.2,.85,.2,1),opacity .28s,filter .28s,box-shadow .28s!important;touch-action:none!important;user-select:none!important}
-#xvault-corner:hover{transform:translateY(-3px) scale(calc(var(--xv-scale)*1.055))!important;opacity:1!important;box-shadow:0 34px 110px rgba(0,0,0,.66),0 0 0 1px rgba(255,255,255,.06),inset 0 1px rgba(255,255,255,.15)!important}
-#xvault-corner.autohide:not(:hover):not(.busy){opacity:calc(var(--xv-opacity)*.48)!important}
-#xvault-corner.dragging{transform:scale(calc(var(--xv-scale)*1.08))!important;cursor:grabbing!important;filter:brightness(1.15)}
-#xvault-corner .xv-core{position:absolute;inset:0;display:flex!important;flex-direction:column;align-items:center!important;justify-content:center!important;gap:1px;text-align:center;pointer-events:none;line-height:1!important}
-#xvault-corner .xv-core b{font:950 16px/1 ui-sans-serif,system-ui!important;letter-spacing:-1.2px;margin:0!important;padding:0!important;transform:none!important}
-#xvault-corner .xv-core small{font:800 6px/1 ui-sans-serif,system-ui!important;letter-spacing:1.5px;color:rgba(255,255,255,.52);margin:3px 0 0!important;padding:0!important}
-#xvault-corner .xv-badge{position:absolute;right:-7px;top:-7px;min-width:23px;height:23px;padding:0 6px;border-radius:999px;border:2px solid #090a0c;background:#f7f7f8;color:#07080a;display:flex;align-items:center;justify-content:center;font:900 9px/1 system-ui;box-shadow:0 8px 28px #0008}
-#xvault-corner .xv-progress{--p:0%;position:absolute;inset:-5px;border-radius:28px;background:conic-gradient(#fff var(--p),rgba(255,255,255,.065) 0);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 0);mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 0);opacity:0;pointer-events:none}
-#xvault-corner.busy .xv-progress{opacity:.9;animation:xv7pulse 1.8s ease-in-out infinite}#xvault-corner.busy .xv-core{animation:xv7breath 1.8s ease-in-out infinite}
-#xvault-corner.edge{width:42px!important;height:78px!important;border-radius:18px!important}
-@keyframes xv7pulse{50%{filter:drop-shadow(0 0 11px rgba(255,255,255,.58))}}@keyframes xv7breath{50%{transform:scale(.94);opacity:.74}}
-#xvault-hover,#xvault-menu{position:fixed;z-index:2147483646;width:210px;padding:10px;border-radius:17px;border:1px solid rgba(255,255,255,.13);background:rgba(13,15,18,.94);backdrop-filter:blur(24px);box-shadow:0 26px 90px rgba(0,0,0,.58);color:#f6f7f8;font:600 12px/1.25 ui-sans-serif,system-ui;animation:xv7pop .2s cubic-bezier(.2,.8,.2,1)}
-#xvault-hover b,#xvault-hover small{display:block;padding:0 5px}#xvault-hover small{color:#858b95;font-size:9px;margin:3px 0 8px}#xvault-hover button,#xvault-menu button{display:block;width:100%;border:0;background:transparent;color:inherit;text-align:left;padding:9px 10px;border-radius:10px;cursor:pointer;font-weight:650}#xvault-hover button:hover,#xvault-menu button:hover{background:rgba(255,255,255,.075);transform:translateX(2px)}
-@keyframes xv7pop{from{opacity:0;transform:translateY(8px) scale(.96)}to{opacity:1;transform:none}}
-#xvault-stale{position:fixed;z-index:2147483647;right:18px;bottom:18px;width:290px;padding:16px;border:1px solid rgba(255,255,255,.13);border-radius:19px;background:rgba(13,15,18,.97);color:#f5f6f7;box-shadow:0 24px 90px rgba(0,0,0,.62);backdrop-filter:blur(24px);font:600 12px/1.35 system-ui;animation:xv7pop .24s cubic-bezier(.2,.8,.2,1)}#xvault-stale b,#xvault-stale span{display:block}#xvault-stale span{color:#9298a2;margin:5px 0 12px}#xvault-stale button{width:100%;border:0;border-radius:11px;padding:10px;background:#f4f5f7;color:#08090b;font-weight:850;cursor:pointer}
+#xvault-corner {
+  --xv-scale: 1;
+  --xv-opacity: 1;
+  position: fixed !important;
+  z-index: 2147483644 !important;
+  right: 18px;
+  bottom: 18px;
+  width: 68px !important;
+  height: 68px !important;
+  padding: 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 23px !important;
+  background:
+    radial-gradient(circle at 28% 18%, rgba(255, 255, 255, 0.19), transparent 33%),
+    linear-gradient(145deg, rgba(26, 28, 33, 0.98), rgba(6, 7, 9, 0.98)) !important;
+  display: grid !important;
+  place-items: center !important;
+  overflow: visible !important;
+  color: white !important;
+  box-shadow:
+    0 26px 88px rgba(0, 0, 0, 0.56),
+    inset 0 1px rgba(255, 255, 255, 0.12) !important;
+  backdrop-filter: blur(22px) !important;
+  transform: scale(var(--xv-scale)) !important;
+  opacity: var(--xv-opacity) !important;
+  transform-origin: center !important;
+  transition:
+    transform 0.28s cubic-bezier(0.2, 0.85, 0.2, 1),
+    opacity 0.28s,
+    filter 0.28s,
+    box-shadow 0.28s !important;
+  touch-action: none !important;
+  user-select: none !important;
+}
+#xvault-corner:hover {
+  transform: translateY(-3px) scale(calc(var(--xv-scale) * 1.055)) !important;
+  opacity: 1 !important;
+  box-shadow:
+    0 34px 110px rgba(0, 0, 0, 0.66),
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 1px rgba(255, 255, 255, 0.15) !important;
+}
+#xvault-corner.autohide:not(:hover):not(.busy) {
+  opacity: calc(var(--xv-opacity) * 0.48) !important;
+}
+#xvault-corner.dragging {
+  transform: scale(calc(var(--xv-scale) * 1.08)) !important;
+  cursor: grabbing !important;
+  filter: brightness(1.15);
+}
+#xvault-corner .xv-core {
+  position: absolute;
+  inset: 0;
+  display: flex !important;
+  flex-direction: column;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 1px;
+  text-align: center;
+  pointer-events: none;
+  line-height: 1 !important;
+}
+#xvault-corner .xv-core b {
+  font:
+    950 16px/1 ui-sans-serif,
+    system-ui !important;
+  letter-spacing: -1.2px;
+  margin: 0 !important;
+  padding: 0 !important;
+  transform: none !important;
+}
+#xvault-corner .xv-core small {
+  font:
+    800 6px/1 ui-sans-serif,
+    system-ui !important;
+  letter-spacing: 1.5px;
+  color: rgba(255, 255, 255, 0.52);
+  margin: 3px 0 0 !important;
+  padding: 0 !important;
+}
+#xvault-corner .xv-badge {
+  position: absolute;
+  right: -7px;
+  top: -7px;
+  min-width: 23px;
+  height: 23px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 2px solid #090a0c;
+  background: #f7f7f8;
+  color: #07080a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 900 9px/1 system-ui;
+  box-shadow: 0 8px 28px #0008;
+}
+#xvault-corner .xv-progress {
+  --p: 0%;
+  position: absolute;
+  inset: -5px;
+  border-radius: 28px;
+  background: conic-gradient(#fff var(--p), rgba(255, 255, 255, 0.065) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+  opacity: 0;
+  pointer-events: none;
+}
+#xvault-corner.busy .xv-progress {
+  opacity: 0.9;
+  animation: xv7pulse 1.8s ease-in-out infinite;
+}
+#xvault-corner.busy .xv-core {
+  animation: xv7breath 1.8s ease-in-out infinite;
+}
+#xvault-corner.edge {
+  width: 42px !important;
+  height: 78px !important;
+  border-radius: 18px !important;
+}
+@keyframes xv7pulse {
+  50% {
+    filter: drop-shadow(0 0 11px rgba(255, 255, 255, 0.58));
+  }
+}
+@keyframes xv7breath {
+  50% {
+    transform: scale(0.94);
+    opacity: 0.74;
+  }
+}
+#xvault-hover,
+#xvault-menu {
+  position: fixed;
+  z-index: 2147483646;
+  width: 210px;
+  padding: 10px;
+  border-radius: 17px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(13, 15, 18, 0.94);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 26px 90px rgba(0, 0, 0, 0.58);
+  color: #f6f7f8;
+  font:
+    600 12px/1.25 ui-sans-serif,
+    system-ui;
+  animation: xv7pop 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#xvault-hover b,
+#xvault-hover small {
+  display: block;
+  padding: 0 5px;
+}
+#xvault-hover small {
+  color: #858b95;
+  font-size: 9px;
+  margin: 3px 0 8px;
+}
+#xvault-hover button,
+#xvault-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 650;
+}
+#xvault-hover button:hover,
+#xvault-menu button:hover {
+  background: rgba(255, 255, 255, 0.075);
+  transform: translateX(2px);
+}
+@keyframes xv7pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+#xvault-stale {
+  position: fixed;
+  z-index: 2147483647;
+  right: 18px;
+  bottom: 18px;
+  width: 290px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 19px;
+  background: rgba(13, 15, 18, 0.97);
+  color: #f5f6f7;
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(24px);
+  font: 600 12px/1.35 system-ui;
+  animation: xv7pop 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#xvault-stale b,
+#xvault-stale span {
+  display: block;
+}
+#xvault-stale span {
+  color: #9298a2;
+  margin: 5px 0 12px;
+}
+#xvault-stale button {
+  width: 100%;
+  border: 0;
+  border-radius: 11px;
+  padding: 10px;
+  background: #f4f5f7;
+  color: #08090b;
+  font-weight: 850;
+  cursor: pointer;
+}
 
 /* v8 centered XV widget polish */
-#xvault-corner{display:grid!important;place-items:center!important;text-align:center!important;line-height:1!important}
-#xvault-corner .xv-core{position:absolute!important;inset:0!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:2px!important;transform:none!important}
-#xvault-corner .xv-core b{display:block!important;margin:0!important;padding:0!important;line-height:.95!important;text-align:center!important;letter-spacing:-.06em!important}
-#xvault-corner .xv-core small{display:block!important;margin:0!important;padding:0!important;text-align:center!important;line-height:1!important}
-#xvault-corner.busy{animation:xvBreath 1.8s ease-in-out infinite}@keyframes xvBreath{50%{filter:drop-shadow(0 0 14px rgba(255,255,255,.18));transform:scale(calc(var(--xv-scale,1)*1.025))}}
+#xvault-corner {
+  display: grid !important;
+  place-items: center !important;
+  text-align: center !important;
+  line-height: 1 !important;
+}
+#xvault-corner .xv-core {
+  position: absolute !important;
+  inset: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 2px !important;
+  transform: none !important;
+}
+#xvault-corner .xv-core b {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 0.95 !important;
+  text-align: center !important;
+  letter-spacing: -0.06em !important;
+}
+#xvault-corner .xv-core small {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  text-align: center !important;
+  line-height: 1 !important;
+}
+#xvault-corner.busy {
+  animation: xvBreath 1.8s ease-in-out infinite;
+}
+@keyframes xvBreath {
+  50% {
+    filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.18));
+    transform: scale(calc(var(--xv-scale, 1) * 1.025));
+  }
+}
 
 /* Reduced/Off feedback also applies to the older capture widget. */
-html[data-xv-motion=reduced] #xvault-corner,html[data-xv-motion=reduced] #xvault-corner *,html[data-xv-motion=reduced] #xvault-hover,html[data-xv-motion=reduced] #xvault-menu{animation:none!important;transition:none!important}
+html[data-xv-motion='reduced'] #xvault-corner,
+html[data-xv-motion='reduced'] #xvault-corner *,
+html[data-xv-motion='reduced'] #xvault-hover,
+html[data-xv-motion='reduced'] #xvault-menu {
+  animation: none !important;
+  transition: none !important;
+}
 /* Capture controls share the Library's restrained utility language. */
-#xvault-corner{border-radius:4px!important;background:#171b19!important;border:1px solid #59655a!important;backdrop-filter:none!important;box-shadow:0 4px 16px #0004!important;transition:opacity var(--xv-motion,120ms) ease,transform var(--xv-motion,120ms) ease!important}#xvault-corner:hover{filter:brightness(1.12);transform:scale(var(--xv-scale,1))!important}#xvault-corner.busy{animation:none!important}#xvault-corner .xv-ring,#xvault-corner .xv-progress{border-radius:2px!important}#xvault-hover,#xvault-menu{max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);overflow:auto;border-radius:3px;background:#171b19;backdrop-filter:none;border-color:#454c46;box-shadow:0 8px 24px #0005;animation:xvCaptureEnter var(--xv-motion,120ms) ease-out}#xvault-hover small{font-size:11px;color:#a6afa8}#xvault-hover button,#xvault-menu button{min-height:40px;border-radius:2px;font-size:12px;font-weight:500}#xvault-hover button:hover,#xvault-menu button:hover{transform:none;background:#29322a}#xvault-corner:focus-visible,#xvault-menu button:focus-visible,#xvault-hover button:focus-visible,.xvault-download:focus-visible{outline:2px solid #a9c8ae;outline-offset:3px}#xvault-toast{max-width:calc(100vw - 24px);overflow-wrap:anywhere;border-radius:3px;backdrop-filter:none;background:#171b19;box-shadow:0 4px 16px #0004;transform:translate(-50%,6px);font-weight:500}#xvault-toast.show{transform:translate(-50%,0)}@keyframes xvCaptureEnter{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){#xvault-corner,#xvault-corner *,#xvault-hover,#xvault-menu,#xvault-toast{animation:none!important;transition:none!important}}
+#xvault-corner {
+  border-radius: 4px !important;
+  background: #171b19 !important;
+  border: 1px solid #59655a !important;
+  backdrop-filter: none !important;
+  box-shadow: 0 4px 16px #0004 !important;
+  transition:
+    opacity var(--xv-motion, 120ms) ease,
+    transform var(--xv-motion, 120ms) ease !important;
+}
+#xvault-corner:hover {
+  filter: brightness(1.12);
+  transform: scale(var(--xv-scale, 1)) !important;
+}
+#xvault-corner.busy {
+  animation: none !important;
+}
+#xvault-corner .xv-ring,
+#xvault-corner .xv-progress {
+  border-radius: 2px !important;
+}
+#xvault-hover,
+#xvault-menu {
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  border-radius: 3px;
+  background: #171b19;
+  backdrop-filter: none;
+  border-color: #454c46;
+  box-shadow: 0 8px 24px #0005;
+  animation: xvCaptureEnter var(--xv-motion, 120ms) ease-out;
+}
+#xvault-hover small {
+  font-size: 11px;
+  color: #a6afa8;
+}
+#xvault-hover button,
+#xvault-menu button {
+  min-height: 40px;
+  border-radius: 2px;
+  font-size: 12px;
+  font-weight: 500;
+}
+#xvault-hover button:hover,
+#xvault-menu button:hover {
+  transform: none;
+  background: #29322a;
+}
+#xvault-corner:focus-visible,
+#xvault-menu button:focus-visible,
+#xvault-hover button:focus-visible,
+.xvault-download:focus-visible {
+  outline: 2px solid #a9c8ae;
+  outline-offset: 3px;
+}
+#xvault-toast {
+  max-width: calc(100vw - 24px);
+  overflow-wrap: anywhere;
+  border-radius: 3px;
+  backdrop-filter: none;
+  background: #171b19;
+  box-shadow: 0 4px 16px #0004;
+  transform: translate(-50%, 6px);
+  font-weight: 500;
+}
+#xvault-toast.show {
+  transform: translate(-50%, 0);
+}
+@keyframes xvCaptureEnter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #xvault-corner,
+  #xvault-corner *,
+  #xvault-hover,
+  #xvault-menu,
+  #xvault-toast {
+    animation: none !important;
+    transition: none !important;
+  }
+}
 
-.xvault-download[data-archive-state="shared"]{color:#9ab9c9;box-shadow:inset 0 -2px #9ab9c9}
+.xvault-download[data-archive-state='shared'] {
+  color: #9ab9c9;
+  box-shadow: inset 0 -2px #9ab9c9;
+}

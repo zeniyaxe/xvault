@@ -3,19 +3,40 @@ import './library-search-core.js';
 const search = globalThis.XVaultLibrarySearch;
 const POST_ID = /^\d{1,32}$/;
 
-function remoteProjection(post, index, downloadedIds, missingIds, knownBytesById = null, inboxSince = 0, downloadSummary = null) {
+function remoteProjection(
+  post,
+  index,
+  downloadedIds,
+  missingIds,
+  knownBytesById = null,
+  inboxSince = 0,
+  downloadSummary = null
+) {
   if (!post || !POST_ID.test(String(post.id || ''))) return null;
   const media = Array.isArray(post.media) ? post.media : [];
   const userMeta = post.userMeta && typeof post.userMeta === 'object' ? post.userMeta : {};
   const mediaNotes = media.map(item => String(item?.xvault?.note || '').toLowerCase()).filter(Boolean);
-  const annotationText = media.flatMap(item => (Array.isArray(item?.xvault?.annotations) ? item.xvault.annotations : []).filter(annotation => !annotation?.deletedAt).map(annotation => String(annotation?.text || '').toLowerCase()).filter(Boolean)).join(' ');
-  const handle = String(post.author?.handle || '').replace(/^@/, '').toLowerCase();
+  const annotationText = media
+    .flatMap(item =>
+      (Array.isArray(item?.xvault?.annotations) ? item.xvault.annotations : [])
+        .filter(annotation => !annotation?.deletedAt)
+        .map(annotation => String(annotation?.text || '').toLowerCase())
+        .filter(Boolean)
+    )
+    .join(' ');
+  const handle = String(post.author?.handle || '')
+    .replace(/^@/, '')
+    .toLowerCase();
   const metrics = post.metrics && typeof post.metrics === 'object' ? post.metrics : {};
-  const archiveSources = [...(Array.isArray(post.archiveSources) ? post.archiveSources : []),
-    ...(Array.isArray(post.sourceFlags) ? post.sourceFlags : [])];
+  const archiveSources = [
+    ...(Array.isArray(post.archiveSources) ? post.archiveSources : []),
+    ...(Array.isArray(post.sourceFlags) ? post.sourceFlags : []),
+  ];
   return {
     id: String(post.id),
-    text: String(post.text || '').slice(0, 3000).toLowerCase(),
+    text: String(post.text || '')
+      .slice(0, 3000)
+      .toLowerCase(),
     displayText: String(post.text || '').slice(0, 900),
     handle,
     name: String(post.author?.name || handle).slice(0, 80),
@@ -26,17 +47,22 @@ function remoteProjection(post, index, downloadedIds, missingIds, knownBytesById
     sensitive: !!post.sensitive,
     favorite: !!userMeta.favorite,
     tags: (Array.isArray(userMeta.tags) ? userMeta.tags : []).map(tag => String(tag).toLowerCase()),
-    note: !!([userMeta.note, ...mediaNotes, annotationText].some(value => String(value || '').trim())),
+    note: !![userMeta.note, ...mediaNotes, annotationText].some(value => String(value || '').trim()),
     noteText: [String(userMeta.note || '').toLowerCase(), ...mediaNotes, annotationText].filter(Boolean).join(' '),
-    mediaNoteText: mediaNotes.join(' '), annotationText,
+    mediaNoteText: mediaNotes.join(' '),
+    annotationText,
     inbox: Number(inboxSince) > 0 && Number(post.archivedAt || 0) >= Number(inboxSince) && !userMeta.reviewedAt,
     downloaded: downloadSummary ? !!downloadSummary.downloaded : downloadedIds.has(String(post.id)),
     missing: downloadSummary ? !!downloadSummary.missing : missingIds.has(String(post.id)),
-    metrics: Object.fromEntries(['likes', 'views', 'bookmarks', 'reposts', 'replies'].map(key => [key, Number(metrics[key] || 0)])),
+    metrics: Object.fromEntries(
+      ['likes', 'views', 'bookmarks', 'reposts', 'replies'].map(key => [key, Number(metrics[key] || 0)])
+    ),
     archivedAt: Number(post.archivedAt || 0),
     postedAt: new Date(post.createdAt || 0).getTime(),
-    knownBytes: downloadSummary ? Math.max(0, Number(downloadSummary.knownBytes) || 0) : knownBytesById?.get(String(post.id)) || 0,
-    index
+    knownBytes: downloadSummary
+      ? Math.max(0, Number(downloadSummary.knownBytes) || 0)
+      : knownBytesById?.get(String(post.id)) || 0,
+    index,
   };
 }
 
@@ -62,7 +88,7 @@ function tupleFor(row, sort) {
     archivedAt: row.archivedAt,
     metric: metric ? row.metrics[metric] : 0,
     mediaCount: row.mediaCount,
-    handle: row.handle
+    handle: row.handle,
   };
 }
 
@@ -78,9 +104,17 @@ export function decodeRemoteCursor(cursor, sort = 'new', query = '') {
     const prefix = 'xvr1:';
     if (typeof cursor !== 'string' || cursor.length > 4096 || !cursor.startsWith(prefix)) throw new Error();
     const value = JSON.parse(decodeURIComponent(cursor.slice(prefix.length)));
-    if (value.sort !== sort || value.query !== query || !value.tuple || !POST_ID.test(String(value.tuple.id || '')) ||
-        !Number.isFinite(Number(value.tuple.archivedAt)) || !Number.isFinite(Number(value.tuple.metric)) ||
-        !Number.isFinite(Number(value.tuple.mediaCount)) || typeof value.tuple.handle !== 'string') throw new Error();
+    if (
+      value.sort !== sort ||
+      value.query !== query ||
+      !value.tuple ||
+      !POST_ID.test(String(value.tuple.id || '')) ||
+      !Number.isFinite(Number(value.tuple.archivedAt)) ||
+      !Number.isFinite(Number(value.tuple.metric)) ||
+      !Number.isFinite(Number(value.tuple.mediaCount)) ||
+      typeof value.tuple.handle !== 'string'
+    )
+      throw new Error();
     return value.tuple;
   } catch {
     throw new Error('This library cursor is invalid or belongs to a different search');
@@ -95,8 +129,11 @@ export function createRemoteScanner(options = {}) {
   if (!search) throw new Error('The shared Library search rules are unavailable');
   const query = String(options.query || '').trim();
   if (query.length > 1000) throw new RangeError('Search query is too long');
-  const sort = ['new', 'old', 'likes', 'views', 'bookmarks', 'reposts', 'replies', 'media', 'author'].includes(options.sort)
-    ? options.sort : 'new';
+  const sort = ['new', 'old', 'likes', 'views', 'bookmarks', 'reposts', 'replies', 'media', 'author'].includes(
+    options.sort
+  )
+    ? options.sort
+    : 'new';
   const limit = Math.max(1, Math.min(60, Math.floor(Number(options.limit) || 40)));
   const after = decodeRemoteCursor(options.cursor, sort, query);
   const tokens = search.compileQuery(query);
@@ -106,11 +143,20 @@ export function createRemoteScanner(options = {}) {
   let matched = 0;
   let index = 0;
   const visit = (post, downloadSummary = null) => {
-    const row = remoteProjection(post, index++, downloadedIds, missingIds, options.knownBytesById, options.inboxSince, downloadSummary);
+    const row = remoteProjection(
+      post,
+      index++,
+      downloadedIds,
+      missingIds,
+      options.knownBytesById,
+      options.inboxSince,
+      downloadSummary
+    );
     if (!row || !search.matchesCompiledQuery(row, tokens)) return;
     matched++;
     if (after && compareCursor(row, after, sort) <= 0) return;
-    let low = 0, high = page.length;
+    let low = 0,
+      high = page.length;
     while (low < high) {
       const mid = (low + high) >>> 1;
       if (compareRemote(page[mid], row, sort) <= 0) low = mid + 1;
@@ -134,7 +180,7 @@ export function createRemoteScanner(options = {}) {
       favorite: row.favorite,
       tags: row.tags.slice(0, 30),
       mediaCount: row.mediaCount,
-      mediaTypes: row.mediaTypes.slice(0, 12)
+      mediaTypes: row.mediaTypes.slice(0, 12),
     }));
     const last = page[page.length - 1];
     return {
@@ -142,7 +188,7 @@ export function createRemoteScanner(options = {}) {
       matched,
       nextCursor: hasMore && last ? encodeCursor(last, sort, query) : null,
       hasMore,
-      sort
+      sort,
     };
   };
   return Object.freeze({ visit, finish });
@@ -184,7 +230,8 @@ function retainPlanRow(heap, candidate, limit, sort) {
   heap[0] = candidate;
   let index = 0;
   for (;;) {
-    const left = index * 2 + 1, right = left + 1;
+    const left = index * 2 + 1,
+      right = left + 1;
     let worst = index;
     if (left < heap.length && comparePlanRows(heap[left], heap[worst], sort) > 0) worst = left;
     if (right < heap.length && comparePlanRows(heap[right], heap[worst], sort) > 0) worst = right;
@@ -208,17 +255,31 @@ export function createRemotePlanner(options = {}) {
   if (!search) throw new Error('The shared Library search rules are unavailable');
   const query = String(options.query || '').trim();
   if (query.length > 1000) throw new RangeError('Search query is too long');
-  const sort = ['new', 'old', 'likes', 'views', 'bookmarks', 'reposts', 'replies', 'media', 'author'].includes(options.sort)
-    ? options.sort : 'new';
+  const sort = ['new', 'old', 'likes', 'views', 'bookmarks', 'reposts', 'replies', 'media', 'author'].includes(
+    options.sort
+  )
+    ? options.sort
+    : 'new';
   const tokens = search.compileQuery(query);
   const downloadedIds = options.downloadedIds instanceof Set ? options.downloadedIds : new Set();
   const missingIds = options.missingIds instanceof Set ? options.missingIds : new Set();
   const candidates = [];
-  const limit = Math.max(1, Math.min(REMOTE_RANK_LIMIT, Math.floor(Number(options.maxCandidates) || REMOTE_RANK_LIMIT)));
+  const limit = Math.max(
+    1,
+    Math.min(REMOTE_RANK_LIMIT, Math.floor(Number(options.maxCandidates) || REMOTE_RANK_LIMIT))
+  );
   let matched = 0;
   let index = 0;
   const visit = (post, downloadSummary = null) => {
-    const row = remoteProjection(post, index++, downloadedIds, missingIds, options.knownBytesById, options.inboxSince, downloadSummary);
+    const row = remoteProjection(
+      post,
+      index++,
+      downloadedIds,
+      missingIds,
+      options.knownBytesById,
+      options.inboxSince,
+      downloadSummary
+    );
     if (!row || !search.matchesCompiledQuery(row, tokens)) return;
     matched++;
     retainPlanRow(candidates, { id: row.id, value: planValue(row, sort) }, limit, sort);
@@ -236,8 +297,14 @@ export function pageRemotePlan(plan, offset, limit = 40) {
   const size = Math.max(1, Math.min(50, Math.floor(Number(limit) || 40)));
   const rows = plan.rows.slice(start, start + size).map(row => ({ id: row.id }));
   const nextOffset = start + rows.length;
-  return { rows, matched: plan.matched, nextOffset,
-    hasMore: nextOffset < plan.rows.length, truncated: !!plan.truncated, sort: plan.sort };
+  return {
+    rows,
+    matched: plan.matched,
+    nextOffset,
+    hasMore: nextOffset < plan.rows.length,
+    truncated: !!plan.truncated,
+    sort: plan.sort,
+  };
 }
 
 function toBase64Url(bytes) {
@@ -247,7 +314,7 @@ function toBase64Url(bytes) {
 }
 
 function fromBase64Url(value) {
-  const binary = atob(String(value).replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4));
+  const binary = atob(String(value).replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4));
   const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
   if (toBase64Url(bytes) !== value) throw new Error('Noncanonical cursor encoding');
   return bytes;
@@ -260,10 +327,16 @@ export function remotePageCursorId(cursor) {
 }
 
 export async function encodeRemotePageCursor(id, after, matched = 0, scanned = 0, secret) {
-  if (!/^[0-9a-f-]{36}$/i.test(String(id || '')) || !after || !['indexed', 'legacy'].includes(after.phase) || !['new', 'old'].includes(after.sort)) {
+  if (
+    !/^[0-9a-f-]{36}$/i.test(String(id || '')) ||
+    !after ||
+    !['indexed', 'legacy'].includes(after.phase) ||
+    !['new', 'old'].includes(after.sort)
+  ) {
     throw new TypeError('A revision-bound Remote cursor is required');
   }
-  if (!(secret instanceof Uint8Array) || secret.length < 32) throw new TypeError('Remote cursor signing key is unavailable');
+  if (!(secret instanceof Uint8Array) || secret.length < 32)
+    throw new TypeError('Remote cursor signing key is unavailable');
   const payload = new TextEncoder().encode(JSON.stringify({ id, after, matched, scanned }));
   const key = await crypto.subtle.importKey('raw', secret, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, payload));
@@ -274,22 +347,35 @@ export async function encodeRemotePageCursor(id, after, matched = 0, scanned = 0
 
 export async function decodeRemotePageCursor(cursor, secret) {
   try {
-    const match = String(cursor || '').match(/^xvr3:([0-9a-f-]{36}):([A-Za-z0-9_-]{1,3500})\.([A-Za-z0-9_-]{20,100})$/i);
+    const match = String(cursor || '').match(
+      /^xvr3:([0-9a-f-]{36}):([A-Za-z0-9_-]{1,3500})\.([A-Za-z0-9_-]{20,100})$/i
+    );
     if (!match) throw new Error();
     if (!(secret instanceof Uint8Array) || secret.length < 32) throw new Error();
-    const payload = fromBase64Url(match[2]), signature = fromBase64Url(match[3]);
+    const payload = fromBase64Url(match[2]),
+      signature = fromBase64Url(match[3]);
     const key = await crypto.subtle.importKey('raw', secret, { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
-    if (!await crypto.subtle.verify('HMAC', key, signature, payload)) throw new Error();
+    if (!(await crypto.subtle.verify('HMAC', key, signature, payload))) throw new Error();
     const value = JSON.parse(new TextDecoder().decode(payload));
     if (value.id !== match[1]) throw new Error();
     const after = value?.after;
-    if (!after || !['indexed', 'legacy'].includes(after.phase) || !['new', 'old'].includes(after.sort) ||
-        !Number.isSafeInteger(Number(after.revision)) || Number(after.revision) < 0 ||
-        after.id == null || String(after.id).length > 128 ||
-        (after.phase === 'indexed' && !Number.isFinite(Number(after.key))) ||
-        !Number.isSafeInteger(Number(value.matched)) || Number(value.matched) < 0 ||
-        !Number.isSafeInteger(Number(value.scanned)) || Number(value.scanned) < 0 ||
-        (after.downloadRevision != null && (!Number.isSafeInteger(Number(after.downloadRevision)) || Number(after.downloadRevision) < 0))) throw new Error();
+    if (
+      !after ||
+      !['indexed', 'legacy'].includes(after.phase) ||
+      !['new', 'old'].includes(after.sort) ||
+      !Number.isSafeInteger(Number(after.revision)) ||
+      Number(after.revision) < 0 ||
+      after.id == null ||
+      String(after.id).length > 128 ||
+      (after.phase === 'indexed' && !Number.isFinite(Number(after.key))) ||
+      !Number.isSafeInteger(Number(value.matched)) ||
+      Number(value.matched) < 0 ||
+      !Number.isSafeInteger(Number(value.scanned)) ||
+      Number(value.scanned) < 0 ||
+      (after.downloadRevision != null &&
+        (!Number.isSafeInteger(Number(after.downloadRevision)) || Number(after.downloadRevision) < 0))
+    )
+      throw new Error();
     return { id: match[1], after, matched: Number(value.matched), scanned: Number(value.scanned) };
   } catch {
     throw new Error('Search cursor is invalid or expired');

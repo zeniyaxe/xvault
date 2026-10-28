@@ -1,2 +1,5 @@
 /* Safe optional density change. It is never applied unless the matching setting is enabled. */
-.xvault-compact-posts article[data-testid="tweet"]{padding-top:4px!important;padding-bottom:4px!important}
+.xvault-compact-posts article[data-testid='tweet'] {
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+}

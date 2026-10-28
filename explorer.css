@@ -1,50 +1,246 @@
 /* Explore: time machine, media map, archive diff. Uses the dashboard tokens, so every theme applies. */
-.explorerBar{display:flex;align-items:center;gap:18px;margin-bottom:22px}
-.explorerNote{margin:0;color:var(--muted);font-size:12.5px}
-.explorerTabs button{min-height:30px;padding:0 14px}
-.explorerPane{display:none}
-.explorerPane.show{display:block;animation:pageIn var(--t-med) var(--ease)}
+.explorerBar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+.explorerNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.explorerTabs button {
+  min-height: 30px;
+  padding: 0 14px;
+}
+.explorerPane {
+  display: none;
+}
+.explorerPane.show {
+  display: block;
+  animation: pageIn var(--t-med) var(--ease);
+}
 
 /* time machine */
-.timelineControl{margin-bottom:18px}
-.timelineControl .panelhead{align-items:baseline;margin-bottom:8px}
-.timelineControl h3{font:600 26px/1.2 var(--font-read);letter-spacing:-.01em;font-variation-settings:"opsz" 26}
-.timelineControl .panelhead b{color:var(--muted);font-weight:500;font-variant-numeric:tabular-nums}
-#xv-time-slider{width:100%;margin:6px 0 4px}
-.timeMarkers{display:flex;justify-content:space-between;color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums}
-.timeMachineGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
-.timeCard{display:grid;align-content:start;overflow:hidden;border:1px solid var(--line-soft);border-radius:var(--r-m);background:var(--surface);cursor:pointer;transition:border-color var(--t-fast),transform var(--t-med) var(--ease)}
-.timeCard:hover{border-color:var(--line);transform:translateY(-2px)}
-.timeCard img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;background:var(--media-bg)}
-.timeNoMedia{display:grid;place-items:center;aspect-ratio:4/3;background:var(--sunk);color:var(--muted)}
-.timeCard>div:last-child{padding:10px 12px 12px}
-.timeCard b{display:block;font-weight:600}
-.timeCard small{display:block;margin-bottom:5px;color:var(--muted);font-size:12px}
-.timeCard p{max-width:none;color:var(--soft);font:400 14px/1.45 var(--font-read)}
+.timelineControl {
+  margin-bottom: 18px;
+}
+.timelineControl .panelhead {
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+.timelineControl h3 {
+  font: 600 26px/1.2 var(--font-read);
+  letter-spacing: -0.01em;
+  font-variation-settings: 'opsz' 26;
+}
+.timelineControl .panelhead b {
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+#xv-time-slider {
+  width: 100%;
+  margin: 6px 0 4px;
+}
+.timeMarkers {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.timeMachineGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.timeCard {
+  display: grid;
+  align-content: start;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-m);
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color var(--t-fast),
+    transform var(--t-med) var(--ease);
+}
+.timeCard:hover {
+  border-color: var(--line);
+  transform: translateY(-2px);
+}
+.timeCard img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4/3;
+  object-fit: cover;
+  background: var(--media-bg);
+}
+.timeNoMedia {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4/3;
+  background: var(--sunk);
+  color: var(--muted);
+}
+.timeCard > div:last-child {
+  padding: 10px 12px 12px;
+}
+.timeCard b {
+  display: block;
+  font-weight: 600;
+}
+.timeCard small {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.timeCard p {
+  max-width: none;
+  color: var(--soft);
+  font: 400 14px/1.45 var(--font-read);
+}
 
 /* media map */
-.mapToolbar{margin-bottom:12px}
-.mapToolbar>div{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
-.mapStage{position:relative;height:calc(100vh - 230px);min-height:340px;overflow:hidden;border:1px solid var(--line);border-radius:var(--r-l);background:var(--sunk);cursor:grab;touch-action:none}
-.mapStage:active{cursor:grabbing}
-.mapWorld{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
-.mapTile{position:absolute;width:120px;height:120px;padding:0;border:0;border-radius:var(--r-xs);overflow:hidden;background:var(--media-bg);transition:transform var(--t-med) var(--ease)}
-.mapTile:hover{transform:scale(1.18);z-index:3}
-.mapTile img{display:block;width:100%;height:100%;object-fit:cover}
-.mapHint{position:absolute;left:12px;bottom:12px;padding:4px 10px;border-radius:var(--r-s);background:var(--scrim);color:var(--soft);font-size:12px;pointer-events:none}
+.mapToolbar {
+  margin-bottom: 12px;
+}
+.mapToolbar > div {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.mapStage {
+  position: relative;
+  height: calc(100vh - 230px);
+  min-height: 340px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background: var(--sunk);
+  cursor: grab;
+  touch-action: none;
+}
+.mapStage:active {
+  cursor: grabbing;
+}
+.mapWorld {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.mapTile {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  overflow: hidden;
+  background: var(--media-bg);
+  transition: transform var(--t-med) var(--ease);
+}
+.mapTile:hover {
+  transform: scale(1.18);
+  z-index: 3;
+}
+.mapTile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.mapHint {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 4px 10px;
+  border-radius: var(--r-s);
+  background: var(--scrim);
+  color: var(--soft);
+  font-size: 12px;
+  pointer-events: none;
+}
 
 /* diff */
-.diffList{display:grid;gap:10px}
-.diffRun{padding:14px 16px;border:1px solid var(--line-soft);border-radius:var(--r-m);background:var(--surface)}
-.diffRun>header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
-.diffRun>header b{font-weight:600}
-.diffRun>header small{display:block;color:var(--muted);font-size:12px}
-.diffRun>header span{color:var(--muted);font-size:12px}
-.diffRun>div{display:grid;grid-template-columns:repeat(3,auto);justify-content:start;gap:0 28px}
-.diffRun strong{grid-row:1;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
-.diffRun>div small{grid-row:2;color:var(--muted);font-size:12px}
-.diffRun p{margin-top:10px;font-size:12.5px}
-.revisionSummary{display:grid;gap:3px;margin-top:12px;padding:12px 14px;border-left:2px solid var(--accent-line);background:var(--surface);border-radius:0 var(--r-s) var(--r-s) 0}
-.revisionSummary span{color:var(--muted);font-size:12.5px}
+.diffList {
+  display: grid;
+  gap: 10px;
+}
+.diffRun {
+  padding: 14px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-m);
+  background: var(--surface);
+}
+.diffRun > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.diffRun > header b {
+  font-weight: 600;
+}
+.diffRun > header small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+.diffRun > header span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.diffRun > div {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  justify-content: start;
+  gap: 0 28px;
+}
+.diffRun strong {
+  grid-row: 1;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.diffRun > div small {
+  grid-row: 2;
+  color: var(--muted);
+  font-size: 12px;
+}
+.diffRun p {
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+.revisionSummary {
+  display: grid;
+  gap: 3px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-left: 2px solid var(--accent-line);
+  background: var(--surface);
+  border-radius: 0 var(--r-s) var(--r-s) 0;
+}
+.revisionSummary span {
+  color: var(--muted);
+  font-size: 12.5px;
+}
 
-@media(max-width:850px){.explorerBar{flex-direction:column;align-items:flex-start}.mapStage{height:55vh}}
+@media (max-width: 850px) {
+  .explorerBar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .mapStage {
+    height: 55vh;
+  }
+}

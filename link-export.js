@@ -5,8 +5,12 @@
   root.XVaultLinkExport = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   const PROVIDERS = Object.freeze({
-    fixvx: 'fixvx.com', fixupx: 'fixupx.com', fxtwitter: 'fxtwitter.com',
-    vxtwitter: 'vxtwitter.com', x: 'x.com', twitter: 'twitter.com'
+    fixvx: 'fixvx.com',
+    fixupx: 'fixupx.com',
+    fxtwitter: 'fxtwitter.com',
+    vxtwitter: 'vxtwitter.com',
+    x: 'x.com',
+    twitter: 'twitter.com',
   });
 
   function validHost(value) {
@@ -16,12 +20,14 @@
       const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
       if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) return null;
       return url.hostname.toLowerCase();
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 
   function providerHost(settings = {}) {
     const provider = settings.linkProvider || 'fixvx';
-    return provider === 'custom' ? validHost(settings.customLinkHost) : (PROVIDERS[provider] || PROVIDERS.fixvx);
+    return provider === 'custom' ? validHost(settings.customLinkHost) : PROVIDERS[provider] || PROVIDERS.fixvx;
   }
 
   function canonicalLink(post, settings = {}, linkProvider = null) {
@@ -34,27 +40,45 @@
     const host = providerHost(settings);
     if (!host) return null;
     let parsed;
-    try { parsed = new URL(source); } catch { return null; }
+    try {
+      parsed = new URL(source);
+    } catch {
+      return null;
+    }
     const match = parsed.pathname.match(/^\/([^/?#]+)\/status\/(\d+)(\/[^?#]*)?$/);
     if (!match || match[2] !== String(post.id)) return null;
-    const out = new URL(`https://${host}/${encodeURIComponent(decodeURIComponent(match[1]))}/status/${match[2]}${match[3] || ''}`);
+    const out = new URL(
+      `https://${host}/${encodeURIComponent(decodeURIComponent(match[1]))}/status/${match[2]}${match[3] || ''}`
+    );
     if (settings.copyPreserveQuery === true || settings.copyStripTracking === false) {
       const tracking = /^(utm_|ref$|ref_src$|s$|t$|cxt$|cn$)/i;
-      for (const [key, value] of parsed.searchParams) if (settings.copyStripTracking === false || !tracking.test(key)) out.searchParams.append(key, value);
+      for (const [key, value] of parsed.searchParams)
+        if (settings.copyStripTracking === false || !tracking.test(key)) out.searchParams.append(key, value);
     }
     return out.href;
   }
 
   function collectLinks(posts, settings = {}, signal, linkProvider = null) {
-    const ids = new Set(), links = [];
-    let duplicates = 0, skipped = 0;
+    const ids = new Set(),
+      links = [];
+    let duplicates = 0,
+      skipped = 0;
     for (const post of posts || []) {
       if (signal?.aborted) throw new Error('Export cancelled');
       const id = post?.id == null ? '' : String(post.id);
-      if (!id || !/^\d+$/.test(id)) { skipped++; continue; }
+      if (!id || !/^\d+$/.test(id)) {
+        skipped++;
+        continue;
+      }
       const url = canonicalLink(post, settings, linkProvider);
-      if (!url) { skipped++; continue; }
-      if (ids.has(id)) { duplicates++; continue; }
+      if (!url) {
+        skipped++;
+        continue;
+      }
+      if (ids.has(id)) {
+        duplicates++;
+        continue;
+      }
       ids.add(id);
       links.push(url);
     }
@@ -67,7 +91,8 @@
     const lines = links.map(url => String(url));
     if (!Number.isFinite(blockSize) || blockSize <= 0) return lines.join('\n');
     const blocks = [];
-    for (let index = 0; index < lines.length; index += Math.floor(blockSize)) blocks.push(lines.slice(index, index + Math.floor(blockSize)).join('\n'));
+    for (let index = 0; index < lines.length; index += Math.floor(blockSize))
+      blocks.push(lines.slice(index, index + Math.floor(blockSize)).join('\n'));
     return blocks.join('\n\n');
   }
 
@@ -81,8 +106,12 @@
   }
 
   function sanitizeFilename(query, count) {
-    const safeQuery = String(query || 'Library search').replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
-      .replace(/[. ]+$/g, '').replace(/\s+/gu, ' ').trim() || 'Library search';
+    const safeQuery =
+      String(query || 'Library search')
+        .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
+        .replace(/[. ]+$/g, '')
+        .replace(/\s+/gu, ' ')
+        .trim() || 'Library search';
     const suffix = ` — ${Number(count) || 0} posts.txt`;
     const maxQueryLength = Math.max(1, 180 - suffix.length);
     let prefix = safeQuery;
@@ -90,5 +119,13 @@
     return `${prefix}${suffix}`;
   }
 
-  return Object.freeze({ validHost, providerHost, canonicalLink, collectLinks, formatLinks, selectScope, sanitizeFilename });
+  return Object.freeze({
+    validHost,
+    providerHost,
+    canonicalLink,
+    collectLinks,
+    formatLinks,
+    selectScope,
+    sanitizeFilename,
+  });
 });

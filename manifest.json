@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "XVault v16 - Chronicle",
-  "version": "16.0.0",
+  "name": "XVault",
+  "version": "17.0.0",
   "description": "Local-first X archive with verified downloads, FixVX Copy Link, contextual X controls, and archival history.",
   "minimum_chrome_version": "120",
   "permissions": [
@@ -42,36 +42,16 @@
   "options_page": "dashboard.html",
   "content_scripts": [
     {
-      "matches": [
-        "https://x.com/*",
-        "https://twitter.com/*",
-        "https://mobile.twitter.com/*"
-      ],
-      "js": [
-        "x-injected-theme.js",
-        "link-utils.js",
-        "content.js",
-        "instant-actions.js",
-        "x-cleanup.js"
-      ],
-      "css": [
-        "content.css",
-        "instant-actions.css",
-        "x-integration.css",
-        "x-cleanup.css"
-      ],
+      "matches": ["https://x.com/*", "https://twitter.com/*", "https://mobile.twitter.com/*"],
+      "js": ["x-injected-theme.js", "link-utils.js", "content.js", "instant-actions.js", "x-cleanup.js"],
+      "css": ["content.css", "instant-actions.css", "x-integration.css", "x-cleanup.css"],
       "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": [
-        "page-hook.js"
-      ],
-      "matches": [
-        "https://x.com/*",
-        "https://twitter.com/*"
-      ]
+      "resources": ["page-hook.js"],
+      "matches": ["https://x.com/*", "https://twitter.com/*"]
     }
   ],
   "side_panel": {

@@ -8,7 +8,13 @@
     const response = await chrome.runtime.sendMessage({ type: 'SET_SETTINGS', settings: patch });
     state = response?.settings || { ...state, ...patch };
     applyStudio();
-    try { settings = state; apply(); sync(); tab({ type: 'XV_REFRESH_INSTANT_SETTINGS' }).catch(() => {}); flashSaved(); } catch {}
+    try {
+      settings = state;
+      apply();
+      sync();
+      tab({ type: 'XV_REFRESH_INSTANT_SETTINGS' }).catch(() => {});
+      flashSaved();
+    } catch {}
     return state;
   };
 
@@ -26,9 +32,24 @@
     }
     window.XVaultPaintRanges?.();
   };
-  window.XVaultSettingsChanged = value => { state = value; applyStudio(); };
+  window.XVaultSettingsChanged = value => {
+    state = value;
+    applyStudio();
+  };
 
-  const motion = `<div class="seg motionLevels" role="radiogroup" aria-label="Animation level">${[['off', 'Off'], ['reduced', 'Reduced'], ['subtle', 'Subtle'], ['normal', 'Normal'], ['rich', 'Rich'], ['extreme', 'Extreme']].map(([value, label]) => `<button type="button" role="radio" data-xv-setting-value="motionLevel" data-xv-value="${value}">${label}</button>`).join('')}</div>
+  const motion = `<div class="seg motionLevels" role="radiogroup" aria-label="Animation level">${[
+    ['off', 'Off'],
+    ['reduced', 'Reduced'],
+    ['subtle', 'Subtle'],
+    ['normal', 'Normal'],
+    ['rich', 'Rich'],
+    ['extreme', 'Extreme'],
+  ]
+    .map(
+      ([value, label]) =>
+        `<button type="button" role="radio" data-xv-setting-value="motionLevel" data-xv-value="${value}">${label}</button>`
+    )
+    .join('')}</div>
 <div class="formgrid two"><label class="field"><span>Animation speed</span><input type="range" min="0.35" max="2" step="0.05" data-xv-setting="motionSpeed"></label></div>
 <div class="toggles">
 <label><span><b>Reduce motion</b><small>Replaces movement with fades in the dashboard and on x.com.</small></span><input type="checkbox" data-xv-setting="reducedMotion"></label>
@@ -82,23 +103,41 @@
     }
     const xSlot = $('#xSlot');
     if (xSlot && !$('#xv-integration-settings')) {
-      xSlot.replaceWith(group('xv-integration-settings', integration), group('xv-links-settings', links), group('xv-cleanup-settings', cleanup));
+      xSlot.replaceWith(
+        group('xv-integration-settings', integration),
+        group('xv-links-settings', links),
+        group('xv-cleanup-settings', cleanup)
+      );
     }
     for (const element of $$('[data-xv-setting]:not([data-xv-bound])')) {
       element.dataset.xvBound = '1';
-      element.addEventListener('change', () => set({ [element.dataset.xvSetting]: element.type === 'checkbox' ? element.checked : element.type === 'number' || element.type === 'range' ? Number(element.value) : element.value }));
+      element.addEventListener('change', () =>
+        set({
+          [element.dataset.xvSetting]:
+            element.type === 'checkbox'
+              ? element.checked
+              : element.type === 'number' || element.type === 'range'
+                ? Number(element.value)
+                : element.value,
+        })
+      );
     }
     for (const button of $$('[data-xv-setting-value]:not([data-xv-bound])')) {
       button.dataset.xvBound = '1';
       button.onclick = () => {
-        const key = button.dataset.xvSettingValue, value = button.dataset.xvValue;
+        const key = button.dataset.xvSettingValue,
+          value = button.dataset.xvValue;
         set(key === 'motionLevel' ? { motionLevel: value, animations: value !== 'off' } : { [key]: value });
       };
     }
     applyStudio();
   };
 
-  const ready = () => chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }).then(response => { state = response?.settings || {}; render(); });
+  const ready = () =>
+    chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }).then(response => {
+      state = response?.settings || {};
+      render();
+    });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready, { once: true });
   else ready();
 })();

@@ -1,1095 +1,1608 @@
 <!doctype html>
 <html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>XVault v16 — Chronicle</title>
-<link rel="stylesheet" href="xv-base.css">
-<link rel="stylesheet" href="xv-library.css">
-<link rel="stylesheet" href="xv-pages.css">
-<link rel="stylesheet" href="xv-settings.css">
-<script defer src="link-utils.js">
-</script>
-<script defer src="link-export.js">
-</script>
-<script defer src="media-asset.js">
-</script>
-<script defer src="library-model.js">
-</script>
-<script defer src="library-collections.js">
-</script>
-<script defer src="library-search-core.js">
-</script>
-<script defer src="media-metadata.js">
-</script>
-<script defer src="inspector-notes.js">
-</script>
-<script defer src="note-recovery.js"></script><script defer src="library-trash.js">
-</script>
-<script defer src="library-workspace.js">
-</script>
-<script defer src="xv-motion.js"></script>
-<script defer src="dashboard-island.js">
-</script>
-<script defer src="app-icons.js">
-</script>
-<script defer src="app-focus.js">
-</script>
-<script defer src="xv-shell.js">
-</script>
-<script defer src="xv-appearance.js">
-</script>
-<script defer src="workspace-model.js"></script>
-<script defer src="xv-workspaces.js"></script>
-<script defer src="download-diagnostics.js">
-</script>
-<script defer src="xv-home.js">
-</script>
-<script defer src="xv-settings.js">
-</script>
-<script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js">
-</script>
-<script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js">
-</script>
-</head>
-<body data-theme="graphite">
-<div class="shell">
-<aside class="rail">
-<button class="brand" data-page="library" aria-label="XVault library">
-<span>XV</span>
-<b>XVault</b>
-</button>
-<nav id="primaryNav" aria-label="Sections">
-<button class="nav active" data-page="library"><span>Library</span></button>
-<button class="nav" data-page="explorer"><span>Explore</span></button>
-<button class="nav" data-page="home" data-pages="home archive sessions"><span>Capture</span></button>
-<button class="nav" data-page="media"><span>Downloads</span></button>
-<button class="nav" data-page="studio"><span>Tools</span></button>
-<button class="nav" data-page="health" data-pages="health integrity activity"><span>System</span></button>
-</nav>
-<div class="rail-spacer"></div>
-<button class="nav" data-page="settings"><span>Settings</span></button>
-<button class="rail-collapse" id="railCollapse" aria-label="Collapse navigation" aria-pressed="false"><span>Collapse</span></button>
-<div class="railfoot">
-<span id="dot">
-</span>
-<div>
-<b id="conn">Looking for X</b>
-<small id="ops">0 operations learned</small>
-</div>
-</div>
-</aside>
-<main>
-<header class="top">
-<div>
-<h1 id="title">Library</h1>
-<nav class="subnav" id="subnav" aria-label="Section pages"></nav>
-</div>
-<div class="topactions">
-<button id="cmdBtn" aria-label="Open command center"><span>Search commands</span></button>
-<button id="refresh" title="Refresh counts and connection" aria-label="Refresh">↻</button>
-<button id="openX" title="Open x.com in a new tab"><span class="tl">Open X</span></button>
-<button id="export" title="Create a full, bounded JSON Lines recovery file"><span class="tl">Export</span></button>
-</div>
-</header>
-<section class="page" id="page-home">
-<div class="home-top">
-<dl class="vault-stats">
-<div><dt>Posts</dt><dd id="stTweets">0</dd></div>
-<div><dt>People</dt><dd id="stUsers">0</dd></div>
-<div><dt>Captures</dt><dd id="stCaps">0</dd></div>
-<div><dt>Storage</dt><dd id="stStore">—</dd></div>
-</dl>
-<span id="radar" hidden>0</span>
-<div class="home-actions">
-<button class="primary big" data-goto="archive">Archive a source</button>
-<button class="big" id="heroScroll" title="Archive what is loaded on the X tab you have open">Archive this X page</button>
-<button class="big" id="archiveEverything" title="Walk bookmarks, likes and timeline history">Archive history</button>
-</div>
-</div>
-<section class="panel">
-<div class="panelhead">
-<h3>Recently archived</h3>
-<button class="quiet" data-goto="library">Open library</button>
-</div>
-<div id="homeRecent" class="home-recent"><div class="empty">The newest posts appear here once the library has loaded.</div></div>
-</section>
-<div class="grid home-grid">
-<section class="panel">
-<div class="panelhead">
-<div>
-<h3>Passive capture</h3>
-<p>While you browse X, the posts that load on screen are saved to this vault. Nothing leaves your computer.</p>
-</div>
-<label class="switch"><input id="capture" type="checkbox" aria-label="Passive capture"><i></i></label>
-</div>
-</section>
-<section class="panel">
-<h3>Operations learned</h3>
-<p>XVault learns X’s current request formats by watching you browse. More operations make archiving faster and steadier.</p>
-<div class="chips" id="chips">Browse X to teach XVault its current operations.</div>
-</section>
-</div>
-<div class="grid home-grid">
-<section class="panel">
-<h3>Download speed</h3>
-<canvas id="bandwidthGraph" width="640" height="150" aria-label="Download speed over the last 60 seconds"></canvas>
-</section>
-<section class="panel">
-<h3>Archive activity</h3>
-<canvas id="activityGraph" width="640" height="150" aria-label="Posts, queue and failures over time"></canvas>
-</section>
-</div>
-<section class="panel">
-<div class="panelhead">
-<h3>Recent runs</h3>
-<button class="quiet" data-goto="sessions">All runs</button>
-</div>
-<div id="homeSessions" class="sessionCards"></div>
-</section>
-</section>
-<section class="page" id="page-archive">
-<div class="archivegrid">
-<section class="panel">
-<h3>Choose a source</h3>
-<div class="sources" role="radiogroup" aria-label="Archive source">
-<button class="source selected" data-source="bookmarks" role="radio" aria-checked="true"><b>Bookmarks</b><span>Everything you saved on X</span></button>
-<button class="source" data-source="likes" role="radio" aria-checked="false"><b>Likes</b><span>Posts you liked</span></button>
-<button class="source" data-source="profile" role="radio" aria-checked="false"><b>Profile</b><span>One account, in full</span></button>
-<button class="source" data-source="timeline" role="radio" aria-checked="false"><b>This page</b><span>What the X tab shows now</span></button>
-</div>
-<label class="field hidden" id="profileWrap"><span>Profile handle</span><div class="pref"><b>@</b><input id="handle" placeholder="username"></div></label>
-<div class="toggles archiveopts">
-<label><span><b>Also download the media</b><small>Full Mirror saves every image, video and GIF found during this run.</small></span><input type="checkbox" id="runMirror"></label>
-<label><span><b>Resume from the last checkpoint</b><small>Continue a previous run from where it stopped, when possible.</small></span><input type="checkbox" id="runResume" checked></label>
-</div>
-<div class="method">
-<div>
-<h4 id="methodTitle">Smart — Bookmarks</h4>
-<p id="methodText">Auto-prime → direct GraphQL → retry → adaptive scroll → verification.</p>
-</div>
-<span id="ready" class="pill">Ready</span>
-</div>
-<div class="row">
-<button class="primary big" id="start">Start archive</button>
-<button id="prime" title="Open the source page on X so XVault can learn its requests">Open source on X</button>
-<button id="testCrawler" class="quiet">Test crawler</button>
-</div>
-<div id="sourceDiag" class="diag">XVault falls back to scrolling automatically instead of stalling.</div>
-</section>
-<section class="panel run">
-<h3 id="runTitle">Idle</h3>
-<div class="bigNum"><strong id="pages">0</strong><span id="pageUnit">steps</span></div>
-<div class="progress"><i id="prog"></i></div>
-<dl>
-<div><dt>Phase</dt><dd id="runPhase">—</dd></div>
-<div><dt>Operation</dt><dd id="runOp">—</dd></div>
-<div><dt>Posts</dt><dd id="runPosts">—</dd></div>
-<div><dt>Rate remaining</dt><dd id="rate">—</dd></div>
-<div><dt>Run</dt><dd id="rid">—</dd></div>
-</dl>
-<div class="triple"><button id="pause">Pause</button><button id="resume">Resume</button><button class="danger" id="stop">Stop</button></div>
-<div class="archiveMap" id="archiveMap" aria-label="Where the run is now">
-<div data-node="x">X</div><i>›</i><div data-node="graphql">GraphQL</div><i>›</i><div data-node="normalize">Normalize</div><i>›</i><div data-node="library">Library</div><i>›</i><div data-node="media">Media</div><i>›</i><div data-node="disk">Disk</div>
-</div>
-<span id="pipelineState" class="savebadge">IDLE</span>
-</section>
-</div>
-<section class="panel">
-<div class="panelhead">
-<h3>Profile collections</h3>
-<button id="saveCollection">Save handles</button>
-</div>
-<label class="field"><span>Handles, one per line</span><textarea id="collectionHandles" rows="4" placeholder="artist1&#10;artist2&#10;artist3"></textarea></label>
-<div class="row"><button id="archiveCollection">Archive collection</button></div>
-</section>
-<details class="panel disclose">
-<summary>Live log <span id="debugState" class="savebadge">IDLE</span></summary>
-<div id="debugLog" class="debuglog"><div>Waiting for a run…</div></div>
-</details>
-</section>
-<section class="page" id="page-library">
-<div class="lib-main">
-<header class="lib-toolbar libraryCommand">
-<div class="searchWrap">
-<svg class="searchIcon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
-<input id="search" type="search" autocomplete="off" spellcheck="false" placeholder="Search your archive">
-<button id="clearSearch" type="button" class="quiet">×</button>
-<details class="menu search-help">
-<summary aria-label="Search syntax help" title="Search syntax">?</summary>
-<div class="menu-pop booruHelp"></div>
-</details>
-</div>
-<div class="lib-controls">
-<div class="seg" id="libraryLayout" role="radiogroup" aria-label="Layout">
-<button type="button" role="radio" data-layout="timeline" title="Timeline: read posts in a column"><span class="sr">Timeline</span></button>
-<button type="button" role="radio" data-layout="cards" title="Cards"><span class="sr">Cards</span></button>
-<button type="button" role="radio" data-layout="gallery" title="Grid: even tiles"><span class="sr">Grid</span></button>
-<button type="button" role="radio" data-layout="masonry" title="Wall: natural proportions"><span class="sr">Wall</span></button>
-<button type="button" role="radio" data-layout="compact" title="List: one row per post"><span class="sr">List</span></button>
-</div>
-<label class="tile-size" title="Tile size"><span class="sr">Tile size</span><input id="libraryTile" type="range" min="150" max="440" step="10" value="260"></label>
-<select id="sort" aria-label="Sort">
-<option value="new">Newest archived</option>
-<option value="old">Oldest archived</option>
-<option value="likes">Most liked</option>
-<option value="views">Most viewed</option>
-<option value="bookmarks">Most bookmarked</option>
-<option value="reposts">Most reposted</option>
-<option value="replies">Most replied</option>
-<option value="media">Most media</option>
-<option value="author">Author A–Z</option>
-</select>
-<select id="libraryView" class="sr" tabindex="-1" aria-hidden="true">
-<option value="timeline">Timeline</option>
-<option value="cards">Cards</option>
-<option value="gallery">Grid</option>
-<option value="masonry">Wall</option>
-<option value="compact">List</option>
-</select>
-<details class="menu" id="libraryTools">
-<summary aria-label="Library actions" title="Library actions"><span class="sr">Library actions</span></summary>
-<div class="menu-pop" id="libraryToolsBody">
-<button id="load" type="button">Reload library</button>
-<button id="browseTrash" type="button">Browse Trash</button>
-<button id="recoverNoteDrafts" type="button">Recover note drafts</button>
-<button id="shuffleLibrary" type="button">Shuffle</button>
-<button id="surpriseMe" type="button">Open a random post</button>
-<hr>
-<button id="integrityQuick" type="button">Scan integrity</button>
-<button id="manifestQuick" type="button">Create manifest</button>
-<button id="csv" type="button">Export CSV</button>
-<button id="remoteQuick" type="button">Browse on phone</button>
-<hr>
-<button id="clearLibrary" type="button" class="danger">Clear library…</button>
-</div>
-</details>
-</div>
-</header>
-<div class="lib-filters">
-<div class="filterchips" id="libraryChips" role="group" aria-label="Quick filters">
-<button class="active" data-filter="">All</button>
-<button data-filter="has:image">Images</button>
-<button data-filter="has:gif">GIFs</button>
-<button data-filter="has:video">Videos</button>
-<button data-filter="rating:sensitive">Sensitive</button>
-</div>
-<div class="libraryStatusBar">
-<div><b id="libShown">0</b><span>shown</span></div>
-<div><b id="libMediaCount">0</b><span>media</span></div>
-<div><b id="libLocalCount">0</b><span>on disk</span></div>
-<div class="libraryMiniActions"></div>
-</div>
-</div>
-<div class="list" id="list">
-<div class="empty">Load the local library to browse it.</div>
-</div>
-</div>
-</section>
-<section class="page" id="page-media">
-<dl class="vault-stats queue-stats">
-<div><dt>Queued</dt><dd id="qQueued">0</dd></div>
-<div><dt>Active</dt><dd id="qActive">0</dd></div>
-<div><dt>Complete</dt><dd id="qDone">0</dd></div>
-<div><dt>Failed</dt><dd id="qFailed">0</dd></div>
-</dl>
-<section class="panel">
-<div class="panelhead">
-<div>
-
-<h3 id="qTitle">Idle</h3>
-</div>
-<div class="row">
-<button id="retryFailed">Retry failed</button>
-<button id="rebuildTargets">Rebuild folders</button>
-<button id="clearCompleted">Clear completed</button>
-<button id="clearFailed">Clear failed</button>
-<button id="cancelQueued">Cancel queued</button>
-<button id="openDownloads">Open downloads</button>
-</div>
-</div>
-<div class="mega">
-<strong id="qPercent">0%</strong>
-<span id="qSpeed">0 B/s</span>
-<span id="qEta">ETA —</span>
-</div>
-<div class="bigprogress">
-<i id="qBar">
-</i>
-</div>
-<div class="qmeta">
-<span id="qBytes">0 B / —</span>
-<span id="qCount">0 files</span>
-</div>
-<div id="downloadHistory" class="downloadhistory">
-<div class="empty">No downloads yet.</div>
-</div>
-</section>
-<details class="panel disclose" id="downloadDecisions">
-<summary>Download decisions <span class="savebadge" id="decisionCount"></span></summary>
-<p>Every request to download a file, what XVault decided and why. Addresses are shown without signatures. Useful when something downloaded twice or not at all.</p>
-<div class="row"><button id="decisionsRefresh" type="button">Refresh</button><button id="decisionsCopy" type="button">Copy as text</button></div>
-<div class="decision-controls"><input id="decisionSearch" type="search" aria-label="Search download decisions" placeholder="Post, file or reason"><select id="decisionOutcome" aria-label="Decision outcome"><option value="all">All decisions</option><option value="queued">Queued</option><option value="skipped">Skipped</option><option value="filtered">Filtered</option><option value="blocked">Blocked</option><option value="started">Browser checks</option></select></div>
-<p id="decisionState" class="settingHint" role="status" aria-live="polite"></p>
-<p id="decisionQueueState" class="settingHint" role="status" aria-live="polite"></p>
-<div id="decisionList" class="decision-list" role="log" aria-live="off"><div class="empty">Open this panel to load recent decisions.</div></div>
-</details>
-</section>
-<section class="page" id="page-health">
-<div class="grid">
-<section class="panel">
-<div class="panelhead">
-<div>
-<small>ARCHIVE HEALTH CENTER</small>
-<h3>Diagnostics</h3>
-</div>
-<button class="primary" id="healthRun">Run checks</button>
-</div>
-<div id="healthList" class="healthlist">
-<div class="empty">Run a health check.</div>
-</div>
-</section>
-<section class="panel">
-<small>REPAIR</small>
-<h3>One-click tools</h3>
-<div class="repairgrid">
-<button id="healthPrimeBookmarks">Re-prime Bookmarks</button>
-<button id="healthPrimeLikes">Re-prime Likes</button>
-<button id="healthRetry">Retry failed media</button>
-<button id="healthRepairAll">Repair all downloads</button>
-<button id="healthTestCrawler">Test crawler</button>
-<button id="healthTestDownload">Test download</button>
-<button id="healthRefresh">Refresh operation map</button>
-</div>
-</section>
-</div>
-</section>
-<section class="page" id="page-sessions">
-<section class="panel">
-<div class="panelhead">
-<div>
-<small>ARCHIVE SESSIONS</small>
-<h3>Every run, explained</h3>
-</div>
-<button id="sessionsRefresh">Refresh</button>
-</div>
-<div id="sessionList" class="sessionCards large">
-</div>
-</section>
-</section>
-<section class="page page-narrow" id="page-studio">
-<section class="panel">
-<h3>Work with one post</h3>
-<p>Paste a link to a post on X to archive it, capture the visible thread, or open it through another viewer.</p>
-<label class="field"><span>Post link</span><input id="toolPostUrl" placeholder="https://x.com/user/status/…"></label>
-<div class="actionGrid">
-<button id="toolArchivePost" class="primary">Archive post</button>
-<button id="toolArchiveThread">Archive visible thread</button>
-<button id="toolQr">Show QR code</button>
-<button id="toolOpenOriginal">Open on X</button>
-<button id="toolOpenFixup">Open in FixupX</button>
-<button id="toolOpenFx">Open in FxTwitter</button>
-</div>
-<div id="qrBox" class="qrBox"></div>
-</section>
-<section class="panel">
-<h3>Looking for something else?</h3>
-<p>Media actions such as repair, copy image and original media live in the Library inspector. Animation conversion and download rules are in Settings.</p>
-<div class="row"><button data-goto="library">Open library</button><button data-goto="settings">Open settings</button><button data-goto="health">Repair center</button></div>
-</section>
-</section>
-<section class="page" id="page-integrity">
-<div class="grid">
-<section class="panel">
-<div class="panelhead">
-<div>
-<small>ARCHIVE INTEGRITY</small>
-<h3>Library ↔ local files</h3>
-</div>
-<button class="primary" id="integrityRun">Run scan</button>
-</div>
-<div class="integrityStats" id="integrityStats">
-<div>
-<strong>—</strong>
-<span>Missing</span>
-</div>
-<div>
-<strong>—</strong>
-<span>Zero-byte</span>
-</div>
-<div>
-<strong>—</strong>
-<span>Wrong format</span>
-</div>
-<div>
-<strong>—</strong>
-<span>Orphans</span>
-</div>
-<div>
-<strong>—</strong>
-<span>Duplicates</span>
-</div>
-</div>
-<div id="integrityList" class="debuglog">
-</div>
-</section>
-<section class="panel">
-<small>SNAPSHOTS & MANIFESTS</small>
-<h3>Portable metadata</h3>
-<p>Make an open, resumable recovery file with post history and download manifests. Media files stay in their existing folders.</p>
-<div class="actionGrid">
-<button class="primary" id="recoveryExport" type="button">Create recovery file</button>
-<button id="recoveryImport" type="button">Review recovery file…</button>
-<button id="snapshotNow">Create snapshot</button>
-<button id="manifestNow">Generate manifest</button>
-</div>
-<input id="recoveryFile" type="file" accept=".jsonl,.ndjson,application/x-ndjson" hidden>
-<div id="recoveryStatus" class="xv-recovery-status" role="status" aria-live="polite"></div>
-<button id="recoveryConflictExport" type="button" hidden>Export conflict evidence</button>
-<button id="recoveryAssetExport" type="button" hidden>Export recovered file references</button>
-<div id="snapshotList" class="debuglog">
-</div>
-</section>
-</div>
-</section>
-<section class="page" id="page-activity">
-<section class="panel">
-<div class="panelhead">
-<div>
-<small>RECENT ACTIONS</small>
-<h3>What XVault has been doing</h3>
-</div>
-<button id="activityRefresh">Refresh</button>
-</div>
-<div id="activityList" class="activitylist">
-</div>
-</section>
-</section>
-<section class="page" id="page-settings">
-<div class="settings-shell">
-<nav class="settings-nav" aria-label="Settings sections">
-<label class="settings-search"><span class="sr">Search settings</span><input id="settingsSearch" type="search" placeholder="Search settings" autocomplete="off"></label>
-<button id="settingsChanged" class="settings-changed" type="button" aria-pressed="false" hidden title="Show only settings that differ from the defaults">Changed from default <b id="settingsChangedCount">0</b></button>
-<div class="settings-links" id="settingsLinks"><button type="button" data-section-link="appearance" aria-current="false">Appearance</button><button type="button" data-section-link="library" aria-current="false">Library</button><button type="button" data-section-link="capture" aria-current="false">Capture</button><button type="button" data-section-link="downloads" aria-current="false">Downloads</button><button type="button" data-section-link="x" aria-current="false">X.com</button><button type="button" data-section-link="phone" aria-current="false">Phone</button><button type="button" data-section-link="privacy" aria-current="false">Privacy and data</button></div>
-<div class="settings-foot">
-<div class="seg" role="group" aria-label="Detail level"><button id="basicMode" type="button">Essentials</button><button id="advancedMode" type="button">Everything</button></div>
-<span id="saveState" class="savebadge" role="status"></span>
-</div>
-</nav>
-<div class="settings-content" id="settingsContent">
-<section class="settings-section" id="set-appearance" data-section="appearance"><header><h2>Appearance</h2><p>Theme, density and how much the interface moves.</p></header><div class="groups"><section class="settinggroup" id="g-theme"><h3>Theme</h3><div id="themeGallery" class="theme-gallery" role="radiogroup" aria-label="Theme"></div>
-<div class="accent-row" id="accentRow"><span class="accent-label">Accent</span><div id="accentSwatches" class="accent-swatches" role="radiogroup" aria-label="Accent color"></div><label class="accent-custom" title="Pick any color"><span class="sr">Custom accent color</span><input type="color" id="accentCustom" value="#d6a84e"></label><button type="button" id="accentReset" class="quiet">Use theme accent</button></div>
-<div class="formgrid two">
-<label class="field"><span>Interface density</span><select id="density" data-setting="uiDensity"><option value="ultra">Ultra compact</option><option value="compact">Compact</option><option value="comfortable">Comfortable</option><option value="spacious">Spacious</option><option value="cinema">Large</option></select></label>
-<label class="field"><span>Interface zoom</span><input type="range" min="0.6" max="1.8" step="0.05" data-setting="dashboardScale"></label>
-</div></section><section class="settinggroup" id="g-layout-type"><h3>Layout and type</h3><p class="settingHint">Sizes and fonts apply instantly. Reset puts every choice here back to the default.</p>
-<div class="formgrid two">
-<label class="field"><span>Navigation width</span><select data-setting="railWidth"><option value="narrow">Narrow</option><option value="normal">Standard</option><option value="wide">Wide</option></select></label>
-<label class="field"><span>Library filters column</span><select data-setting="facetWidth"><option value="narrow">Narrow</option><option value="normal">Standard</option><option value="wide">Wide</option></select></label>
-<label class="field"><span>Inspector width</span><select data-setting="inspectorWidth"><option value="narrow">Narrow</option><option value="normal">Standard</option><option value="wide">Wide</option></select></label>
-<label class="field"><span>Open XVault on</span><select data-setting="startPage"><option value="last">The page I was on</option><option value="library">Library</option><option value="home">Capture overview</option></select></label>
-<label class="field"><span>Interface font</span><select data-setting="uiFont"><option value="hanken">Hanken Grotesk</option><option value="system">System font</option></select></label>
-<label class="field"><span>Post text font</span><select data-setting="readFont"><option value="newsreader">Newsreader (serif)</option><option value="sans">Same as interface</option><option value="georgia">Georgia</option></select></label>
-</div>
-<div class="row"><button id="resetLayoutType" type="button">Reset layout and type</button></div></section><section class="settinggroup" id="g-motion-slot"><h3>Motion</h3><p class="settingHint">The system reduced-motion preference always wins.</p><div id="motionSlot"></div></section><section class="settinggroup advancedOnly" id="g-sound"><h3>Sound</h3><div class="toggles"><label><span><b>Soft click sounds</b><small>A quiet tick generated on your computer. No audio files.</small></span><input type="checkbox" data-setting="dashboardSounds"></label></div>
-<div class="formgrid two"><label class="field"><span>Volume</span><input type="range" min="0" max="1" step="0.01" data-setting="soundVolume"></label></div></section></div></section><section class="settings-section" id="set-library" data-section="library"><header><h2>Library</h2><p>How posts and media appear while you browse your archive.</p></header><div class="groups"><section class="settinggroup" id="g-inbox"><h3>Inbox</h3><p class="settingHint">New posts wait in the Inbox until you review them in Quick Look (press R) or mark them reviewed. Posts archived before this feature were treated as reviewed.</p>
-<div class="row"><button id="inboxReviewed">Mark everything reviewed</button><button id="inboxAll">Put unreviewed posts back in Inbox</button></div></section><section class="settinggroup" id="g-layout"><h3>Layout and detail</h3><div class="formgrid two">
-<label class="field"><span>Posts per page</span><input type="number" min="50" max="1500" data-setting="libraryPageSize"></label>
-</div>
-<div class="toggles">
-<label><span><b>Show display names</b></span><input type="checkbox" data-setting="libraryShowNames"></label>
-<label><span><b>Show avatars</b></span><input type="checkbox" data-setting="libraryShowAvatars"></label>
-<label><span><b>Show engagement counts</b></span><input type="checkbox" data-setting="libraryShowMetrics"></label>
-</div></section><section class="settinggroup" id="g-video"><h3>Video and animation</h3><div class="formgrid two">
-<label class="field"><span>Animation display</span><select data-setting="libraryAnimationMode"><option value="native">Native GIF or WebP (recommended)</option><option value="gif">Converted GIF</option><option value="webp">Converted animated WebP</option><option value="mp4">Original MP4 loop</option></select></label>
-<label class="field"><span>Video preload</span><select data-setting="libraryPreloadMedia"><option value="none">None</option><option value="metadata">Metadata</option><option value="auto">Automatic</option></select></label>
-<label class="field"><span>Default volume</span><input type="number" min="0" max="1" step="0.05" data-setting="libraryVolume"></label>
-</div>
-<div class="toggles">
-<label><span><b>Play GIFs and animations automatically</b></span><input type="checkbox" data-setting="libraryAutoplayAnimated"></label>
-<label><span><b>Show video controls</b></span><input type="checkbox" data-setting="libraryVideoControls"></label>
-<label><span><b>Mute previews</b></span><input type="checkbox" data-setting="libraryVideoMuted"></label>
-<label><span><b>One volume for every video</b><small>Changing one player updates all of them.</small></span><input type="checkbox" data-setting="rememberLibraryVolume"></label>
-<label><span><b>Restart previews when the pointer leaves</b></span><input type="checkbox" data-setting="libraryVideoHoverReset"></label>
-</div></section><section class="settinggroup advancedOnly" id="g-viewer"><h3>Image viewer</h3><div class="formgrid two">
-<label class="field"><span>Maximum zoom (%)</span><input type="number" min="100" max="1200" step="25" data-setting="libraryZoomMax"></label>
-<label class="field"><span>Zoom step (%)</span><input type="number" min="5" max="100" step="5" data-setting="libraryZoomStep"></label>
-<label class="field"><span>Click-to-zoom (%)</span><input type="number" min="100" max="500" step="25" data-setting="libraryClickZoom"></label>
-</div></section></div></section><section class="settings-section" id="set-capture" data-section="capture"><header><h2>Capture</h2><p>How XVault reads X while it archives.</p></header><div class="groups"><section class="settinggroup advancedOnly" id="g-crawler"><h3>Resilience</h3><p class="settingHint">Pacing and retries for archive runs. Balanced suits most accounts.</p><div class="seg presetrow" role="group" aria-label="Crawler preset"><button data-preset="safe">Safe</button><button data-preset="balanced">Balanced</button><button data-preset="fast">Fast</button></div><div class="formgrid two">
-<label class="field">
-<span>Direct delay</span>
-<input type="number" data-setting="directPageDelay">
-</label>
-<label class="field">
-<span>Jitter</span>
-<input type="number" data-setting="directPageJitter">
-</label>
-<label class="field">
-<span>First-page timeout</span>
-<input type="number" data-setting="firstPageTimeout">
-</label>
-<label class="field">
-<span>Page size</span>
-<input type="number" data-setting="pageSize">
-</label>
-<label class="field">
-<span>Max pages (0 unlimited)</span>
-<input type="number" data-setting="maxPages">
-</label>
-<label class="field">
-<span>Scroll delay</span>
-<input type="number" data-setting="scrollDelay">
-</label>
-<label class="field">
-<span>Idle rounds</span>
-<input type="number" data-setting="scrollIdleRounds">
-</label>
-<label class="field">
-<span>Verification passes</span>
-<input type="number" data-setting="verificationPasses">
-</label>
-</div>
-<div class="toggles">
-<label>
-<span>
-<b>Smart auto-fallback</b>
-</span>
-<input type="checkbox" data-setting="smartFallback">
-</label>
-<label>
-<span>
-<b>Auto-prime</b>
-</span>
-<input type="checkbox" data-setting="autoPrimeHistory">
-</label>
-<label>
-<span>
-<b>Checkpoint resume</b>
-</span>
-<input type="checkbox" data-setting="checkpointResume">
-</label>
-<label>
-<span>
-<b>Incremental sync</b>
-</span>
-<input type="checkbox" data-setting="incrementalSync">
-</label>
-<label>
-<span>
-<b>Verification pass</b>
-</span>
-<input type="checkbox" data-setting="completionVerification">
-</label>
-</div></section><section class="settinggroup advancedOnly" id="g-profile"><h3>Complete profiles</h3><div class="formgrid two">
-<label class="field">
-<span>Profile archive mode</span>
-<select data-setting="profileArchiveMode">
-<option value="complete">Posts + replies + retweets + quotes</option>
-<option value="posts">Posts only</option>
-</select>
-</label>
-</div>
-<p>Complete mode auto-primes the profile’s replies timeline. Media authored by the selected profile goes to <b>Media</b>; nested retweets, quotes and replied-to posts go to <b>Retweets</b>.</p></section></div></section><section class="settings-section" id="set-downloads" data-section="downloads"><header><h2>Downloads</h2><p>What gets saved, where it goes, and how failures recover.</p></header><div class="groups"><section class="settinggroup" id="g-rules"><h3>What to download</h3><div class="toggles">
-<label>
-<span>
-<b>Full Mirror by default</b>
-<small>Archive jobs also download media.</small>
-</span>
-<input type="checkbox" data-setting="fullMirrorMode">
-</label>
-<label>
-<span>
-<b>Force profile subfolder</b>
-<small>Profile archives always go under that profile's handle, even when author sorting is off.</small>
-</span>
-<input type="checkbox" data-setting="forceProfileSubfolder">
-</label>
-<label>
-<span>
-<b>Detect animated WebP</b>
-<small>Inspect real bytes and place animated WebP in GIFs.</small>
-</span>
-<input type="checkbox" data-setting="detectAnimatedWebP">
-</label>
-<label>
-<span>
-<b>Hash dedupe small media</b>
-<small>Optional SHA-256 duplicate check (extra bandwidth).</small>
-</span>
-<input type="checkbox" data-setting="hashDedupe">
-</label>
-</div>
-<div class="formgrid two">
-<label class="field">
-<span>Images</span>
-<select data-setting="imageRule">
-<option value="always">Always</option>
-<option value="never">Never</option>
-</select>
-</label>
-<label class="field">
-<span>GIFs / animated WebP</span>
-<select data-setting="gifRule">
-<option value="always">Always</option>
-<option value="never">Never</option>
-</select>
-</label>
-<label class="field">
-<span>Videos</span>
-<select data-setting="videoRule">
-<option value="always">Always</option>
-<option value="never">Never</option>
-</select>
-</label>
-<label class="field">
-<span>Max video MB (0 = unlimited)</span>
-<input type="number" data-setting="maxVideoMB">
-</label>
-<label class="field">
-<span>Min image width</span>
-<input type="number" data-setting="minImageWidth">
-</label>
-<label class="field">
-<span>Min image height</span>
-<input type="number" data-setting="minImageHeight">
-</label>
-</div></section><section class="settinggroup" id="g-folders"><h3>Folders and file names</h3><div id="folderPreview" class="pathpreview">
-</div>
-<div class="formgrid two">
-<label class="field">
-<span>Root</span>
-<input data-setting="mediaFolder">
-</label>
-<label class="field">
-<span>Images</span>
-<input data-setting="imageFolder">
-</label>
-<label class="field">
-<span>Videos</span>
-<input data-setting="videoFolder">
-</label>
-<label class="field">
-<span>GIFs</span>
-<input data-setting="gifFolder">
-</label>
-<label class="field">
-<span>Other</span>
-<input data-setting="otherFolder">
-</label>
-<label class="field">
-<span>Filename</span>
-<select data-setting="fileNaming">
-<option value="random">Random</option>
-<option value="author-id-index">author-post-index</option>
-<option value="author-id">author-post</option>
-<option value="id">post ID</option>
-<option value="custom">Custom template</option>
-</select>
-</label>
-<label class="field">
-<span>Random length</span>
-<input type="number" data-setting="randomNameLength">
-</label>
-<label class="field">
-<span>Custom template</span>
-<input data-setting="customFilenameTemplate">
-</label>
-</div>
-<div id="filenamePreview" class="pathpreview">
-</div>
-<div class="toggles">
-<label>
-<span>
-<b>Sort by media type</b>
-<small>Images / Videos / GIFs / Other.</small>
-</span>
-<input type="checkbox" data-setting="organizeByType">
-</label>
-<label>
-<span>
-<b>Then by author</b>
-<small>Optional author subfolder.</small>
-</span>
-<input type="checkbox" data-setting="organizeByAuthor">
-</label>
-<label>
-<span>
-<b>Then by month</b>
-<small>YYYY-MM.</small>
-</span>
-<input type="checkbox" data-setting="organizeByDate">
-</label>
-<label>
-<span>
-<b>Then by archive source</b>
-<small>Bookmarks / Likes / Timeline.</small>
-</span>
-<input type="checkbox" data-setting="organizeByArchiveSource">
-</label>
-</div></section><section class="settinggroup" id="g-queue"><h3>Queue behavior</h3>
-<div class="formgrid two">
-<label class="field">
-<span>Concurrent downloads</span>
-<input type="number" data-setting="maxConcurrentDownloads">
-</label>
-<label class="field">
-<span>Retries</span>
-<input type="number" data-setting="downloadRetries">
-</label>
-<label class="field">
-<span>Retry delay</span>
-<input type="number" data-setting="retryDelay">
-</label>
-<label class="field">
-<span>Hash max MB</span>
-<input type="number" data-setting="hashDedupeMaxMB">
-</label>
-<label class="field"><span>When another post contains the same file</span><select data-setting="crossPostDuplicates"><option value="keep">Keep a copy with each post</option><option value="skip">Save it once (skip the repeat)</option></select></label></div>
-<div class="toggles">
-<label><span><b>Skip files you already have</b><small>XVault recognizes the same image or video however X spells its address, so a file is saved once per post.</small></span><input type="checkbox" data-setting="skipDuplicateDownloads"></label>
-<label>
-<span>
-<b>Repair queue after restart</b>
-</span>
-<input type="checkbox" data-setting="autoRepairQueue">
-</label>
-<label>
-<span>
-<b>Prevent sleep during jobs</b>
-</span>
-<input type="checkbox" data-setting="preventSleepDuringTasks">
-</label>
-<label>
-<span>
-<b>Completion notifications</b>
-</span>
-<input type="checkbox" data-setting="completionNotifications">
-</label>
-</div><div class="row"><button id="testDownload">Run a test download</button></div></section><section class="settinggroup advancedOnly" id="g-conversion"><h3>Animation conversion</h3><p class="settingHint">X serves most GIFs as MP4 loops. With the FFmpeg Helper running, XVault keeps the original and creates a real GIF or WebP copy.</p>
-<div class="formgrid two">
-<label class="field">
-<span>Original animation subfolder</span>
-<input data-setting="animationOriginalFolder">
-</label>
-<label class="field">
-<span>GIF output subfolder</span>
-<input data-setting="animationGifFolder">
-</label>
-<label class="field">
-<span>Animated WebP output subfolder</span>
-<input data-setting="animatedWebPFolder">
-</label>
-<label class="field">
-<span>WebP quality</span>
-<input type="number" min="1" max="100" data-setting="conversionWebPQuality">
-</label>
-<label class="field">
-<span>Helper localhost port</span>
-<input type="number" min="1024" max="65535" data-setting="helperPort">
-</label>
-<label class="field">
-<span>Conversion FPS</span>
-<input type="number" min="5" max="60" data-setting="conversionFps">
-</label>
-<label class="field">
-<span>Conversion max width</span>
-<input type="number" min="320" max="4096" data-setting="conversionMaxWidth">
-</label>
-</div>
-<div class="toggles">
-<label class="recommended">
-<span>
-<b>Convert X animation MP4</b>
-<small>Runs through the included FFmpeg helper.</small>
-</span>
-<input type="checkbox" data-setting="convertAnimatedMp4">
-</label>
-<label class="recommended">
-<span>
-<b>Create real GIF copy</b>
-</span>
-<input type="checkbox" data-setting="convertAnimationGif">
-</label>
-<label class="recommended">
-<span>
-<b>Create animated WebP copy</b>
-</span>
-<input type="checkbox" data-setting="convertAnimationWebP">
-</label>
-<label class="recommended">
-<span>
-<b>Keep original MP4 too</b>
-</span>
-<input type="checkbox" data-setting="keepConversionSource">
-</label>
-<label class="recommended">
-<span>
-<b>Use Helper bridge for previews</b>
-<small>Avoids fragile file:// previews and updates converted GIF/WebP reliably.</small>
-</span>
-<input type="checkbox" data-setting="helperPreferHttpPreview">
-</label>
-<label>
-<span>
-<b>Prefer local converted GIF previews</b>
-<small>Also enable “Allow access to file URLs” for XVault in Chrome.</small>
-</span>
-<input type="checkbox" data-setting="preferLocalConvertedAnimationPreviews">
-</label>
-</div></section></div></section><section class="settings-section" id="set-x" data-section="x"><header><h2>X.com</h2><p>What XVault adds to x.com itself.</p></header><div class="groups"><div id="xSlot"></div><section class="settinggroup" id="g-floating"><h3>XV button</h3><p class="settingHint">The floating shortcut on x.com.</p><div class="formgrid two">
-<label class="field">
-<span>Scale</span>
-<input type="number" step=".05" data-setting="cornerScale">
-</label>
-<label class="field">
-<span>Opacity</span>
-<input type="number" step=".05" data-setting="cornerOpacity">
-</label>
-<label class="field">
-<span>Mode</span>
-<select data-setting="floatingMode">
-<option value="orb">Orb</option>
-<option value="edge">Edge dock</option>
-</select>
-</label>
-<label class="field">
-<span>Auto-hide delay</span>
-<input type="number" data-setting="floatingAutoHideDelay">
-</label>
-
-</div>
-<div class="toggles">
-<label>
-<span>
-<b>Show XV</b>
-</span>
-<input type="checkbox" data-setting="showFloatingButton">
-</label>
-<label>
-<span>
-<b>Draggable</b>
-</span>
-<input type="checkbox" data-setting="cornerDraggable">
-</label>
-<label>
-<span>
-<b>Magnetic snap</b>
-</span>
-<input type="checkbox" data-setting="cornerSnap">
-</label>
-<label>
-<span>
-<b>Hover mini panel</b>
-</span>
-<input type="checkbox" data-setting="floatingHoverPanel">
-</label>
-<label>
-<span>
-<b>Auto-hide</b>
-</span>
-<input type="checkbox" data-setting="floatingAutoHide">
-</label>
-<label>
-<span>
-<b>Legacy side dock</b>
-</span>
-<input type="checkbox" data-setting="showSideDock">
-</label>
-</div></section></div></section><section class="settings-section" id="set-phone" data-section="phone"><header><h2>Phone</h2><p>Browse your library from a phone on the same Wi-Fi.</p></header><div class="groups"><section class="remote-panel settinggroup" id="remoteCompanion">
-<div class="remote-heading">
-<div>
-<h3>Your Library, on this Wi-Fi</h3>
-<p>Pair a phone to browse locally saved posts and stream media from this computer.</p>
-</div>
-<span id="remoteState" class="remote-state">OFF</span>
-</div>
-<div class="remote-toolbar">
-<label class="remote-port">
-<span>Port</span>
-<input id="remotePort" type="number" min="1024" max="65535" value="18765" data-setting="remotePort">
-</label>
-<button id="remoteToggle" class="primary">Start pairing</button>
-<button id="remoteCheck" type="button">Check connection</button>
-<button id="remoteStop" hidden>Stop Remote</button>
-</div>
-<p id="remoteConnectionStatus" class="remote-stopped-note" role="status" aria-live="polite">The Companion runs in the background. Start pairing to create your phone QR; no setup window needs to stay open.</p>
-<div id="remoteSetupHint" class="remote-hint">
-<b>One-time setup</b>
-<ol class="remote-setup-steps"><li>Copy your extension ID, then open <code>FFmpeg_Helper</code> and run <code>setup_remote.bat</code>. Paste the ID when asked.</li><li>Allow the Private-network firewall rule. On your trusted home Wi-Fi, set Windows Settings → Network &amp; Internet → Wi-Fi → your network → Network profile to <b>Private</b>.</li><li>Return here and choose <b>Check connection</b>, then <b>Start pairing</b>. Keep your phone on the same non-guest Wi-Fi.</li></ol>
-<span>Already installed? Check connection first. If it fails, run <code>check_remote.bat</code> for a read-only diagnosis.</span>
-<button id="remoteCopyExtension">Copy extension ID</button>
-<small id="remoteExtensionId">
-</small>
-</div>
-<details class="remote-grants">
-<summary>Optional phone permissions</summary>
-<div class="remote-permissions">
-<label>
-<input type="checkbox" data-remote-permission="favorite.write">
-<span>Change Favorites</span>
-</label>
-<label>
-<input type="checkbox" data-remote-permission="tags.write">
-<span>Edit tags</span>
-</label>
-<label>
-<input type="checkbox" data-remote-permission="notes.write">
-<span>Edit notes</span>
-</label>
-<label>
-<input type="checkbox" data-remote-permission="downloads.manage">
-<span>Save archived media to PC</span>
-</label>
-</div>
-</details>
-<div id="remotePairStage" class="remote-pair-stage" hidden>
-<div id="remoteQr" class="remote-qr" aria-label="Phone pairing QR code">
-</div>
-<div class="remote-pair-copy">
-<small>SCAN TO PAIR</small>
-<b id="remotePairCode">
-</b>
-<span id="remotePairExpiry">
-</span>
-<label>Phone address<input id="remoteAddress" readonly>
-</label>
-<button id="remoteCopyAddress">Copy address</button>
-<div class="remote-fingerprint">
-<b>Local HTTPS certificate</b>
-<code id="remoteFingerprint">
-</code>
-<span>On the first visit, your phone may show a certificate warning. Check this SHA-256 fingerprint in the browser’s certificate details before continuing.</span>
-</div>
-</div>
-</div>
-<div id="remotePending" class="remote-pending" aria-live="polite">
-</div>
-<div id="remoteDevices" class="remote-devices">
-</div>
-<p class="remote-privacy">Device permissions are checked by the Companion on every request. Phone access is paused when the Companion stops; paired credentials can be revoked here.</p>
-</section></div></section><section class="settings-section" id="set-privacy" data-section="privacy"><header><h2>Privacy and data</h2><p>Local-first means these controls are about your own computer.</p></header><div class="groups"><section class="settinggroup" id="g-privacy"><h3>Safety</h3><div class="toggles">
-<label>
-<span>
-<b>Confirm destructive clears</b>
-</span>
-<input type="checkbox" data-setting="confirmClearArchive">
-</label>
-<label>
-<span>
-<b>Stale context notice</b>
-</span>
-<input type="checkbox" data-setting="showStaleContextNotice">
-</label>
-<label>
-<span>
-<b>Remember dashboard page</b>
-</span>
-<input type="checkbox" data-setting="rememberLastDashboardPage">
-</label>
-<label>
-<span>
-<b>Health check on startup</b>
-</span>
-<input type="checkbox" data-setting="healthCheckOnStartup">
-</label>
-</div></section><section class="settinggroup" id="g-backup"><h3>Back up and reset</h3><div class="row">
-<button id="exportSettings">Export settings</button>
-<button id="importSettings">Import settings</button>
-<input id="settingsFile" type="file" accept="application/json,.json" hidden>
-<button class="primary" id="recommendedAll">Apply recommended</button>
-</div>
-<div class="row resets"><span class="settingHint">Reset one area:</span><button id="resetFloat">XV button</button><button id="resetCrawler">Crawler</button><button id="resetMedia">Media</button><button id="restorePrevious">Restore previous</button><button id="resetSettings" class="danger">Factory settings</button></div></section><section class="settinggroup" id="g-danger"><h3>Local archive</h3><div class="row"><button class="danger" id="clear">Clear library…</button></div><p class="settingHint">Removes XVault’s local copy of your archive. It does not delete anything on X or any file you already downloaded.</p></section></div></section>
-<p class="settings-empty empty" id="settingsEmpty" hidden>No setting matches that search.</p>
-</div>
-</div>
-</section>
-</main>
-</div>
-<div id="toast">
-</div>
-<div id="lightbox" class="lightbox hidden">
-<button id="lbClose" title="Close">×</button>
-<button id="lbPrev" title="Previous post/media">‹</button>
-<div class="lbStage">
-<div id="lbContent" class="lbContent">
-</div>
-<div class="zoomDock" id="zoomDock">
-<button id="lbFit">Fit</button>
-<button id="lbMinus">−</button>
-<input id="lbZoom" type="range" min="25" max="1200" step="5" value="100">
-<button id="lbPlus">+</button>
-<button id="lbActual">1:1</button>
-<b id="lbZoomLabel">100%</b>
-</div>
-</div>
-<button id="lbNext" title="Next post/media">›</button>
-<aside id="lbMeta">
-</aside>
-</div>
-<aside id="detailsDrawer" class="detailsDrawer hidden">
-<button id="drawerClose">×</button>
-<div id="drawerBody">
-</div>
-</aside>
-<aside id="notificationCenter" class="notificationCenter hidden">
-<header>
-<b>Notifications</b>
-<button id="notifClose">×</button>
-</header>
-<div id="notifList">
-</div>
-</aside>
-<dialog id="archiveRecoveryDialog" class="xv-recovery-dialog" aria-labelledby="archiveRecoveryTitle">
-<header class="xv-recovery-head">
-<div><small>PORTABLE ARCHIVE · JSON LINES</small><h2 id="archiveRecoveryTitle">Review recovery file</h2></div>
-<button id="archiveRecoveryClose" type="button" aria-label="Close recovery dialog">×</button>
-</header>
-<p id="archiveRecoveryDescription" class="xv-recovery-copy">The file is read in bounded batches. Existing records are never replaced.</p>
-<div class="xv-recovery-meter" aria-hidden="true"><i id="archiveRecoveryMeter"></i></div>
-<p id="archiveRecoveryProgress" class="xv-recovery-progress" role="status" aria-live="polite">Choose a recovery file to inspect it.</p>
-<dl id="archiveRecoveryCounts" class="xv-recovery-counts" hidden>
-<div><dt>New records</dt><dd id="recoveryCountNew">0</dd></div>
-<div><dt>Already present</dt><dd id="recoveryCountSame">0</dd></div>
-<div><dt>Conflicts retained</dt><dd id="recoveryCountConflicts">0</dd></div>
-<div><dt>File references</dt><dd id="recoveryCountAssets">0</dd></div>
-</dl>
-<p id="archiveRecoveryNotice" class="xv-recovery-notice" hidden>No local data will be overwritten. If you continue, both versions of each conflict will be saved as evidence.</p>
-<details id="archiveRecoveryConflictSamples" class="xv-recovery-conflict-samples" hidden>
-<summary>Inspect up to five conflicts</summary>
-<ol id="archiveRecoveryConflictList"></ol>
-</details>
-<div class="xv-recovery-actions">
-<button id="archiveRecoveryConflictExport" type="button" hidden>Export conflicts</button>
-<button id="archiveRecoveryAssetsExport" type="button" hidden>Export file manifest</button>
-<button id="archiveRecoveryCancel" type="button">Cancel</button>
-<button class="primary" id="archiveRecoveryApply" type="button" disabled>Import missing records</button>
-</div>
-</dialog>
-<div id="palette" class="palette hidden">
-<div class="palettebox">
-<input id="paletteInput" placeholder="Type a command…">
-<div id="paletteList">
-</div>
-</div>
-</div>
-<div id="onboarding" class="onboarding hidden" role="dialog" aria-modal="true" aria-labelledby="onboardTitle">
-<div>
-<h2 id="onboardTitle">Welcome to XVault</h2>
-<p>Everything you archive stays on this computer. Balanced settings are already in place; two quick checks make sure capturing and downloading work before you start.</p>
-<div class="steps">
-<button id="onboardRecommended">Apply balanced settings</button>
-<button id="onboardTest">Test the crawler</button>
-<button id="onboardDone" class="primary">Start using XVault</button>
-</div>
-</div>
-</div>
-<script src="dashboard.js">
-</script>
-<script src="command-match.js"></script>
-<script src="command-center.js">
-</script>
-<script src="remote-settings.js">
-</script>
-<script type="module" src="archive-recovery-ui.mjs"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>XVault</title>
+    <link rel="stylesheet" href="xv-base.css" />
+    <link rel="stylesheet" href="xv-library.css" />
+    <link rel="stylesheet" href="xv-pages.css" />
+    <link rel="stylesheet" href="xv-settings.css" />
+    <script defer src="link-utils.js"></script>
+    <script defer src="link-export.js"></script>
+    <script defer src="media-asset.js"></script>
+    <script defer src="library-model.js"></script>
+    <script defer src="library-collections.js"></script>
+    <script defer src="library-search-core.js"></script>
+    <script defer src="media-metadata.js"></script>
+    <script defer src="inspector-notes.js"></script>
+    <script defer src="note-recovery.js"></script>
+    <script defer src="library-trash.js"></script>
+    <script defer src="library-workspace.js"></script>
+    <script defer src="xv-motion.js"></script>
+    <script defer src="dashboard-island.js"></script>
+    <script defer src="app-icons.js"></script>
+    <script defer src="app-focus.js"></script>
+    <script defer src="xv-shell.js"></script>
+    <script defer src="xv-appearance.js"></script>
+    <script defer src="workspace-model.js"></script>
+    <script defer src="xv-workspaces.js"></script>
+    <script defer src="download-diagnostics.js"></script>
+    <script defer src="xv-home.js"></script>
+    <script defer src="xv-settings.js"></script>
+    <script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script>
+    <script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script>
+  </head>
+  <body data-theme="graphite">
+    <div class="shell">
+      <aside class="rail">
+        <button class="brand" data-page="library" aria-label="XVault library">
+          <span>XV</span>
+          <b>XVault</b>
+        </button>
+        <nav id="primaryNav" aria-label="Sections">
+          <button class="nav active" data-page="library"><span>Library</span></button>
+          <button class="nav" data-page="explorer"><span>Explore</span></button>
+          <button class="nav" data-page="home" data-pages="home archive sessions"><span>Capture</span></button>
+          <button class="nav" data-page="media"><span>Downloads</span></button>
+          <button class="nav" data-page="studio"><span>Tools</span></button>
+          <button class="nav" data-page="health" data-pages="health integrity activity"><span>System</span></button>
+        </nav>
+        <div class="rail-spacer"></div>
+        <button class="nav" data-page="settings"><span>Settings</span></button>
+        <button class="rail-collapse" id="railCollapse" aria-label="Collapse navigation" aria-pressed="false">
+          <span>Collapse</span>
+        </button>
+        <div class="railfoot">
+          <span id="dot"> </span>
+          <div>
+            <b id="conn">Looking for X</b>
+            <small id="ops">0 operations learned</small>
+          </div>
+        </div>
+      </aside>
+      <main>
+        <header class="top">
+          <div>
+            <h1 id="title">Library</h1>
+            <nav class="subnav" id="subnav" aria-label="Section pages"></nav>
+          </div>
+          <div class="topactions">
+            <button id="cmdBtn" aria-label="Open command center"><span>Search commands</span></button>
+            <button id="refresh" title="Refresh counts and connection" aria-label="Refresh">↻</button>
+            <button id="openX" title="Open x.com in a new tab"><span class="tl">Open X</span></button>
+            <button id="export" title="Create a full, bounded JSON Lines recovery file">
+              <span class="tl">Export</span>
+            </button>
+          </div>
+        </header>
+        <section class="page" id="page-home">
+          <div class="home-top">
+            <dl class="vault-stats">
+              <div>
+                <dt>Posts</dt>
+                <dd id="stTweets">0</dd>
+              </div>
+              <div>
+                <dt>People</dt>
+                <dd id="stUsers">0</dd>
+              </div>
+              <div>
+                <dt>Captures</dt>
+                <dd id="stCaps">0</dd>
+              </div>
+              <div>
+                <dt>Storage</dt>
+                <dd id="stStore">—</dd>
+              </div>
+            </dl>
+            <span id="radar" hidden>0</span>
+            <div class="home-actions">
+              <button class="primary big" data-goto="archive">Archive a source</button>
+              <button class="big" id="heroScroll" title="Archive what is loaded on the X tab you have open">
+                Archive this X page
+              </button>
+              <button class="big" id="archiveEverything" title="Walk bookmarks, likes and timeline history">
+                Archive history
+              </button>
+            </div>
+          </div>
+          <section class="panel">
+            <div class="panelhead">
+              <h3>Recently archived</h3>
+              <button class="quiet" data-goto="library">Open library</button>
+            </div>
+            <div id="homeRecent" class="home-recent">
+              <div class="empty">The newest posts appear here once the library has loaded.</div>
+            </div>
+          </section>
+          <div class="grid home-grid">
+            <section class="panel">
+              <div class="panelhead">
+                <div>
+                  <h3>Passive capture</h3>
+                  <p>
+                    While you browse X, the posts that load on screen are saved to this vault. Nothing leaves your
+                    computer.
+                  </p>
+                </div>
+                <label class="switch"><input id="capture" type="checkbox" aria-label="Passive capture" /><i></i></label>
+              </div>
+            </section>
+            <section class="panel">
+              <h3>Operations learned</h3>
+              <p>
+                XVault learns X’s current request formats by watching you browse. More operations make archiving faster
+                and steadier.
+              </p>
+              <div class="chips" id="chips">Browse X to teach XVault its current operations.</div>
+            </section>
+          </div>
+          <div class="grid home-grid">
+            <section class="panel">
+              <h3>Download speed</h3>
+              <canvas
+                id="bandwidthGraph"
+                width="640"
+                height="150"
+                aria-label="Download speed over the last 60 seconds"
+              ></canvas>
+            </section>
+            <section class="panel">
+              <h3>Archive activity</h3>
+              <canvas
+                id="activityGraph"
+                width="640"
+                height="150"
+                aria-label="Posts, queue and failures over time"
+              ></canvas>
+            </section>
+          </div>
+          <section class="panel">
+            <div class="panelhead">
+              <h3>Recent runs</h3>
+              <button class="quiet" data-goto="sessions">All runs</button>
+            </div>
+            <div id="homeSessions" class="sessionCards"></div>
+          </section>
+        </section>
+        <section class="page" id="page-archive">
+          <div class="archivegrid">
+            <section class="panel">
+              <h3>Choose a source</h3>
+              <div class="sources" role="radiogroup" aria-label="Archive source">
+                <button class="source selected" data-source="bookmarks" role="radio" aria-checked="true">
+                  <b>Bookmarks</b><span>Everything you saved on X</span>
+                </button>
+                <button class="source" data-source="likes" role="radio" aria-checked="false">
+                  <b>Likes</b><span>Posts you liked</span>
+                </button>
+                <button class="source" data-source="profile" role="radio" aria-checked="false">
+                  <b>Profile</b><span>One account, in full</span>
+                </button>
+                <button class="source" data-source="timeline" role="radio" aria-checked="false">
+                  <b>This page</b><span>What the X tab shows now</span>
+                </button>
+              </div>
+              <label class="field hidden" id="profileWrap"
+                ><span>Profile handle</span>
+                <div class="pref"><b>@</b><input id="handle" placeholder="username" /></div
+              ></label>
+              <div class="toggles archiveopts">
+                <label
+                  ><span
+                    ><b>Also download the media</b
+                    ><small>Full Mirror saves every image, video and GIF found during this run.</small></span
+                  ><input type="checkbox" id="runMirror"
+                /></label>
+                <label
+                  ><span
+                    ><b>Resume from the last checkpoint</b
+                    ><small>Continue a previous run from where it stopped, when possible.</small></span
+                  ><input type="checkbox" id="runResume" checked
+                /></label>
+              </div>
+              <div class="method">
+                <div>
+                  <h4 id="methodTitle">Smart — Bookmarks</h4>
+                  <p id="methodText">Auto-prime → direct GraphQL → retry → adaptive scroll → verification.</p>
+                </div>
+                <span id="ready" class="pill">Ready</span>
+              </div>
+              <div class="row">
+                <button class="primary big" id="start">Start archive</button>
+                <button id="prime" title="Open the source page on X so XVault can learn its requests">
+                  Open source on X
+                </button>
+                <button id="testCrawler" class="quiet">Test crawler</button>
+              </div>
+              <div id="sourceDiag" class="diag">XVault falls back to scrolling automatically instead of stalling.</div>
+            </section>
+            <section class="panel run">
+              <h3 id="runTitle">Idle</h3>
+              <div class="bigNum"><strong id="pages">0</strong><span id="pageUnit">steps</span></div>
+              <div class="progress"><i id="prog"></i></div>
+              <dl>
+                <div>
+                  <dt>Phase</dt>
+                  <dd id="runPhase">—</dd>
+                </div>
+                <div>
+                  <dt>Operation</dt>
+                  <dd id="runOp">—</dd>
+                </div>
+                <div>
+                  <dt>Posts</dt>
+                  <dd id="runPosts">—</dd>
+                </div>
+                <div>
+                  <dt>Rate remaining</dt>
+                  <dd id="rate">—</dd>
+                </div>
+                <div>
+                  <dt>Run</dt>
+                  <dd id="rid">—</dd>
+                </div>
+              </dl>
+              <div class="triple">
+                <button id="pause">Pause</button><button id="resume">Resume</button
+                ><button class="danger" id="stop">Stop</button>
+              </div>
+              <div class="archiveMap" id="archiveMap" aria-label="Where the run is now">
+                <div data-node="x">X</div>
+                <i>›</i>
+                <div data-node="graphql">GraphQL</div>
+                <i>›</i>
+                <div data-node="normalize">Normalize</div>
+                <i>›</i>
+                <div data-node="library">Library</div>
+                <i>›</i>
+                <div data-node="media">Media</div>
+                <i>›</i>
+                <div data-node="disk">Disk</div>
+              </div>
+              <span id="pipelineState" class="savebadge">IDLE</span>
+            </section>
+          </div>
+          <section class="panel">
+            <div class="panelhead">
+              <h3>Profile collections</h3>
+              <button id="saveCollection">Save handles</button>
+            </div>
+            <label class="field"
+              ><span>Handles, one per line</span
+              ><textarea id="collectionHandles" rows="4" placeholder="artist1&#10;artist2&#10;artist3"></textarea>
+            </label>
+            <div class="row"><button id="archiveCollection">Archive collection</button></div>
+          </section>
+          <details class="panel disclose">
+            <summary>Live log <span id="debugState" class="savebadge">IDLE</span></summary>
+            <div id="debugLog" class="debuglog"><div>Waiting for a run…</div></div>
+          </details>
+        </section>
+        <section class="page" id="page-library">
+          <div class="lib-main">
+            <header class="lib-toolbar libraryCommand">
+              <div class="searchWrap">
+                <svg
+                  class="searchIcon"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.65"
+                  stroke-linecap="round"
+                >
+                  <circle cx="10.5" cy="10.5" r="6.5" />
+                  <path d="m16 16 5 5" />
+                </svg>
+                <input
+                  id="search"
+                  type="search"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="Search your archive"
+                />
+                <button id="clearSearch" type="button" class="quiet">×</button>
+                <details class="menu search-help">
+                  <summary aria-label="Search syntax help" title="Search syntax">?</summary>
+                  <div class="menu-pop booruHelp"></div>
+                </details>
+              </div>
+              <div class="lib-controls">
+                <div class="seg" id="libraryLayout" role="radiogroup" aria-label="Layout">
+                  <button type="button" role="radio" data-layout="timeline" title="Timeline: read posts in a column">
+                    <span class="sr">Timeline</span>
+                  </button>
+                  <button type="button" role="radio" data-layout="cards" title="Cards">
+                    <span class="sr">Cards</span>
+                  </button>
+                  <button type="button" role="radio" data-layout="gallery" title="Grid: even tiles">
+                    <span class="sr">Grid</span>
+                  </button>
+                  <button type="button" role="radio" data-layout="masonry" title="Wall: natural proportions">
+                    <span class="sr">Wall</span>
+                  </button>
+                  <button type="button" role="radio" data-layout="compact" title="List: one row per post">
+                    <span class="sr">List</span>
+                  </button>
+                </div>
+                <label class="tile-size" title="Tile size"
+                  ><span class="sr">Tile size</span
+                  ><input id="libraryTile" type="range" min="150" max="440" step="10" value="260"
+                /></label>
+                <select id="sort" aria-label="Sort">
+                  <option value="new">Newest archived</option>
+                  <option value="old">Oldest archived</option>
+                  <option value="likes">Most liked</option>
+                  <option value="views">Most viewed</option>
+                  <option value="bookmarks">Most bookmarked</option>
+                  <option value="reposts">Most reposted</option>
+                  <option value="replies">Most replied</option>
+                  <option value="media">Most media</option>
+                  <option value="author">Author A–Z</option>
+                </select>
+                <select id="libraryView" class="sr" tabindex="-1" aria-hidden="true">
+                  <option value="timeline">Timeline</option>
+                  <option value="cards">Cards</option>
+                  <option value="gallery">Grid</option>
+                  <option value="masonry">Wall</option>
+                  <option value="compact">List</option>
+                </select>
+                <details class="menu" id="libraryTools">
+                  <summary aria-label="Library actions" title="Library actions">
+                    <span class="sr">Library actions</span>
+                  </summary>
+                  <div class="menu-pop" id="libraryToolsBody">
+                    <button id="load" type="button">Reload library</button>
+                    <button id="browseTrash" type="button">Browse Trash</button>
+                    <button id="recoverNoteDrafts" type="button">Recover note drafts</button>
+                    <button id="shuffleLibrary" type="button">Shuffle</button>
+                    <button id="surpriseMe" type="button">Open a random post</button>
+                    <hr />
+                    <button id="integrityQuick" type="button">Scan integrity</button>
+                    <button id="manifestQuick" type="button">Create manifest</button>
+                    <button id="csv" type="button">Export CSV</button>
+                    <button id="remoteQuick" type="button">Browse on phone</button>
+                    <hr />
+                    <button id="clearLibrary" type="button" class="danger">Clear library…</button>
+                  </div>
+                </details>
+              </div>
+            </header>
+            <div class="lib-filters">
+              <div class="filterchips" id="libraryChips" role="group" aria-label="Quick filters">
+                <button class="active" data-filter="">All</button>
+                <button data-filter="has:image">Images</button>
+                <button data-filter="has:gif">GIFs</button>
+                <button data-filter="has:video">Videos</button>
+                <button data-filter="rating:sensitive">Sensitive</button>
+              </div>
+              <div class="libraryStatusBar">
+                <div><b id="libShown">0</b><span>shown</span></div>
+                <div><b id="libMediaCount">0</b><span>media</span></div>
+                <div><b id="libLocalCount">0</b><span>on disk</span></div>
+                <div class="libraryMiniActions"></div>
+              </div>
+            </div>
+            <div class="list" id="list">
+              <div class="empty">Load the local library to browse it.</div>
+            </div>
+          </div>
+        </section>
+        <section class="page" id="page-media">
+          <dl class="vault-stats queue-stats">
+            <div>
+              <dt>Queued</dt>
+              <dd id="qQueued">0</dd>
+            </div>
+            <div>
+              <dt>Active</dt>
+              <dd id="qActive">0</dd>
+            </div>
+            <div>
+              <dt>Complete</dt>
+              <dd id="qDone">0</dd>
+            </div>
+            <div>
+              <dt>Failed</dt>
+              <dd id="qFailed">0</dd>
+            </div>
+          </dl>
+          <section class="panel">
+            <div class="panelhead">
+              <div>
+                <h3 id="qTitle">Idle</h3>
+              </div>
+              <div class="row">
+                <button id="retryFailed">Retry failed</button>
+                <button id="rebuildTargets">Rebuild folders</button>
+                <button id="clearCompleted">Clear completed</button>
+                <button id="clearFailed">Clear failed</button>
+                <button id="cancelQueued">Cancel queued</button>
+                <button id="openDownloads">Open downloads</button>
+              </div>
+            </div>
+            <div class="mega">
+              <strong id="qPercent">0%</strong>
+              <span id="qSpeed">0 B/s</span>
+              <span id="qEta">ETA —</span>
+            </div>
+            <div class="bigprogress">
+              <i id="qBar"> </i>
+            </div>
+            <div class="qmeta">
+              <span id="qBytes">0 B / —</span>
+              <span id="qCount">0 files</span>
+            </div>
+            <div id="downloadHistory" class="downloadhistory">
+              <div class="empty">No downloads yet.</div>
+            </div>
+          </section>
+          <details class="panel disclose" id="downloadDecisions">
+            <summary>Download decisions <span class="savebadge" id="decisionCount"></span></summary>
+            <p>
+              Every request to download a file, what XVault decided and why. Addresses are shown without signatures.
+              Useful when something downloaded twice or not at all.
+            </p>
+            <div class="row">
+              <button id="decisionsRefresh" type="button">Refresh</button
+              ><button id="decisionsCopy" type="button">Copy as text</button>
+            </div>
+            <div class="decision-controls">
+              <input
+                id="decisionSearch"
+                type="search"
+                aria-label="Search download decisions"
+                placeholder="Post, file or reason"
+              /><select id="decisionOutcome" aria-label="Decision outcome">
+                <option value="all">All decisions</option>
+                <option value="queued">Queued</option>
+                <option value="skipped">Skipped</option>
+                <option value="filtered">Filtered</option>
+                <option value="blocked">Blocked</option>
+                <option value="started">Browser checks</option>
+              </select>
+            </div>
+            <p id="decisionState" class="settingHint" role="status" aria-live="polite"></p>
+            <p id="decisionQueueState" class="settingHint" role="status" aria-live="polite"></p>
+            <div id="decisionList" class="decision-list" role="log" aria-live="off">
+              <div class="empty">Open this panel to load recent decisions.</div>
+            </div>
+          </details>
+        </section>
+        <section class="page" id="page-health">
+          <div class="grid">
+            <section class="panel">
+              <div class="panelhead">
+                <div>
+                  <small>ARCHIVE HEALTH CENTER</small>
+                  <h3>Diagnostics</h3>
+                </div>
+                <button class="primary" id="healthRun">Run checks</button>
+              </div>
+              <div id="healthList" class="healthlist">
+                <div class="empty">Run a health check.</div>
+              </div>
+            </section>
+            <section class="panel">
+              <small>REPAIR</small>
+              <h3>One-click tools</h3>
+              <div class="repairgrid">
+                <button id="healthPrimeBookmarks">Re-prime Bookmarks</button>
+                <button id="healthPrimeLikes">Re-prime Likes</button>
+                <button id="healthRetry">Retry failed media</button>
+                <button id="healthRepairAll">Repair all downloads</button>
+                <button id="healthTestCrawler">Test crawler</button>
+                <button id="healthTestDownload">Test download</button>
+                <button id="healthRefresh">Refresh operation map</button>
+              </div>
+            </section>
+          </div>
+        </section>
+        <section class="page" id="page-sessions">
+          <section class="panel">
+            <div class="panelhead">
+              <div>
+                <small>ARCHIVE SESSIONS</small>
+                <h3>Every run, explained</h3>
+              </div>
+              <button id="sessionsRefresh">Refresh</button>
+            </div>
+            <div id="sessionList" class="sessionCards large"></div>
+          </section>
+        </section>
+        <section class="page page-narrow" id="page-studio">
+          <section class="panel">
+            <h3>Work with one post</h3>
+            <p>
+              Paste a link to a post on X to archive it, capture the visible thread, or open it through another viewer.
+            </p>
+            <label class="field"
+              ><span>Post link</span><input id="toolPostUrl" placeholder="https://x.com/user/status/…"
+            /></label>
+            <div class="actionGrid">
+              <button id="toolArchivePost" class="primary">Archive post</button>
+              <button id="toolArchiveThread">Archive visible thread</button>
+              <button id="toolQr">Show QR code</button>
+              <button id="toolOpenOriginal">Open on X</button>
+              <button id="toolOpenFixup">Open in FixupX</button>
+              <button id="toolOpenFx">Open in FxTwitter</button>
+            </div>
+            <div id="qrBox" class="qrBox"></div>
+          </section>
+          <section class="panel">
+            <h3>Looking for something else?</h3>
+            <p>
+              Media actions such as repair, copy image and original media live in the Library inspector. Animation
+              conversion and download rules are in Settings.
+            </p>
+            <div class="row">
+              <button data-goto="library">Open library</button><button data-goto="settings">Open settings</button
+              ><button data-goto="health">Repair center</button>
+            </div>
+          </section>
+        </section>
+        <section class="page" id="page-integrity">
+          <div class="grid">
+            <section class="panel">
+              <div class="panelhead">
+                <div>
+                  <small>ARCHIVE INTEGRITY</small>
+                  <h3>Library ↔ local files</h3>
+                </div>
+                <button class="primary" id="integrityRun">Run scan</button>
+              </div>
+              <div class="integrityStats" id="integrityStats">
+                <div>
+                  <strong>—</strong>
+                  <span>Missing</span>
+                </div>
+                <div>
+                  <strong>—</strong>
+                  <span>Zero-byte</span>
+                </div>
+                <div>
+                  <strong>—</strong>
+                  <span>Wrong format</span>
+                </div>
+                <div>
+                  <strong>—</strong>
+                  <span>Orphans</span>
+                </div>
+                <div>
+                  <strong>—</strong>
+                  <span>Duplicates</span>
+                </div>
+              </div>
+              <div id="integrityList" class="debuglog"></div>
+            </section>
+            <section class="panel">
+              <small>SNAPSHOTS & MANIFESTS</small>
+              <h3>Portable metadata</h3>
+              <p>
+                Make an open, resumable recovery file with post history and download manifests. Media files stay in
+                their existing folders.
+              </p>
+              <div class="actionGrid">
+                <button class="primary" id="recoveryExport" type="button">Create recovery file</button>
+                <button id="recoveryImport" type="button">Review recovery file…</button>
+                <button id="snapshotNow">Create snapshot</button>
+                <button id="manifestNow">Generate manifest</button>
+              </div>
+              <input id="recoveryFile" type="file" accept=".jsonl,.ndjson,application/x-ndjson" hidden />
+              <div id="recoveryStatus" class="xv-recovery-status" role="status" aria-live="polite"></div>
+              <button id="recoveryConflictExport" type="button" hidden>Export conflict evidence</button>
+              <button id="recoveryAssetExport" type="button" hidden>Export recovered file references</button>
+              <div id="snapshotList" class="debuglog"></div>
+            </section>
+          </div>
+        </section>
+        <section class="page" id="page-activity">
+          <section class="panel">
+            <div class="panelhead">
+              <div>
+                <small>RECENT ACTIONS</small>
+                <h3>What XVault has been doing</h3>
+              </div>
+              <button id="activityRefresh">Refresh</button>
+            </div>
+            <div id="activityList" class="activitylist"></div>
+          </section>
+        </section>
+        <section class="page" id="page-settings">
+          <div class="settings-shell">
+            <nav class="settings-nav" aria-label="Settings sections">
+              <label class="settings-search"
+                ><span class="sr">Search settings</span
+                ><input id="settingsSearch" type="search" placeholder="Search settings" autocomplete="off"
+              /></label>
+              <button
+                id="settingsChanged"
+                class="settings-changed"
+                type="button"
+                aria-pressed="false"
+                hidden
+                title="Show only settings that differ from the defaults"
+              >
+                Changed from default <b id="settingsChangedCount">0</b>
+              </button>
+              <div class="settings-links" id="settingsLinks">
+                <button type="button" data-section-link="appearance" aria-current="false">Appearance</button
+                ><button type="button" data-section-link="library" aria-current="false">Library</button
+                ><button type="button" data-section-link="capture" aria-current="false">Capture</button
+                ><button type="button" data-section-link="downloads" aria-current="false">Downloads</button
+                ><button type="button" data-section-link="x" aria-current="false">X.com</button
+                ><button type="button" data-section-link="phone" aria-current="false">Phone</button
+                ><button type="button" data-section-link="privacy" aria-current="false">Privacy and data</button>
+              </div>
+              <div class="settings-foot">
+                <div class="seg" role="group" aria-label="Detail level">
+                  <button id="basicMode" type="button">Essentials</button
+                  ><button id="advancedMode" type="button">Everything</button>
+                </div>
+                <span id="saveState" class="savebadge" role="status"></span>
+              </div>
+            </nav>
+            <div class="settings-content" id="settingsContent">
+              <section class="settings-section" id="set-appearance" data-section="appearance">
+                <header>
+                  <h2>Appearance</h2>
+                  <p>Theme, density and how much the interface moves.</p>
+                </header>
+                <div class="groups">
+                  <section class="settinggroup" id="g-theme">
+                    <h3>Theme</h3>
+                    <div id="themeGallery" class="theme-gallery" role="radiogroup" aria-label="Theme"></div>
+                    <div class="accent-row" id="accentRow">
+                      <span class="accent-label">Accent</span>
+                      <div
+                        id="accentSwatches"
+                        class="accent-swatches"
+                        role="radiogroup"
+                        aria-label="Accent color"
+                      ></div>
+                      <label class="accent-custom" title="Pick any color"
+                        ><span class="sr">Custom accent color</span
+                        ><input type="color" id="accentCustom" value="#d6a84e" /></label
+                      ><button type="button" id="accentReset" class="quiet">Use theme accent</button>
+                    </div>
+                    <div class="formgrid two">
+                      <label class="field"
+                        ><span>Interface density</span
+                        ><select id="density" data-setting="uiDensity">
+                          <option value="ultra">Ultra compact</option>
+                          <option value="compact">Compact</option>
+                          <option value="comfortable">Comfortable</option>
+                          <option value="spacious">Spacious</option>
+                          <option value="cinema">Large</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Interface zoom</span
+                        ><input type="range" min="0.6" max="1.8" step="0.05" data-setting="dashboardScale"
+                      /></label>
+                    </div>
+                  </section>
+                  <section class="settinggroup" id="g-layout-type">
+                    <h3>Layout and type</h3>
+                    <p class="settingHint">
+                      Sizes and fonts apply instantly. Reset puts every choice here back to the default.
+                    </p>
+                    <div class="formgrid two">
+                      <label class="field"
+                        ><span>Navigation width</span
+                        ><select data-setting="railWidth">
+                          <option value="narrow">Narrow</option>
+                          <option value="normal">Standard</option>
+                          <option value="wide">Wide</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Library filters column</span
+                        ><select data-setting="facetWidth">
+                          <option value="narrow">Narrow</option>
+                          <option value="normal">Standard</option>
+                          <option value="wide">Wide</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Inspector width</span
+                        ><select data-setting="inspectorWidth">
+                          <option value="narrow">Narrow</option>
+                          <option value="normal">Standard</option>
+                          <option value="wide">Wide</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Open XVault on</span
+                        ><select data-setting="startPage">
+                          <option value="last">The page I was on</option>
+                          <option value="library">Library</option>
+                          <option value="home">Capture overview</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Interface font</span
+                        ><select data-setting="uiFont">
+                          <option value="hanken">Hanken Grotesk</option>
+                          <option value="system">System font</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Post text font</span
+                        ><select data-setting="readFont">
+                          <option value="newsreader">Newsreader (serif)</option>
+                          <option value="sans">Same as interface</option>
+                          <option value="georgia">Georgia</option>
+                        </select></label
+                      >
+                    </div>
+                    <div class="row"><button id="resetLayoutType" type="button">Reset layout and type</button></div>
+                  </section>
+                  <section class="settinggroup" id="g-motion-slot">
+                    <h3>Motion</h3>
+                    <p class="settingHint">The system reduced-motion preference always wins.</p>
+                    <div id="motionSlot"></div>
+                  </section>
+                  <section class="settinggroup advancedOnly" id="g-sound">
+                    <h3>Sound</h3>
+                    <div class="toggles">
+                      <label
+                        ><span
+                          ><b>Soft click sounds</b
+                          ><small>A quiet tick generated on your computer. No audio files.</small></span
+                        ><input type="checkbox" data-setting="dashboardSounds"
+                      /></label>
+                    </div>
+                    <div class="formgrid two">
+                      <label class="field"
+                        ><span>Volume</span><input type="range" min="0" max="1" step="0.01" data-setting="soundVolume"
+                      /></label>
+                    </div>
+                  </section>
+                </div>
+              </section>
+              <section class="settings-section" id="set-library" data-section="library">
+                <header>
+                  <h2>Library</h2>
+                  <p>How posts and media appear while you browse your archive.</p>
+                </header>
+                <div class="groups">
+                  <section class="settinggroup" id="g-inbox">
+                    <h3>Inbox</h3>
+                    <p class="settingHint">
+                      New posts wait in the Inbox until you review them in Quick Look (press R) or mark them reviewed.
+                      Posts archived before this feature were treated as reviewed.
+                    </p>
+                    <div class="row">
+                      <button id="inboxReviewed">Mark everything reviewed</button
+                      ><button id="inboxAll">Put unreviewed posts back in Inbox</button>
+                    </div>
+                  </section>
+                  <section class="settinggroup" id="g-layout">
+                    <h3>Layout and detail</h3>
+                    <div class="formgrid two">
+                      <label class="field"
+                        ><span>Posts per page</span
+                        ><input type="number" min="50" max="1500" data-setting="libraryPageSize"
+                      /></label>
+                    </div>
+                    <div class="toggles">
+                      <label
+                        ><span><b>Show display names</b></span
+                        ><input type="checkbox" data-setting="libraryShowNames"
+                      /></label>
+                      <label
+                        ><span><b>Show avatars</b></span
+                        ><input type="checkbox" data-setting="libraryShowAvatars"
+                      /></label>
+                      <label
+                        ><span><b>Show engagement counts</b></span
+                        ><input type="checkbox" data-setting="libraryShowMetrics"
+                      /></label>
+                    </div>
+                  </section>
+                  <section class="settinggroup" id="g-video">
+                    <h3>Video and animation</h3>
+                    <div class="formgrid two">
+                      <label class="field"
+                        ><span>Animation display</span
+                        ><select data-setting="libraryAnimationMode">
+                          <option value="native">Native GIF or WebP (recommended)</option>
+                          <option value="gif">Converted GIF</option>
+                          <option value="webp">Converted animated WebP</option>
+                          <option value="mp4">Original MP4 loop</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Video preload</span
+                        ><select data-setting="libraryPreloadMedia">
+                          <option value="none">None</option>
+                          <option value="metadata">Metadata</option>
+                          <option value="auto">Automatic</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Default volume</span
+                        ><input type="number" min="0" max="1" step="0.05" data-setting="libraryVolume"
+                      /></label>
+                    </div>
+                    <div class="toggles">
+                      <label
+                        ><span><b>Play GIFs and animations automatically</b></span
+                        ><input type="checkbox" data-setting="libraryAutoplayAnimated"
+                      /></label>
+                      <label
+                        ><span><b>Show video controls</b></span
+                        ><input type="checkbox" data-setting="libraryVideoControls"
+                      /></label>
+                      <label
+                        ><span><b>Mute previews</b></span
+                        ><input type="checkbox" data-setting="libraryVideoMuted"
+                      /></label>
+                      <label
+                        ><span
+                          ><b>One volume for every video</b
+                          ><small>Changing one player updates all of them.</small></span
+                        ><input type="checkbox" data-setting="rememberLibraryVolume"
+                      /></label>
+                      <label
+                        ><span><b>Restart previews when the pointer leaves</b></span
+                        ><input type="checkbox" data-setting="libraryVideoHoverReset"
+                      /></label>
+                    </div>
+                  </section>
+                  <section class="settinggroup advancedOnly" id="g-viewer">
+                    <h3>Image viewer</h3>
+                    <div class="formgrid two">
+                      <label class="field"
+                        ><span>Maximum zoom (%)</span
+                        ><input type="number" min="100" max="1200" step="25" data-setting="libraryZoomMax"
+                      /></label>
+                      <label class="field"
+                        ><span>Zoom step (%)</span
+                        ><input type="number" min="5" max="100" step="5" data-setting="libraryZoomStep"
+                      /></label>
+                      <label class="field"
+                        ><span>Click-to-zoom (%)</span
+                        ><input type="number" min="100" max="500" step="25" data-setting="libraryClickZoom"
+                      /></label>
+                    </div>
+                  </section>
+                </div>
+              </section>
+              <section class="settings-section" id="set-capture" data-section="capture">
+                <header>
+                  <h2>Capture</h2>
+                  <p>How XVault reads X while it archives.</p>
+                </header>
+                <div class="groups">
+                  <section class="settinggroup advancedOnly" id="g-crawler">
+                    <h3>Resilience</h3>
+                    <p class="settingHint">Pacing and retries for archive runs. Balanced suits most accounts.</p>
+                    <div class="seg presetrow" role="group" aria-label="Crawler preset">
+                      <button data-preset="safe">Safe</button><button data-preset="balanced">Balanced</button
+                      ><button data-preset="fast">Fast</button>
+                    </div>
+                    <div class="formgrid two">
+                      <label class="field">
+                        <span>Direct delay</span>
+                        <input type="number" data-setting="directPageDelay" />
+                      </label>
+                      <label class="field">
+                        <span>Jitter</span>
+                        <input type="number" data-setting="directPageJitter" />
+                      </label>
+                      <label class="field">
+                        <span>First-page timeout</span>
+                        <input type="number" data-setting="firstPageTimeout" />
+                      </label>
+                      <label class="field">
+                        <span>Page size</span>
+                        <input type="number" data-setting="pageSize" />
+                      </label>
+                      <label class="field">
+                        <span>Max pages (0 unlimited)</span>
+                        <input type="number" data-setting="maxPages" />
+                      </label>
+                      <label class="field">
+                        <span>Scroll delay</span>
+                        <input type="number" data-setting="scrollDelay" />
+                      </label>
+                      <label class="field">
+                        <span>Idle rounds</span>
+                        <input type="number" data-setting="scrollIdleRounds" />
+                      </label>
+                      <label class="field">
+                        <span>Verification passes</span>
+                        <input type="number" data-setting="verificationPasses" />
+                      </label>
+                    </div>
+                    <div class="toggles">
+                      <label>
+                        <span>
+                          <b>Smart auto-fallback</b>
+                        </span>
+                        <input type="checkbox" data-setting="smartFallback" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Auto-prime</b>
+                        </span>
+                        <input type="checkbox" data-setting="autoPrimeHistory" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Checkpoint resume</b>
+                        </span>
+                        <input type="checkbox" data-setting="checkpointResume" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Incremental sync</b>
+                        </span>
+                        <input type="checkbox" data-setting="incrementalSync" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Verification pass</b>
+                        </span>
+                        <input type="checkbox" data-setting="completionVerification" />
+                      </label>
+                    </div>
+                  </section>
+                  <section class="settinggroup advancedOnly" id="g-profile">
+                    <h3>Complete profiles</h3>
+                    <div class="formgrid two">
+                      <label class="field">
+                        <span>Profile archive mode</span>
+                        <select data-setting="profileArchiveMode">
+                          <option value="complete">Posts + replies + retweets + quotes</option>
+                          <option value="posts">Posts only</option>
+                        </select>
+                      </label>
+                    </div>
+                    <p>
+                      Complete mode auto-primes the profile’s replies timeline. Media authored by the selected profile
+                      goes to <b>Media</b>; nested retweets, quotes and replied-to posts go to <b>Retweets</b>.
+                    </p>
+                  </section>
+                </div>
+              </section>
+              <section class="settings-section" id="set-downloads" data-section="downloads">
+                <header>
+                  <h2>Downloads</h2>
+                  <p>What gets saved, where it goes, and how failures recover.</p>
+                </header>
+                <div class="groups">
+                  <section class="settinggroup" id="g-rules">
+                    <h3>What to download</h3>
+                    <div class="toggles">
+                      <label>
+                        <span>
+                          <b>Full Mirror by default</b>
+                          <small>Archive jobs also download media.</small>
+                        </span>
+                        <input type="checkbox" data-setting="fullMirrorMode" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Force profile subfolder</b>
+                          <small
+                            >Profile archives always go under that profile's handle, even when author sorting is
+                            off.</small
+                          >
+                        </span>
+                        <input type="checkbox" data-setting="forceProfileSubfolder" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Detect animated WebP</b>
+                          <small>Inspect real bytes and place animated WebP in GIFs.</small>
+                        </span>
+                        <input type="checkbox" data-setting="detectAnimatedWebP" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Hash dedupe small media</b>
+                          <small>Optional SHA-256 duplicate check (extra bandwidth).</small>
+                        </span>
+                        <input type="checkbox" data-setting="hashDedupe" />
+                      </label>
+                    </div>
+                    <div class="formgrid two">
+                      <label class="field">
+                        <span>Images</span>
+                        <select data-setting="imageRule">
+                          <option value="always">Always</option>
+                          <option value="never">Never</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>GIFs / animated WebP</span>
+                        <select data-setting="gifRule">
+                          <option value="always">Always</option>
+                          <option value="never">Never</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>Videos</span>
+                        <select data-setting="videoRule">
+                          <option value="always">Always</option>
+                          <option value="never">Never</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>Max video MB (0 = unlimited)</span>
+                        <input type="number" data-setting="maxVideoMB" />
+                      </label>
+                      <label class="field">
+                        <span>Min image width</span>
+                        <input type="number" data-setting="minImageWidth" />
+                      </label>
+                      <label class="field">
+                        <span>Min image height</span>
+                        <input type="number" data-setting="minImageHeight" />
+                      </label>
+                    </div>
+                  </section>
+                  <section class="settinggroup" id="g-folders">
+                    <h3>Folders and file names</h3>
+                    <div id="folderPreview" class="pathpreview"></div>
+                    <div class="formgrid two">
+                      <label class="field">
+                        <span>Root</span>
+                        <input data-setting="mediaFolder" />
+                      </label>
+                      <label class="field">
+                        <span>Images</span>
+                        <input data-setting="imageFolder" />
+                      </label>
+                      <label class="field">
+                        <span>Videos</span>
+                        <input data-setting="videoFolder" />
+                      </label>
+                      <label class="field">
+                        <span>GIFs</span>
+                        <input data-setting="gifFolder" />
+                      </label>
+                      <label class="field">
+                        <span>Other</span>
+                        <input data-setting="otherFolder" />
+                      </label>
+                      <label class="field">
+                        <span>Filename</span>
+                        <select data-setting="fileNaming">
+                          <option value="random">Random</option>
+                          <option value="author-id-index">author-post-index</option>
+                          <option value="author-id">author-post</option>
+                          <option value="id">post ID</option>
+                          <option value="custom">Custom template</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>Random length</span>
+                        <input type="number" data-setting="randomNameLength" />
+                      </label>
+                      <label class="field">
+                        <span>Custom template</span>
+                        <input data-setting="customFilenameTemplate" />
+                      </label>
+                    </div>
+                    <div id="filenamePreview" class="pathpreview"></div>
+                    <div class="toggles">
+                      <label>
+                        <span>
+                          <b>Sort by media type</b>
+                          <small>Images / Videos / GIFs / Other.</small>
+                        </span>
+                        <input type="checkbox" data-setting="organizeByType" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Then by author</b>
+                          <small>Optional author subfolder.</small>
+                        </span>
+                        <input type="checkbox" data-setting="organizeByAuthor" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Then by month</b>
+                          <small>YYYY-MM.</small>
+                        </span>
+                        <input type="checkbox" data-setting="organizeByDate" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Then by archive source</b>
+                          <small>Bookmarks / Likes / Timeline.</small>
+                        </span>
+                        <input type="checkbox" data-setting="organizeByArchiveSource" />
+                      </label>
+                    </div>
+                  </section>
+                  <section class="settinggroup" id="g-queue">
+                    <h3>Queue behavior</h3>
+                    <div class="formgrid two">
+                      <label class="field">
+                        <span>Concurrent downloads</span>
+                        <input type="number" data-setting="maxConcurrentDownloads" />
+                      </label>
+                      <label class="field">
+                        <span>Retries</span>
+                        <input type="number" data-setting="downloadRetries" />
+                      </label>
+                      <label class="field">
+                        <span>Retry delay</span>
+                        <input type="number" data-setting="retryDelay" />
+                      </label>
+                      <label class="field">
+                        <span>Hash max MB</span>
+                        <input type="number" data-setting="hashDedupeMaxMB" />
+                      </label>
+                      <label class="field"
+                        ><span>When another post contains the same file</span
+                        ><select data-setting="crossPostDuplicates">
+                          <option value="keep">Keep a copy with each post</option>
+                          <option value="skip">Save it once (skip the repeat)</option>
+                        </select></label
+                      >
+                    </div>
+                    <div class="toggles">
+                      <label
+                        ><span
+                          ><b>Skip files you already have</b
+                          ><small
+                            >XVault recognizes the same image or video however X spells its address, so a file is saved
+                            once per post.</small
+                          ></span
+                        ><input type="checkbox" data-setting="skipDuplicateDownloads"
+                      /></label>
+                      <label>
+                        <span>
+                          <b>Repair queue after restart</b>
+                        </span>
+                        <input type="checkbox" data-setting="autoRepairQueue" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Prevent sleep during jobs</b>
+                        </span>
+                        <input type="checkbox" data-setting="preventSleepDuringTasks" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Completion notifications</b>
+                        </span>
+                        <input type="checkbox" data-setting="completionNotifications" />
+                      </label>
+                    </div>
+                    <div class="row"><button id="testDownload">Run a test download</button></div>
+                  </section>
+                  <section class="settinggroup advancedOnly" id="g-conversion">
+                    <h3>Animation conversion</h3>
+                    <p class="settingHint">
+                      X serves most GIFs as MP4 loops. With the FFmpeg Helper running, XVault keeps the original and
+                      creates a real GIF or WebP copy.
+                    </p>
+                    <div class="formgrid two">
+                      <label class="field">
+                        <span>Original animation subfolder</span>
+                        <input data-setting="animationOriginalFolder" />
+                      </label>
+                      <label class="field">
+                        <span>GIF output subfolder</span>
+                        <input data-setting="animationGifFolder" />
+                      </label>
+                      <label class="field">
+                        <span>Animated WebP output subfolder</span>
+                        <input data-setting="animatedWebPFolder" />
+                      </label>
+                      <label class="field">
+                        <span>WebP quality</span>
+                        <input type="number" min="1" max="100" data-setting="conversionWebPQuality" />
+                      </label>
+                      <label class="field">
+                        <span>Helper localhost port</span>
+                        <input type="number" min="1024" max="65535" data-setting="helperPort" />
+                      </label>
+                      <label class="field">
+                        <span>Conversion FPS</span>
+                        <input type="number" min="5" max="60" data-setting="conversionFps" />
+                      </label>
+                      <label class="field">
+                        <span>Conversion max width</span>
+                        <input type="number" min="320" max="4096" data-setting="conversionMaxWidth" />
+                      </label>
+                    </div>
+                    <div class="toggles">
+                      <label class="recommended">
+                        <span>
+                          <b>Convert X animation MP4</b>
+                          <small>Runs through the included FFmpeg helper.</small>
+                        </span>
+                        <input type="checkbox" data-setting="convertAnimatedMp4" />
+                      </label>
+                      <label class="recommended">
+                        <span>
+                          <b>Create real GIF copy</b>
+                        </span>
+                        <input type="checkbox" data-setting="convertAnimationGif" />
+                      </label>
+                      <label class="recommended">
+                        <span>
+                          <b>Create animated WebP copy</b>
+                        </span>
+                        <input type="checkbox" data-setting="convertAnimationWebP" />
+                      </label>
+                      <label class="recommended">
+                        <span>
+                          <b>Keep original MP4 too</b>
+                        </span>
+                        <input type="checkbox" data-setting="keepConversionSource" />
+                      </label>
+                      <label class="recommended">
+                        <span>
+                          <b>Use Helper bridge for previews</b>
+                          <small>Avoids fragile file:// previews and updates converted GIF/WebP reliably.</small>
+                        </span>
+                        <input type="checkbox" data-setting="helperPreferHttpPreview" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Prefer local converted GIF previews</b>
+                          <small>Also enable “Allow access to file URLs” for XVault in Chrome.</small>
+                        </span>
+                        <input type="checkbox" data-setting="preferLocalConvertedAnimationPreviews" />
+                      </label>
+                    </div>
+                  </section>
+                </div>
+              </section>
+              <section class="settings-section" id="set-x" data-section="x">
+                <header>
+                  <h2>X.com</h2>
+                  <p>What XVault adds to x.com itself.</p>
+                </header>
+                <div class="groups">
+                  <div id="xSlot"></div>
+                  <section class="settinggroup" id="g-floating">
+                    <h3>XV button</h3>
+                    <p class="settingHint">The floating shortcut on x.com.</p>
+                    <div class="formgrid two">
+                      <label class="field">
+                        <span>Scale</span>
+                        <input type="number" step=".05" data-setting="cornerScale" />
+                      </label>
+                      <label class="field">
+                        <span>Opacity</span>
+                        <input type="number" step=".05" data-setting="cornerOpacity" />
+                      </label>
+                      <label class="field">
+                        <span>Mode</span>
+                        <select data-setting="floatingMode">
+                          <option value="orb">Orb</option>
+                          <option value="edge">Edge dock</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>Auto-hide delay</span>
+                        <input type="number" data-setting="floatingAutoHideDelay" />
+                      </label>
+                    </div>
+                    <div class="toggles">
+                      <label>
+                        <span>
+                          <b>Show XV</b>
+                        </span>
+                        <input type="checkbox" data-setting="showFloatingButton" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Draggable</b>
+                        </span>
+                        <input type="checkbox" data-setting="cornerDraggable" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Magnetic snap</b>
+                        </span>
+                        <input type="checkbox" data-setting="cornerSnap" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Hover mini panel</b>
+                        </span>
+                        <input type="checkbox" data-setting="floatingHoverPanel" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Auto-hide</b>
+                        </span>
+                        <input type="checkbox" data-setting="floatingAutoHide" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Legacy side dock</b>
+                        </span>
+                        <input type="checkbox" data-setting="showSideDock" />
+                      </label>
+                    </div>
+                  </section>
+                </div>
+              </section>
+              <section class="settings-section" id="set-phone" data-section="phone">
+                <header>
+                  <h2>Phone</h2>
+                  <p>Browse your library from a phone on the same Wi-Fi.</p>
+                </header>
+                <div class="groups">
+                  <section class="remote-panel settinggroup" id="remoteCompanion">
+                    <div class="remote-heading">
+                      <div>
+                        <h3>Your Library, on this Wi-Fi</h3>
+                        <p>Pair a phone to browse locally saved posts and stream media from this computer.</p>
+                      </div>
+                      <span id="remoteState" class="remote-state">OFF</span>
+                    </div>
+                    <div class="remote-toolbar">
+                      <label class="remote-port">
+                        <span>Port</span>
+                        <input
+                          id="remotePort"
+                          type="number"
+                          min="1024"
+                          max="65535"
+                          value="18765"
+                          data-setting="remotePort"
+                        />
+                      </label>
+                      <button id="remoteToggle" class="primary">Start pairing</button>
+                      <button id="remoteCheck" type="button">Check connection</button>
+                      <button id="remoteStop" hidden>Stop Remote</button>
+                    </div>
+                    <p id="remoteConnectionStatus" class="remote-stopped-note" role="status" aria-live="polite">
+                      The Companion runs in the background. Start pairing to create your phone QR; no setup window needs
+                      to stay open.
+                    </p>
+                    <div id="remoteSetupHint" class="remote-hint">
+                      <b>One-time setup</b>
+                      <ol class="remote-setup-steps">
+                        <li>
+                          Copy your extension ID, then open <code>FFmpeg_Helper</code> and run
+                          <code>setup_remote.bat</code>. Paste the ID when asked.
+                        </li>
+                        <li>
+                          Allow the Private-network firewall rule. On your trusted home Wi-Fi, set Windows Settings →
+                          Network &amp; Internet → Wi-Fi → your network → Network profile to <b>Private</b>.
+                        </li>
+                        <li>
+                          Return here and choose <b>Check connection</b>, then <b>Start pairing</b>. Keep your phone on
+                          the same non-guest Wi-Fi.
+                        </li>
+                      </ol>
+                      <span
+                        >Already installed? Check connection first. If it fails, run <code>check_remote.bat</code> for a
+                        read-only diagnosis.</span
+                      >
+                      <button id="remoteCopyExtension">Copy extension ID</button>
+                      <small id="remoteExtensionId"> </small>
+                    </div>
+                    <details class="remote-grants">
+                      <summary>Optional phone permissions</summary>
+                      <div class="remote-permissions">
+                        <label>
+                          <input type="checkbox" data-remote-permission="favorite.write" />
+                          <span>Change Favorites</span>
+                        </label>
+                        <label>
+                          <input type="checkbox" data-remote-permission="tags.write" />
+                          <span>Edit tags</span>
+                        </label>
+                        <label>
+                          <input type="checkbox" data-remote-permission="notes.write" />
+                          <span>Edit notes</span>
+                        </label>
+                        <label>
+                          <input type="checkbox" data-remote-permission="downloads.manage" />
+                          <span>Save archived media to PC</span>
+                        </label>
+                      </div>
+                    </details>
+                    <div id="remotePairStage" class="remote-pair-stage" hidden>
+                      <div id="remoteQr" class="remote-qr" aria-label="Phone pairing QR code"></div>
+                      <div class="remote-pair-copy">
+                        <small>SCAN TO PAIR</small>
+                        <b id="remotePairCode"> </b>
+                        <span id="remotePairExpiry"> </span>
+                        <label>Phone address<input id="remoteAddress" readonly /> </label>
+                        <button id="remoteCopyAddress">Copy address</button>
+                        <div class="remote-fingerprint">
+                          <b>Local HTTPS certificate</b>
+                          <code id="remoteFingerprint"> </code>
+                          <span
+                            >On the first visit, your phone may show a certificate warning. Check this SHA-256
+                            fingerprint in the browser’s certificate details before continuing.</span
+                          >
+                        </div>
+                      </div>
+                    </div>
+                    <div id="remotePending" class="remote-pending" aria-live="polite"></div>
+                    <div id="remoteDevices" class="remote-devices"></div>
+                    <p class="remote-privacy">
+                      Device permissions are checked by the Companion on every request. Phone access is paused when the
+                      Companion stops; paired credentials can be revoked here.
+                    </p>
+                  </section>
+                </div>
+              </section>
+              <section class="settings-section" id="set-privacy" data-section="privacy">
+                <header>
+                  <h2>Privacy and data</h2>
+                  <p>Local-first means these controls are about your own computer.</p>
+                </header>
+                <div class="groups">
+                  <section class="settinggroup" id="g-privacy">
+                    <h3>Safety</h3>
+                    <div class="toggles">
+                      <label>
+                        <span>
+                          <b>Confirm destructive clears</b>
+                        </span>
+                        <input type="checkbox" data-setting="confirmClearArchive" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Stale context notice</b>
+                        </span>
+                        <input type="checkbox" data-setting="showStaleContextNotice" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Remember dashboard page</b>
+                        </span>
+                        <input type="checkbox" data-setting="rememberLastDashboardPage" />
+                      </label>
+                      <label>
+                        <span>
+                          <b>Health check on startup</b>
+                        </span>
+                        <input type="checkbox" data-setting="healthCheckOnStartup" />
+                      </label>
+                    </div>
+                  </section>
+                  <section class="settinggroup" id="g-backup">
+                    <h3>Back up and reset</h3>
+                    <div class="row">
+                      <button id="exportSettings">Export settings</button>
+                      <button id="importSettings">Import settings</button>
+                      <input id="settingsFile" type="file" accept="application/json,.json" hidden />
+                      <button class="primary" id="recommendedAll">Apply recommended</button>
+                    </div>
+                    <div class="row resets">
+                      <span class="settingHint">Reset one area:</span><button id="resetFloat">XV button</button
+                      ><button id="resetCrawler">Crawler</button><button id="resetMedia">Media</button
+                      ><button id="restorePrevious">Restore previous</button
+                      ><button id="resetSettings" class="danger">Factory settings</button>
+                    </div>
+                  </section>
+                  <section class="settinggroup" id="g-danger">
+                    <h3>Local archive</h3>
+                    <div class="row"><button class="danger" id="clear">Clear library…</button></div>
+                    <p class="settingHint">
+                      Removes XVault’s local copy of your archive. It does not delete anything on X or any file you
+                      already downloaded.
+                    </p>
+                  </section>
+                </div>
+              </section>
+              <p class="settings-empty empty" id="settingsEmpty" hidden>No setting matches that search.</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div id="toast"></div>
+    <div id="lightbox" class="lightbox hidden">
+      <button id="lbClose" title="Close">×</button>
+      <button id="lbPrev" title="Previous post/media">‹</button>
+      <div class="lbStage">
+        <div id="lbContent" class="lbContent"></div>
+        <div class="zoomDock" id="zoomDock">
+          <button id="lbFit">Fit</button>
+          <button id="lbMinus">−</button>
+          <input id="lbZoom" type="range" min="25" max="1200" step="5" value="100" />
+          <button id="lbPlus">+</button>
+          <button id="lbActual">1:1</button>
+          <b id="lbZoomLabel">100%</b>
+        </div>
+      </div>
+      <button id="lbNext" title="Next post/media">›</button>
+      <aside id="lbMeta"></aside>
+    </div>
+    <aside id="detailsDrawer" class="detailsDrawer hidden">
+      <button id="drawerClose">×</button>
+      <div id="drawerBody"></div>
+    </aside>
+    <aside id="notificationCenter" class="notificationCenter hidden">
+      <header>
+        <b>Notifications</b>
+        <button id="notifClose">×</button>
+      </header>
+      <div id="notifList"></div>
+    </aside>
+    <dialog id="archiveRecoveryDialog" class="xv-recovery-dialog" aria-labelledby="archiveRecoveryTitle">
+      <header class="xv-recovery-head">
+        <div>
+          <small>PORTABLE ARCHIVE · JSON LINES</small>
+          <h2 id="archiveRecoveryTitle">Review recovery file</h2>
+        </div>
+        <button id="archiveRecoveryClose" type="button" aria-label="Close recovery dialog">×</button>
+      </header>
+      <p id="archiveRecoveryDescription" class="xv-recovery-copy">
+        The file is read in bounded batches. Existing records are never replaced.
+      </p>
+      <div class="xv-recovery-meter" aria-hidden="true"><i id="archiveRecoveryMeter"></i></div>
+      <p id="archiveRecoveryProgress" class="xv-recovery-progress" role="status" aria-live="polite">
+        Choose a recovery file to inspect it.
+      </p>
+      <dl id="archiveRecoveryCounts" class="xv-recovery-counts" hidden>
+        <div>
+          <dt>New records</dt>
+          <dd id="recoveryCountNew">0</dd>
+        </div>
+        <div>
+          <dt>Already present</dt>
+          <dd id="recoveryCountSame">0</dd>
+        </div>
+        <div>
+          <dt>Conflicts retained</dt>
+          <dd id="recoveryCountConflicts">0</dd>
+        </div>
+        <div>
+          <dt>File references</dt>
+          <dd id="recoveryCountAssets">0</dd>
+        </div>
+      </dl>
+      <p id="archiveRecoveryNotice" class="xv-recovery-notice" hidden>
+        No local data will be overwritten. If you continue, both versions of each conflict will be saved as evidence.
+      </p>
+      <details id="archiveRecoveryConflictSamples" class="xv-recovery-conflict-samples" hidden>
+        <summary>Inspect up to five conflicts</summary>
+        <ol id="archiveRecoveryConflictList"></ol>
+      </details>
+      <div class="xv-recovery-actions">
+        <button id="archiveRecoveryConflictExport" type="button" hidden>Export conflicts</button>
+        <button id="archiveRecoveryAssetsExport" type="button" hidden>Export file manifest</button>
+        <button id="archiveRecoveryCancel" type="button">Cancel</button>
+        <button class="primary" id="archiveRecoveryApply" type="button" disabled>Import missing records</button>
+      </div>
+    </dialog>
+    <div id="palette" class="palette hidden">
+      <div class="palettebox">
+        <input id="paletteInput" placeholder="Type a command…" />
+        <div id="paletteList"></div>
+      </div>
+    </div>
+    <div id="onboarding" class="onboarding hidden" role="dialog" aria-modal="true" aria-labelledby="onboardTitle">
+      <div>
+        <h2 id="onboardTitle">Welcome to XVault</h2>
+        <p>
+          Everything you archive stays on this computer. Balanced settings are already in place; two quick checks make
+          sure capturing and downloading work before you start.
+        </p>
+        <div class="steps">
+          <button id="onboardRecommended">Apply balanced settings</button>
+          <button id="onboardTest">Test the crawler</button>
+          <button id="onboardDone" class="primary">Start using XVault</button>
+        </div>
+      </div>
+    </div>
+    <script src="dashboard.js"></script>
+    <script src="command-match.js"></script>
+    <script src="command-center.js"></script>
+    <script src="remote-settings.js"></script>
+    <script type="module" src="archive-recovery-ui.mjs"></script>
+  </body>
 </html>
