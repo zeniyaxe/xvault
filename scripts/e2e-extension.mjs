@@ -13,6 +13,7 @@ const profile = join(tmpdir(), `xvault-e2e-${Date.now()}`);
 const context = await chromium.launchPersistentContext(profile, {
   headless: true,
   executablePath: process.env.CHROMIUM_PATH || undefined,
+  channel: process.env.CHROMIUM_PATH ? undefined : 'chromium', // full Chromium: headless-shell cannot load extensions
   args: [`--disable-extensions-except=${root}`, `--load-extension=${root}`, '--no-sandbox'],
 });
 const failures = [];

@@ -94,6 +94,4 @@ export default [
     languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: { ...globals.node } },
     rules,
   },
-  // Layered "wrap and replace" overrides of function declarations are an intentional pattern in background.js.
-  { files: ['background.js'], rules: { 'no-func-assign': 'off' } },
 ];

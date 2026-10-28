@@ -4898,7 +4898,7 @@ async function refreshExpiredUrl(row) {
     return null;
   }
 }
-async function failOrRetry(row, error, s) {
+async function failOrRetryCore(row, error, s) {
   if (['retry-wait', 'failed', 'cancelled'].includes(row.state)) return;
   active.delete(row.key);
   if (row.downloadId != null) {
@@ -4939,9 +4939,9 @@ async function failOrRetry(row, error, s) {
   }
   updateBadge();
 }
-const _failOrRetryReliability = failOrRetry;
-failOrRetry = async function (row, error, s) {
-  await _failOrRetryReliability(row, error, s);
+// Reliability layer: journals recovery/connection/verification events around the core implementation.
+async function failOrRetry(row, error, s) {
+  await failOrRetryCore(row, error, s);
   if (row && ['expired-url', 'missing', 'wrong-content'].includes(row.failureReason) && row.state === 'failed') {
     row.recoveryAction = 'open-source-post';
     row.sourcePostUrl = row.item?.sourcePostUrl || null;
@@ -4953,7 +4953,7 @@ failOrRetry = async function (row, error, s) {
     });
   }
   return row;
-};
+}
 async function downloadStatePage(state, afterKey = null, limit = 32) {
   const database = await db();
   try {
@@ -5423,7 +5423,7 @@ chrome.downloads.onChanged.addListener(d => {
     });
   downloadEventTails.set(id, tracked);
 });
-async function verifyCompletedDownload(downloadId) {
+async function verifyCompletedDownloadCore(downloadId) {
   const row = await readDownloadByBrowserId(downloadId).catch(() => null);
   if (!row || !['verifying', 'complete'].includes(row.state)) return { ok: false, reason: 'not-verifying' };
   let item;
@@ -5765,7 +5765,7 @@ async function helperPost(path, body) {
   return { ok: r.ok, status: r.status, ...data };
 }
 
-async function helperStatus() {
+async function helperStatusCore() {
   try {
     const r = await helperFetch('/status');
     if (!r.ok) throw Error(`HTTP ${r.status}`);
@@ -5873,15 +5873,15 @@ async function conversionStatus(key = '') {
     return { ok: false, error: String(error) };
   }
 }
-const _helperStatusReliability = helperStatus;
-helperStatus = async function () {
-  const out = await _helperStatusReliability();
+// Reliability layer: journals recovery/connection/verification events around the core implementation.
+async function helperStatus() {
+  const out = await helperStatusCore();
   const connected = !!out.connected;
   if (helperConnectionState !== null && helperConnectionState !== connected)
     await action('helper', connected ? 'Helper bridge reconnected' : 'Helper bridge disconnected', { connected });
   helperConnectionState = connected;
   return out;
-};
+}
 async function repairDownloads() {
   let afterKey = null,
     hasMore = true,
@@ -6024,9 +6024,9 @@ async function healthCheck() {
     settings: s,
   };
 }
-const _verifyCompletedDownloadReliability = verifyCompletedDownload;
-verifyCompletedDownload = async function (downloadId) {
-  const out = await _verifyCompletedDownloadReliability(downloadId);
+// Reliability layer: journals recovery/connection/verification events around the core implementation.
+async function verifyCompletedDownload(downloadId) {
+  const out = await verifyCompletedDownloadCore(downloadId);
   if (out?.verification?.state && out.verification.state !== 'verified') {
     await action('verification', `Download verification ${out.verification.state}`, {
       downloadId,
@@ -6034,7 +6034,7 @@ verifyCompletedDownload = async function (downloadId) {
     });
   }
   return out;
-};
+}
 // Conversion-only bulk items reuse an already verified MP4 instead of creating a
 // second physical download when the user asks for GIF/WebP derivatives later.
 // v17 download-planner settings are layered here so older local settings remain

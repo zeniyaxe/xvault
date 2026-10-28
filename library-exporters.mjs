@@ -205,6 +205,11 @@ main{max-width:760px;margin:0 auto;padding:12px 20px 60px}article{border-bottom:
 `;
 }
 
+const poster = (item, src) => {
+  const still = safeHref(item?.url);
+  return still && still !== src ? ` poster="${escapeHtml(still)}"` : '';
+};
+
 export function htmlPost(post) {
   const date = iso(post?.createdAt);
   const media = (post?.media || [])
@@ -213,7 +218,7 @@ export function htmlPost(post) {
       if (!src) return '';
       return item?.type === 'photo'
         ? `<img loading="lazy" src="${escapeHtml(src)}" alt="">`
-        : `<video controls preload="none" src="${escapeHtml(src)}"></video>`;
+        : `<video controls preload="none"${poster(item, src)} src="${escapeHtml(src)}"></video>`;
     })
     .join('');
   const tags = tagsOf(post)
