@@ -1,0 +1,10 @@
+FFmpeg_Helper/config.json
+FFmpeg_Helper/.xvault*
+*.log
+__pycache__/
+.env*
+output/
+tests/
+.playwright-mcp/
+AGENTS.md
+continue.md

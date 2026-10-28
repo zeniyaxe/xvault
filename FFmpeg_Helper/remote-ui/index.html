@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111315">
+  <meta name="color-scheme" content="dark">
+  <title>XVault Remote</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/app-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/app-icon-192.png">
+  <link rel="stylesheet" href="/remote.css">
+  <script defer src="/remote-drafts.js"></script>
+  <script defer src="/remote.js"></script>
+</head>
+<body>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.3 8.5c0 4.1-8.3 10.4-8.3 10.4S3.7 12.6 3.7 8.5a4.5 4.5 0 0 1 8-2.8 4.5 4.5 0 0 1 8.6 2.8Z"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3m-4 4 4-4 4 4"/><path d="M5 12v8h14v-8"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m9 6 9 6-9 6z"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M3 9a14 14 0 0 1 18 0M6.5 12.5a8.5 8.5 0 0 1 11 0M10 16a3.1 3.1 0 0 1 4 0M12 20h.01"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21l-6-4-6 4z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></symbol>
+    <symbol id="i-pc-save" viewBox="0 0 24 24"><path d="M3 4h7m7 0h4v13H3V4m9-2v10m-3-3 3 3 3-3M8 21h8m-4-4v4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><circle cx="8" cy="9" r="1.5"/><path d="m4 18 5-5 3 3 4-6 4 8"/></symbol>
+  </svg>
+
+  <div id="pairScreen" class="pair-screen" hidden>
+    <div class="pair-mark"><img src="/app-icon.svg" alt="" width="40" height="40"></div>
+    <p class="eyebrow">XVAULT · PRIVATE LIBRARY</p>
+    <h1>Pair this phone</h1>
+    <p class="pair-copy">Keep this screen open while XVault asks for approval on your computer.</p>
+    <div class="pair-progress" aria-hidden="true"><span></span></div>
+    <div id="pairApprovalCode" class="pair-approval-code" hidden><span>Confirm this code on your computer</span><b id="pairCode" aria-label="Pairing confirmation code"></b></div>
+    <p id="pairStatus" class="pair-status" role="status">Connecting to your computer…</p>
+    <button id="pairRetry" class="text-button" hidden>Try again</button>
+    <button id="pairDrafts" class="text-button" type="button">Retained drafts on this phone</button>
+    <p class="pair-footnote">Your computer must approve this phone before the Library opens.</p>
+  </div>
+
+  <div id="app" class="app-shell" hidden>
+    <header class="topbar">
+      <a class="wordmark" href="#library" aria-label="XVault Remote home"><img src="/app-icon.svg" alt="" width="32" height="32"><span class="sr-only">XVault</span></a>
+      <div class="connection"><span class="connection-dot"></span><span id="connectionLabel">Private connection</span></div>
+      <button id="topMore" class="icon-button" aria-label="Connection settings"><svg><use href="#i-more"/></svg></button>
+    </header>
+    <div id="offlineBanner" class="offline-banner" role="status" hidden><span>Your computer is unreachable. Loaded references and local drafts remain here.</span><button id="reconnect" type="button">Reconnect</button></div>
+    <div id="installBanner" class="install-banner" hidden><span>Add XVault to your home screen</span><button id="installBannerAction" type="button">How to install</button><button id="installDismiss" class="icon-button" type="button" aria-label="Dismiss install hint"><svg><use href="#i-close"/></svg></button></div>
+
+    <main id="scrollRegion" class="scroll-region">
+      <section id="libraryView" class="view active" aria-labelledby="libraryHeading">
+        <div class="view-heading">
+          <div><h1 id="libraryHeading">Library</h1></div>
+          <div class="heading-actions"><button id="browseOpen" class="browse-button" type="button"><svg><use href="#i-bookmark"/></svg>Browse</button><span id="resultCount" class="result-count">—</span></div>
+        </div>
+        <label class="search-box"><svg><use href="#i-search"/></svg><input id="searchInput" type="search" enterkeyhint="search" placeholder="Search your archive" autocomplete="off"><button id="clearQuery" class="search-clear" aria-label="Clear search" hidden><svg><use href="#i-close"/></svg></button></label>
+        <div class="browse-tools"><div id="quickFilters" class="quick-filters" role="group" aria-label="Quick filters"><button class="filter active" data-query="">All</button><button class="filter" data-query="fav:true"><svg><use href="#i-heart"/></svg> Saved</button><button class="filter" data-query="has:image">Photos</button><button class="filter" data-query="has:video">Video</button></div><label class="sort-label"><span>Sort</span><select id="sortSelect" aria-label="Sort results"><option value="new">Newest</option><option value="old">Oldest</option><option value="likes">Most liked</option><option value="views">Most viewed</option><option value="media">Most media</option><option value="author">Author</option></select></label></div>
+        <p id="queryLine" class="query-line" hidden></p>
+        <div id="updatesBanner" class="archive-updates" role="status" hidden><span>Your archive changed on the computer.</span><button id="refreshArchive" type="button">Refresh results</button></div>
+        <div id="gallery" class="gallery" aria-live="polite" aria-busy="false"><div class="loading-state"><span class="spinner"></span><p>Opening your Library…</p></div></div>
+        <div id="loadStatus" class="load-status" role="status" tabindex="-1"></div>
+      </section>
+
+      <section id="recentView" class="view" aria-labelledby="recentHeading" hidden>
+        <div class="view-heading"><div><h1 id="recentHeading">Recent activity</h1></div></div>
+        <div id="activityList" class="activity-list"><div class="loading-state"><span class="spinner"></span><p>Loading activity…</p></div></div>
+      </section>
+
+      <section id="settingsView" class="view" aria-labelledby="settingsHeading" hidden>
+        <div class="view-heading"><div><h1 id="settingsHeading">This phone</h1></div></div>
+        <div class="connection-summary"><span class="connection-dot"></span><div><b>Paired with XVault</b><small id="deviceName">Private device access</small></div></div>
+        <div class="settings-list">
+          <label class="setting-row"><span><b>Appearance</b><small>A quiet surface for your media</small></span><select id="remoteTheme" aria-label="Remote theme"><option value="graphite">Graphite</option><option value="oled">True black</option><option value="paper">Paper</option></select></label>
+          <label class="setting-row"><span><b>Motion</b><small>System and desktop limits always apply</small></span><select id="motionSelect" aria-label="Remote motion"><option value="normal">Normal</option><option value="reduced">Reduced</option><option value="off">Off</option></select></label>
+          <button id="dataSaver" class="setting-row" aria-pressed="false"><span><b>Data Saver</b><small>Hide gallery and thumbnail previews; open chosen media on demand</small></span><span class="toggle"><i></i></span></button>
+          <button id="privacyScreen" class="setting-row" aria-pressed="false"><span><b>Privacy cover</b><small>Hide posts when you switch apps; tap to reveal on return</small></span><span class="toggle"><i></i></span></button>
+          <button id="installApp" class="setting-row"><span><b>Add to home screen</b><small id="installDeviceHint">Open XVault as a standalone companion</small></span><svg><use href="#i-share"/></svg></button>
+          <button id="copyCurrentLink" class="setting-row"><span><b>Copy current link</b><small>Share the open post</small></span><svg><use href="#i-share"/></svg></button>
+          <button id="deviceDrafts" class="setting-row"><span><b>Retained drafts</b><small>Find, export or recover notes from any pairing</small></span><svg><use href="#i-clock"/></svg></button>
+          <button id="signOut" class="setting-row signout"><span><b>Forget this device</b><small>Remove the local pairing credential</small></span><svg><use href="#i-close"/></svg></button>
+        </div>
+        <h2 class="section-label">Desktop permissions</h2><ul id="permissionList" class="permission-list"></ul>
+        <p class="privacy-note">Your posts stay on this computer. XVault sends only the visible Library page and streams selected local media when you open it.</p>
+      </section>
+      <div class="bottom-space" aria-hidden="true"></div>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Primary navigation">
+      <button class="nav-item active" data-view="libraryView" aria-current="page"><svg><use href="#i-grid"/></svg><span>Library</span></button>
+      <button class="nav-item" data-view="recentView"><svg><use href="#i-clock"/></svg><span>Recent</span></button>
+      <button class="nav-item" data-view="settingsView"><svg><use href="#i-wifi"/></svg><span>Device</span></button>
+    </nav>
+  </div>
+
+  <dialog id="browseSheet" class="action-sheet browse-sheet" aria-labelledby="browseHeading">
+    <header class="sheet-heading"><h2 id="browseHeading">Browse archive</h2><button id="browseClose" class="icon-button" type="button" aria-label="Close archive browsing"><svg><use href="#i-close"/></svg></button></header>
+    <section aria-labelledby="timeMachineHeading"><h3 id="timeMachineHeading">Time Machine</h3><p class="privacy-note">Choose a month and apply it to your current search.</p><label class="month-basis">Date<select id="monthBasis"><option value="posted">Post date</option><option value="archived">Archive date</option></select></label><div class="month-controls"><button id="monthPrevious" type="button" aria-label="Previous month">←</button><input id="browseMonth" type="month" aria-label="Choose month"><button id="monthNext" type="button" aria-label="Next month">→</button></div><div class="browse-month-actions"><button id="monthApply" type="button">Browse month</button><button id="monthClear" type="button">All dates</button></div><p id="monthStatus" role="status"></p></section>
+    <section aria-labelledby="savedViewsHeading"><div class="saved-views-heading"><h3 id="savedViewsHeading">Desktop saved views</h3><button id="viewsRefresh" class="text-button" type="button">Refresh</button></div><label class="search-box"><svg><use href="#i-search"/></svg><input id="viewsSearch" type="search" placeholder="Find a saved view" aria-label="Find a saved view"></label><p id="viewsStatus" role="status"></p><div id="savedViewList" class="saved-view-list"></div></section>
+  </dialog>
+
+  <dialog id="installSheet" class="action-sheet" aria-labelledby="installHeading"><header class="sheet-heading"><h2 id="installHeading">XVault on your home screen</h2><button id="installClose" class="icon-button" type="button" aria-label="Close install instructions"><svg><use href="#i-close"/></svg></button></header><p id="installInstructions" class="sheet-text"></p><p class="privacy-note">Installation keeps the same pairing and local drafts. Your computer still needs to be reachable, and its certificate must be trusted.</p><button id="installConfirm" class="text-button" type="button" hidden>Install XVault</button><p id="installStatus" role="status"></p></dialog>
+  <dialog id="privacyCover" class="privacy-cover" aria-labelledby="privacyHeading"><img src="/app-icon.svg" width="40" height="40" alt=""><h2 id="privacyHeading">Your archive is covered</h2><p>Tap to reveal this screen.</p><button id="privacyReveal" type="button">Return to XVault</button></dialog>
+
+  <dialog id="actionSheet" class="action-sheet" aria-labelledby="sheetTitle">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <div class="sheet-heading"><div><h2 id="sheetTitle">Post actions</h2></div><button class="icon-button" data-close-dialog aria-label="Close"><svg><use href="#i-close"/></svg></button></div>
+    <p id="sheetText" class="sheet-text"></p>
+    <p id="sheetTags" class="sheet-tags"></p>
+    <div class="sheet-download"><button id="sheetDownloadPC" class="save-pc-button" type="button"><svg><use href="#i-pc-save"/></svg><span>Save all media to PC</span></button><button id="sheetDownloadStop" type="button" hidden>Stop remaining requests</button><p id="sheetDownloadStatus" role="status" aria-live="polite"></p></div>
+    <section id="noteEditor" class="note-editor" hidden aria-labelledby="noteHeading">
+      <h3 id="noteHeading">Private note</h3>
+      <label for="noteInput">Your annotation</label><textarea id="noteInput" rows="6" maxlength="100000" placeholder="Keep an observation with this post"></textarea>
+      <div id="noteConflict" hidden><p>The saved note changed. Your draft is retained.</p><label>Current saved note<textarea id="noteSaved" rows="4" readonly></textarea></label><button id="noteUseSaved" type="button">Use saved note</button><button id="noteKeepDraft" type="button">Save my draft instead</button></div>
+      <div class="note-toolbar"><button id="noteSave" type="button">Save note</button><button id="noteRetry" type="button" hidden>Retry reading note</button><span id="noteStatus" role="status" aria-live="polite"></span></div>
+    </section>
+    <div class="sheet-actions"><button id="sheetOpen" class="sheet-action"><svg><use href="#i-share"/></svg><span>Open source link</span></button><button id="sheetCopy" class="sheet-action"><svg><use href="#i-share"/></svg><span>Copy post link</span></button><button id="sheetFavorite" class="sheet-action" hidden><svg><use href="#i-heart"/></svg><span>Save to Favorites</span></button></div>
+  </dialog>
+
+  <dialog id="viewer" class="viewer" aria-label="Media viewer">
+    <header class="viewer-bar"><button id="viewerBack" class="icon-button" aria-label="Close viewer"><svg><use href="#i-close"/></svg></button><span id="viewerPosition" aria-live="polite" aria-atomic="true"></span><button id="viewerMore" class="icon-button" aria-label="Post actions"><svg><use href="#i-more"/></svg></button></header>
+    <div id="viewerStage" class="viewer-stage"></div>
+    <div class="viewer-navigation"><button id="viewerPrevious" type="button" aria-label="Previous media">Previous</button><button id="viewerNext" type="button" aria-label="Next media">Next</button></div>
+    <div class="viewer-downloads"><a id="viewerSavePhone" class="save-phone-button" download aria-label="Save this file to phone"><svg><use href="#i-download"/></svg><span>Save to phone</span></a><button id="viewerSavePC" class="save-pc-button" type="button"><svg><use href="#i-pc-save"/></svg><span>Save to PC</span></button><p id="viewerDownloadStatus" role="status" aria-live="polite"></p></div>
+    <footer class="viewer-meta"><p id="viewerAuthor"></p><p id="viewerCaption"></p><button id="viewerCaptionToggle" class="caption-toggle" type="button" hidden>Show full post text</button><div id="viewerThumbs" class="viewer-thumbs"></div></footer>
+  </dialog>
+
+  <dialog id="draftRecovery" class="action-sheet" aria-labelledby="draftHeading"><header class="sheet-heading"><h2 id="draftHeading">Retained drafts</h2><button id="draftClose" class="icon-button" aria-label="Close draft recovery"><svg><use href="#i-close"/></svg></button></header><p class="privacy-note">These notes remain on this phone, including drafts from older pairings. Recovery copies a draft; its original evidence stays here.</p><label class="search-box"><svg><use href="#i-search"/></svg><input id="draftSearch" type="search" placeholder="Search notes or post IDs" aria-label="Search retained drafts"></label><select id="draftSort" aria-label="Sort drafts"><option value="new">Newest first</option><option value="old">Oldest first</option><option value="post">Post ID</option></select><select id="draftPairing" aria-label="Filter draft pairing"><option value="all">All pairings</option><option value="current">Current pairing</option><option value="previous">Previous pairings</option></select><div class="draft-transfer"><button id="draftSelectMatching" type="button">Select matching</button><button id="draftExportSelected" type="button" disabled>Export selected</button><label class="draft-import-label">Import drafts<input id="draftImportFile" type="file" accept=".json,application/json"></label></div><section id="draftImportPreview" hidden aria-label="Draft import preview"><p id="draftImportSummary"></p><div id="draftImportConflicts"></div><button id="draftImportCommit" type="button">Import and retain both versions</button><button id="draftImportCancel" type="button">Cancel</button></section><p id="draftStatus" role="status" aria-live="polite"></p><div id="draftList"></div></dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,22 @@
+body{height:auto;min-width:280px;overflow:auto}
+main{padding:14px}
+header{display:flex;align-items:center;gap:10px;padding:2px 0 14px}
+header b{display:block;font-size:14px}
+header small{display:block;color:var(--muted);font-size:12px}
+header button{margin-left:auto}
+.mark{width:28px;height:28px;border-radius:var(--r-s)}
+.hero{display:flex;align-items:baseline;gap:8px;padding:0 0 14px;margin-bottom:14px;border-bottom:1px solid var(--line)}
+.hero strong{font-size:34px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.hero span{color:var(--muted)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.grid button{flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:2px;height:auto;min-height:62px;padding:10px 12px;text-align:left}
+.grid button b{font-weight:600}
+.grid button small{color:var(--muted);font-size:12px;font-weight:400}
+.card{padding:0 0 12px;margin-bottom:12px}
+.card label{display:grid;gap:5px;color:var(--soft);font-size:12px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--line-soft)}
+.row:first-of-type{margin-top:10px}
+.shortcuts{display:grid;gap:8px}
+.shortcuts span{display:flex;justify-content:space-between;color:var(--muted);font-size:12px}
+#toast{left:14px;right:14px;bottom:14px;transform:translateY(8px);max-width:none}
+#toast.show{transform:none}

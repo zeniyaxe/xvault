@@ -1,0 +1,16 @@
+{
+  "xvault_folder": "XVault",
+  "extension_id": "",
+  "fps": 20,
+  "max_width": 1280,
+  "webp_quality": 90,
+  "poll_seconds": 1.5,
+  "make_gif": true,
+  "make_webp": true,
+  "delete_source": false,
+  "original_folder": "Originals",
+  "gif_folder": "GIFs",
+  "gif_output_folder": "GIF",
+  "webp_output_folder": "WebP",
+  "server_port": 17843
+}

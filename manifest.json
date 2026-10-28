@@ -1,0 +1,112 @@
+{
+  "manifest_version": 3,
+  "name": "XVault v16 - Chronicle",
+  "version": "16.0.0",
+  "description": "Local-first X archive with verified downloads, FixVX Copy Link, contextual X controls, and archival history.",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "alarms",
+    "clipboardWrite",
+    "contextMenus",
+    "downloads",
+    "notifications",
+    "power",
+    "scripting",
+    "sidePanel",
+    "storage",
+    "tabs",
+    "unlimitedStorage",
+    "webRequest",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "https://mobile.twitter.com/*",
+    "https://pbs.twimg.com/*",
+    "https://video.twimg.com/*",
+    "file:///*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "XVault",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "options_page": "dashboard.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://mobile.twitter.com/*"
+      ],
+      "js": [
+        "x-injected-theme.js",
+        "link-utils.js",
+        "content.js",
+        "instant-actions.js",
+        "x-cleanup.js"
+      ],
+      "css": [
+        "content.css",
+        "instant-actions.css",
+        "x-integration.css",
+        "x-cleanup.css"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "page-hook.js"
+      ],
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ]
+    }
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "commands": {
+    "copy-centered": {
+      "suggested_key": {
+        "default": "Alt+Shift+C"
+      },
+      "description": "Copy the centered/hovered X post link"
+    },
+    "download-centered": {
+      "suggested_key": {
+        "default": "Alt+Shift+D"
+      },
+      "description": "Download media from the centered/hovered X post"
+    },
+    "archive-centered": {
+      "suggested_key": {
+        "default": "Alt+Shift+A"
+      },
+      "description": "Archive the centered/hovered X post locally"
+    },
+    "open-dashboard": {
+      "suggested_key": {
+        "default": "Alt+Shift+V"
+      },
+      "description": "Open XVault dashboard"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
