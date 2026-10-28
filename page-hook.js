@@ -153,6 +153,9 @@
         headers = new Headers(template.headers || {});
       headers.delete('content-length');
       headers.delete('host');
+      // Session CSRF tokens are never persisted with templates; use the live ct0 cookie for each request.
+      const csrf = /(?:^|;\s*)ct0=([^;]+)/.exec(document.cookie)?.[1];
+      if (csrf) headers.set('x-csrf-token', decodeURIComponent(csrf));
       post('DIRECT_DEBUG', { runId, phase: 'request', message: `Fetching page ${page + 1}`, page: page + 1, url });
       let r;
       try {

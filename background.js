@@ -165,11 +165,30 @@ const contentSettingKeys = [
   'xPowerMenuEnabled',
 ];
 let templateWriteTail = Promise.resolve();
+// Session-bound credentials must never be written to disk with GraphQL templates. The page hook
+// re-reads the live CSRF token from the ct0 cookie when it replays a template.
+const TEMPLATE_SECRET_HEADERS = /^(cookie|content-length|host|x-csrf-token)$/i;
+function sanitizeTemplate(template) {
+  const headers = {};
+  for (const [name, value] of Object.entries(template?.headers || {}))
+    if (name && !TEMPLATE_SECRET_HEADERS.test(name)) headers[name] = String(value ?? '');
+  return { ...template, headers };
+}
+async function scrubStoredTemplates() {
+  const stored = (await chrome.storage.local.get('graphqlTemplates')).graphqlTemplates || {};
+  const dirty = Object.values(stored).some(t =>
+    Object.keys(t?.headers || {}).some(h => TEMPLATE_SECRET_HEADERS.test(h))
+  );
+  if (!dirty) return;
+  const next = Object.fromEntries(Object.entries(stored).map(([k, t]) => [k, sanitizeTemplate(t)]));
+  await chrome.storage.local.set({ graphqlTemplates: next });
+}
+scrubStoredTemplates().catch(() => {});
 function storeCaptureTemplates(incoming) {
   const task = templateWriteTail.then(async () => {
     const previous = (await chrome.storage.local.get('graphqlTemplates')).graphqlTemplates || {},
       next = { ...previous };
-    for (const template of incoming) next[template.operation] = template;
+    for (const template of incoming) next[template.operation] = sanitizeTemplate(template);
     await chrome.storage.local.set({ graphqlTemplates: next });
     return { ok: true };
   });
@@ -2505,7 +2524,7 @@ try {
       if (!x) return;
       const headers = {};
       for (const h of d.requestHeaders || [])
-        if (h.name && !/^(cookie|content-length|host)$/i.test(h.name)) headers[h.name] = h.value || '';
+        if (h.name && !TEMPLATE_SECRET_HEADERS.test(h.name)) headers[h.name] = h.value || '';
       let pageHref = '',
         pagePath = '';
       try {
@@ -2513,9 +2532,9 @@ try {
         pageHref = t.url || '';
         pagePath = new URL(pageHref).pathname;
       } catch {}
-      const old = (await chrome.storage.local.get('graphqlTemplates')).graphqlTemplates || {};
-      old[x.operation] = { ...x, headers, pageHref, pagePath, capturedAt: Date.now(), capturedBy: 'webRequest' };
-      await chrome.storage.local.set({ graphqlTemplates: old });
+      await storeCaptureTemplates([
+        { ...x, headers, pageHref, pagePath, capturedAt: Date.now(), capturedBy: 'webRequest' },
+      ]).catch(() => {});
       pendingGraphql.delete(d.requestId);
     },
     { urls: ['https://x.com/i/api/graphql/*', 'https://twitter.com/i/api/graphql/*'] },

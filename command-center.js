@@ -46,6 +46,10 @@
       },
     },
     { name: 'Open Library', hint: 'your archived posts and media', run: () => nav('library') },
+    { name: 'Export Markdown notes', hint: 'Obsidian-compatible folder', run: () => $('#exportMarkdown')?.click() },
+    { name: 'Export offline HTML', hint: 'single searchable file', run: () => $('#exportHtml')?.click() },
+    { name: 'Export CSV', hint: 'spreadsheet of every post', run: () => $('#csv')?.click() },
+    { name: 'Create recovery file', hint: 'full JSON Lines backup', run: () => $('#export')?.click() },
     {
       name: 'Review the Inbox',
       hint: 'step through new posts: R keeps, F favorites, Delete trashes',

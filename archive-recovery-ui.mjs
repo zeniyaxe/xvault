@@ -1,4 +1,5 @@
 import { RECOVERY_STORES, createRecoveryHeader, encodeRecoveryLine, scanRecoveryArchive } from './archive-recovery.mjs';
+import * as exporters from './library-exporters.mjs';
 
 const $ = selector => document.querySelector(selector);
 const BATCH_ROWS = 40;
@@ -275,13 +276,48 @@ if (dialog && fileInput && typeof chrome !== 'undefined' && chrome.runtime?.send
     }
   }
 
-  async function exportArchiveCsv() {
+  // Streams every archived post through `emit` in bounded pages, aborting if the archive changes mid-export.
+  async function streamArchivePosts(controller, label, emit) {
+    let afterKey = null,
+      expectedRevision = null,
+      count = 0,
+      hasMore = true;
+    const stale = when =>
+      new Error(`The archive changed ${when} ${label} export. Run the export again for a consistent copy.`);
+    while (hasMore) {
+      if (controller.signal.aborted)
+        throw controller.signal.reason || new DOMException(`${label} export stopped`, 'AbortError');
+      const page = await request('READ_RECOVERY_BACKUP_PAGE', {
+        store: 'tweets',
+        afterKey,
+        limit: 100,
+        expectedRevision,
+      });
+      if (page.stale) throw stale('during');
+      if (expectedRevision == null)
+        expectedRevision = { archiveRevision: page.revision, downloadRevision: page.downloadRevision };
+      for (const post of page.rows || []) {
+        await emit(post);
+        count++;
+      }
+      afterKey = page.nextKey;
+      hasMore = !!page.hasMore;
+      setProgress(`Wrote ${count.toLocaleString()} posts`, null);
+    }
+    const verified = await request('READ_RECOVERY_BACKUP_PAGE', { store: 'tweets', limit: 1, expectedRevision });
+    if (verified.stale) throw stale('before');
+    return count;
+  }
+
+  // Single-file exports (CSV, HTML) share one streaming writer path.
+  async function exportArchiveFile({ label, extension, mime, head, row, foot }) {
+    const day = new Date().toISOString().slice(0, 10);
     let writer;
     try {
-      writer = await makeWriter(`xvault-archive-${new Date().toISOString().slice(0, 10)}.csv`, {
-        description: 'XVault archive CSV',
-        mime: 'text/csv',
-        extension: '.csv',
+      writer = await makeWriter(`xvault-archive-${day}${extension}`, {
+        description: `XVault archive ${label}`,
+        mime,
+        extension,
       });
     } catch (error) {
       if (error?.name !== 'AbortError') status.textContent = error?.message || String(error);
@@ -289,73 +325,93 @@ if (dialog && fileInput && typeof chrome !== 'undefined' && chrome.runtime?.send
     }
     const controller = new AbortController();
     openDialog(
-      'Export archive CSV',
+      `Export archive ${label}`,
       'Writing every archived post in bounded IndexedDB pages. The export stops if the archive changes.'
     );
     startOperation(controller);
-    operation = 'csv';
-    let afterKey = null,
-      expectedRevision = null,
-      count = 0,
-      bytes = 0,
-      hasMore = true;
-    const encoder = new TextEncoder();
+    operation = label.toLowerCase();
+    let bytes = 0;
     const write = async value => {
-      if (controller.signal.aborted)
-        throw controller.signal.reason || new DOMException('CSV export stopped', 'AbortError');
       await writer.write(value);
-      bytes += encoder.encode(value).byteLength;
-    };
-    const cell = value => {
-      const text = String(value ?? '');
-      return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+      bytes += encoderLength(value);
     };
     try {
-      await write('\ufeffid,createdAt,author,text,url,likes,reposts,replies,mediaCount\r\n');
-      while (hasMore) {
-        const page = await request('READ_RECOVERY_BACKUP_PAGE', {
-          store: 'tweets',
-          afterKey,
-          limit: 100,
-          expectedRevision,
-        });
-        if (page.stale)
-          throw new Error(
-            'The archive changed during CSV export. The partial file was discarded; run the export again.'
-          );
-        if (expectedRevision == null)
-          expectedRevision = { archiveRevision: page.revision, downloadRevision: page.downloadRevision };
-        for (const tweet of page.rows || []) {
-          const values = [
-            tweet.id,
-            tweet.createdAt,
-            tweet.author?.handle,
-            tweet.text,
-            tweet.url,
-            tweet.metrics?.likes,
-            tweet.metrics?.reposts,
-            tweet.metrics?.replies,
-            tweet.media?.length,
-          ];
-          await write(`${values.map(cell).join(',')}\r\n`);
-          count++;
-        }
-        afterKey = page.nextKey;
-        hasMore = !!page.hasMore;
-        setProgress(`Wrote ${count.toLocaleString()} posts · ${bytesLabel(bytes)}`, null);
-      }
-      const verified = await request('READ_RECOVERY_BACKUP_PAGE', { store: 'tweets', limit: 1, expectedRevision });
-      if (verified.stale)
-        throw new Error(
-          'The archive changed before CSV export finished. The partial file was discarded; run the export again.'
-        );
+      await write(head());
+      const count = await streamArchivePosts(controller, label, post => write(row(post)));
+      await write(foot());
       await writer.close();
       setProgress(`Saved ${count.toLocaleString()} posts · ${bytesLabel(bytes)}`, 1);
-      status.textContent = `CSV saved · ${count.toLocaleString()} posts.`;
+      status.textContent = `${label} saved · ${count.toLocaleString()} posts.`;
     } catch (error) {
       try {
         await writer.abort(error);
       } catch {}
+      showError(error);
+    } finally {
+      operation = null;
+      finishOperation(controller);
+    }
+  }
+
+  const exportArchiveCsv = () =>
+    exportArchiveFile({
+      label: 'CSV',
+      extension: '.csv',
+      mime: 'text/csv',
+      head: exporters.csvHeader,
+      row: exporters.csvRow,
+      foot: () => '',
+    });
+  const exportArchiveHtml = () =>
+    exportArchiveFile({
+      label: 'HTML',
+      extension: '.html',
+      mime: 'text/html',
+      head: () => exporters.htmlHead('XVault archive'),
+      row: exporters.htmlPost,
+      foot: exporters.htmlFoot,
+    });
+
+  // Obsidian-compatible export: one Markdown note per post plus an index note, written into a folder.
+  async function exportArchiveMarkdown() {
+    if (typeof window.showDirectoryPicker !== 'function') {
+      status.textContent = 'Markdown folder export needs a Chromium version with folder access.';
+      return;
+    }
+    let parent;
+    try {
+      parent = await window.showDirectoryPicker({ id: 'xvault-markdown', mode: 'readwrite' });
+    } catch (error) {
+      if (error?.name !== 'AbortError') status.textContent = error?.message || String(error);
+      return;
+    }
+    const controller = new AbortController();
+    openDialog(
+      'Export Markdown notes',
+      'Writing one Obsidian-compatible note per post. Existing notes with the same name are updated in place.'
+    );
+    startOperation(controller);
+    operation = 'markdown';
+    const writeText = async (dir, name, text) => {
+      const handle = await dir.getFileHandle(name, { create: true });
+      const stream = await handle.createWritable();
+      await stream.write(text);
+      await stream.close();
+    };
+    try {
+      const root = await parent.getDirectoryHandle('XVault', { create: true });
+      const posts = await root.getDirectoryHandle('posts', { create: true });
+      const entries = [];
+      const count = await streamArchivePosts(controller, 'Markdown', async post => {
+        const file = exporters.markdownFileName(post);
+        await writeText(posts, file, exporters.markdownNote(post));
+        entries.push({ file: `posts/${file}`, handle: post?.author?.handle, text: post?.text });
+      });
+      entries.sort((a, b) => b.file.localeCompare(a.file));
+      await writeText(root, 'XVault Index.md', exporters.markdownIndex(entries));
+      setProgress(`Saved ${count.toLocaleString()} notes`, 1);
+      status.textContent = `Markdown saved · ${count.toLocaleString()} notes in ${parent.name}/XVault.`;
+    } catch (error) {
       showError(error);
     } finally {
       operation = null;
@@ -773,6 +829,8 @@ if (dialog && fileInput && typeof chrome !== 'undefined' && chrome.runtime?.send
   $('#recoveryExport')?.addEventListener('click', exportRecoveryFile);
   $('#export')?.addEventListener('click', exportRecoveryFile);
   $('#csv')?.addEventListener('click', exportArchiveCsv);
+  $('#exportMarkdown')?.addEventListener('click', exportArchiveMarkdown);
+  $('#exportHtml')?.addEventListener('click', exportArchiveHtml);
   window.XVaultCreateRecoveryFile = exportRecoveryFile;
   $('#recoveryImport')?.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
