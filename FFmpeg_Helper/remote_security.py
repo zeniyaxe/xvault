@@ -171,6 +171,11 @@ class PairingManager:
 
     def _consume_attempt(self, remote_address: str, now: float) -> None:
         address = str(remote_address or 'unknown')[:64]
+        if len(self._attempts) > 1024:
+            # Bound memory under address churn: forget clients whose window has fully elapsed.
+            for key, window in list(self._attempts.items()):
+                if not window or now - window[-1] >= PAIRING_ATTEMPT_WINDOW_SECONDS:
+                    del self._attempts[key]
         attempts = self._attempts[address]
         while attempts and now - attempts[0] >= PAIRING_ATTEMPT_WINDOW_SECONDS:
             attempts.popleft()
@@ -373,6 +378,8 @@ def parse_byte_range(value: str, size: int) -> tuple[int, int]:
     if ',' in spec or '-' not in spec:
         raise InvalidRange('Only one byte range is supported')
     left, right = spec.split('-', 1)
+    if not re.fullmatch(r'[0-9]{0,19}', left) or not re.fullmatch(r'[0-9]{0,19}', right) or not (left or right):
+        raise InvalidRange('Invalid byte range')
     try:
         if left:
             start = int(left)
