@@ -1,0 +1,10 @@
+node_modules/
+dist/
+fonts/
+icons/
+*.png
+*.woff2
+*.md
+FFmpeg_Helper/remote-ui/qrcode-generator.js
+FFmpeg_Helper/remote-ui/qrcode-utf8.js
+package-lock.json

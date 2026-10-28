@@ -1,0 +1,22 @@
+{
+  "name": "xvault",
+  "version": "17.0.0",
+  "private": true,
+  "description": "Local-first X/Twitter archive and media manager (Chrome MV3 extension).",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --test tests/",
+    "check": "node scripts/check-extension.mjs",
+    "build": "node scripts/build.mjs",
+    "verify": "npm run check && npm run lint && npm test && npm run format:check"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.0",
+    "globals": "^15.15.0",
+    "prettier": "^3.6.0"
+  },
+  "engines": { "node": ">=20" }
+}
