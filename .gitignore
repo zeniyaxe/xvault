@@ -11,6 +11,9 @@ output/
 .playwright-mcp/
 coverage/
 
+# Vendored third-party runtime assets (copied from node_modules by scripts/vendor-ocr.mjs)
+vendor/
+
 # Build artifacts — distribute via CI artifacts / GitHub Releases, never commit
 dist/
 *.zip

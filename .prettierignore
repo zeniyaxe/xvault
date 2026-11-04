@@ -8,3 +8,4 @@ icons/
 FFmpeg_Helper/remote-ui/qrcode-generator.js
 FFmpeg_Helper/remote-ui/qrcode-utf8.js
 package-lock.json
+vendor/

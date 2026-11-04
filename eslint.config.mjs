@@ -53,7 +53,7 @@ const rules = {
 };
 
 export default [
-  { ignores: ['node_modules/**', 'dist/**', 'FFmpeg_Helper/remote-ui/qrcode-*.js'] },
+  { ignores: ['node_modules/**', 'dist/**', 'vendor/**', 'FFmpeg_Helper/remote-ui/qrcode-*.js'] },
   {
     files: ['**/*.js'],
     languageOptions: {

@@ -3,6 +3,7 @@
 import { readFileSync, readdirSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { vendorOcr } from './vendor-ocr.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const { version } = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
@@ -23,6 +24,9 @@ const EXCLUDE = new Set([
   '.editorconfig',
 ]);
 const SKIP = [/\.log$/, /__pycache__/, /^FFmpeg_Helper\/config\.json$/, /^FFmpeg_Helper\/\.xvault/, /\.zip$/];
+
+// The local OCR engine ships inside the ZIP; refresh it from node_modules when available.
+vendorOcr({ quiet: true });
 
 const files = [];
 (function walk(dir) {
