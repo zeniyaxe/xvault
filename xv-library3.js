@@ -1151,6 +1151,7 @@
     })),
   ]);
   window.XVaultLibrary3 = {
+    createBoard,
     openBulkEditor,
     openBoardManager,
     openBoardPicker,

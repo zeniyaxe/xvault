@@ -1117,8 +1117,12 @@
           renderLib();
         };
         empty.append(clear);
+        // XVault 21: xv-forge-search.js adds "Did you mean" / "Allow typos" / "Search by meaning".
+        window.dispatchEvent(new CustomEvent('xvault:no-results', { detail: { query: q, container: empty } }));
       }
     }
+    if (filtered.length && q)
+      window.dispatchEvent(new CustomEvent('xvault:results', { detail: { query: q, count: filtered.length } }));
     if (!filtered.length && libraryTotalRecords === 0) {
       const empty = $('#list .empty');
       if (empty) {
