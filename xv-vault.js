@@ -304,6 +304,7 @@
       });
       parsed.readMs = Math.round(performance.now() - started);
       parsed.fileName = file.name;
+      parsed.file = file;
       paintImportPreview();
     } catch (error) {
       box.innerHTML = `<p class="xv-import-error" role="alert">${html(error?.message || error)}</p><button type="button" data-import="again">Choose another file</button>`;
@@ -327,16 +328,35 @@
       account = parsed.account || {},
       sets = [
         ['tweets', 'Your posts & reposts', parsed.tweets.length],
+        ['community', 'Community posts', parsed.community?.length || 0],
+        ['deleted', 'Posts you deleted (kept, marked deleted)', parsed.deleted?.length || 0],
         ['likes', 'Likes', parsed.likes.length],
         ['bookmarks', 'Bookmarks', parsed.bookmarks.length],
       ].filter(([, , count]) => count);
-    box.innerHTML = `<div class="xv-import-summary"><div><b>${account.username ? `@${html(account.username)}` : html(parsed.fileName)}</b><span>${parsed.generatedAt ? `Archive generated ${when(Date.parse(parsed.generatedAt))} · ` : ''}read in ${fmt(parsed.readMs)} ms${parsed.mediaFiles ? ` · ${fmt(parsed.mediaFiles)} media files left in the ZIP (XVault re-downloads originals from X on demand)` : ''}</span></div>
+    const media = parsed.media || [],
+      mediaBytes = media.reduce((sum, file) => sum + (Number(file.size) || 0), 0),
+      notes = parsed.notes || {},
+      privateSkipped = parsed.skippedPrivate || {};
+    const facts = [
+      notes.found
+        ? `${fmt(notes.attached)} of ${fmt(notes.found)} long posts restored to full length${notes.unmatched ? ` (${fmt(notes.unmatched)} without a matching post)` : ''}`
+        : '',
+      privateSkipped.files
+        ? `${fmt(privateSkipped.files)} direct-message files (${bytes(privateSkipped.bytes)}) skipped unread`
+        : '',
+    ].filter(Boolean);
+    box.innerHTML = `<div class="xv-import-summary"><div><b>${account.username ? `@${html(account.username)}` : html(parsed.fileName)}</b><span>${parsed.generatedAt ? `Archive generated ${when(Date.parse(parsed.generatedAt))} · ` : ''}read in ${fmt(parsed.readMs)} ms${parsed.mediaFiles && !media.length ? ` · ${fmt(parsed.mediaFiles)} media files left in the ZIP (XVault re-downloads originals from X on demand)` : ''}</span>${facts.length ? `<ul class="xv-import-facts">${facts.map(fact => `<li>${html(fact)}</li>`).join('')}</ul>` : ''}</div>
 <fieldset class="xv-import-sets"><legend>Import</legend>${sets
       .map(
         ([key, label, count]) =>
           `<label class="xv-check"><input type="checkbox" name="${key}" checked> ${label} <em>${fmt(count)}</em></label>`
       )
       .join('')}</fieldset>
+${
+  media.length
+    ? `<label class="xv-check xv-import-media"><input type="checkbox" name="zip-media"${settings.importMediaFromZip === false ? '' : ' checked'}> Save ${fmt(media.length)} media files from the ZIP <em>${bytes(mediaBytes)}</em></label><p class="xv-l3-hint">Files are copied from the ZIP into your XVault download folder — nothing is re-downloaded from X. Keep this tab open until they are saved.</p>`
+    : ''
+}
 <p class="xv-l3-hint">Imported posts are tagged with the source <code>x-archive</code> (search <code>source:x-archive</code>). Likes and bookmarks in X's export only carry the post text and link; open them on X later and XVault fills in authors and media.</p>
 <div class="xv-vault-actions"><button type="button" class="primary" data-import="start">Import</button><button type="button" class="quiet" data-import="cancel">Choose another file</button></div></div>`;
     box.querySelector('[data-import="cancel"]').onclick = resetImport;
@@ -345,7 +365,8 @@
   async function runImport() {
     const box = $('#xvImport'),
       chosen = [...box.querySelectorAll('.xv-import-sets input:checked')].map(input => input.name),
-      rows = chosen.flatMap(kind => parsed[kind].map(row => ({ row, kind })));
+      withMedia = !!box.querySelector('input[name="zip-media"]:checked'),
+      rows = chosen.flatMap(kind => (parsed[kind] || []).map(row => ({ row, kind })));
     if (!rows.length) return toast('Choose at least one set to import');
     cancelImport = false;
     box.innerHTML = `<div class="xv-import-progress" aria-live="polite"><b>Importing ${fmt(rows.length)} records</b><span>Starting…</span><div class="xv-quota-bar"><i style="width:1%"></i></div><button type="button" class="quiet" data-import="stop">Stop</button></div>`;
@@ -370,7 +391,18 @@
           `${fmt(done)} of ${fmt(rows.length)} · ${fmt(totals.created)} new · ${fmt(Math.round(rate))}/s · about ${fmt(Math.ceil((rows.length - done) / Math.max(1, rate)))} s left`;
         box.querySelector('i').style.width = `${(done / rows.length) * 100}%`;
       }
-      box.innerHTML = `<div class="xv-import-summary is-done"><div><b>${cancelImport ? 'Import stopped' : 'Import complete'}</b><span>${fmt(totals.created)} new posts · ${fmt(totals.updated)} already in your vault${totals.skipped ? ` · ${fmt(totals.skipped)} skipped (invalid)` : ''} · ${fmt(Math.round((performance.now() - started) / 1000))} s</span></div><div class="xv-vault-actions"><button type="button" class="primary" data-import="open">Open in Library</button><button type="button" class="quiet" data-import="again">Import another</button></div></div>`;
+      const mediaResult =
+        withMedia && !cancelImport
+          ? await importZipMedia(box, new Set(rows.map(item => String(item.row.id)))).catch(error => ({
+              error: error?.message || String(error),
+            }))
+          : null;
+      const mediaLine = mediaResult
+        ? mediaResult.error
+          ? ` · media: ${html(mediaResult.error)}`
+          : ` · ${fmt(mediaResult.saved)} media files saved from the ZIP${mediaResult.skipped ? `, ${fmt(mediaResult.skipped)} already on disk` : ''}${mediaResult.failed ? `, ${fmt(mediaResult.failed)} could not be saved (see Downloads)` : ''}`
+        : '';
+      box.innerHTML = `<div class="xv-import-summary is-done"><div><b>${cancelImport ? 'Import stopped' : 'Import complete'}</b><span>${fmt(totals.created)} new posts · ${fmt(totals.updated)} already in your vault${totals.skipped ? ` · ${fmt(totals.skipped)} skipped (invalid)` : ''}${mediaLine} · ${fmt(Math.round((performance.now() - started) / 1000))} s</span></div><div class="xv-vault-actions"><button type="button" class="primary" data-import="open">Open in Library</button><button type="button" class="quiet" data-import="again">Import another</button></div></div>`;
       box.querySelector('[data-import="open"]').onclick = () => {
         page('library');
         window.XVaultLibraryRunQuery?.('source:x-archive');
@@ -385,6 +417,72 @@
         `<p class="xv-import-error" role="alert">${html(error?.message || error)} — ${fmt(totals.stored)} records were saved before the error; running the import again is safe.</p>`
       );
     }
+  }
+
+  // Media from the ZIP (XVault 21): each file becomes a page-owned blob: URL handed to the download
+  // queue with the post's X CDN address as its identity, so duplicates and later re-downloads line up.
+  // Batches wait for the previous one to leave the queue, so memory stays bounded and URLs are revoked.
+  async function importZipMedia(box, importedIds) {
+    const { zipEntryBlob } = await loadImporter();
+    const files = (parsed.media || []).filter(file => importedIds.has(String(file.tweetId)) && file.url);
+    const owner = new Map();
+    for (const row of [...parsed.tweets, ...(parsed.community || []), ...(parsed.deleted || [])])
+      owner.set(String(row.id), row);
+    const result = { saved: 0, skipped: 0, failed: 0 };
+    const span = box.querySelector('span'),
+      bar = box.querySelector('i');
+    const BATCH = 40;
+    for (let at = 0; at < files.length && !cancelImport; at += BATCH) {
+      const slice = files.slice(at, at + BATCH),
+        urls = [],
+        items = [];
+      for (const file of slice) {
+        try {
+          const blob = await zipEntryBlob(parsed.file, file.entry),
+            url = URL.createObjectURL(blob),
+            post = owner.get(String(file.tweetId)) || {};
+          urls.push(url);
+          items.push({
+            url: file.url,
+            localSource: url,
+            knownSize: file.size,
+            ext: file.ext,
+            tweetId: file.tweetId,
+            mediaId: file.mediaId || undefined,
+            index: file.index,
+            mediaType: file.type === 'photo' ? 'image' : file.type,
+            sourceMediaType: file.type === 'photo' ? 'image' : file.type,
+            author: post.author?.handle || parsed.account?.username || '',
+            createdAt: post.createdAt || undefined,
+            source: 'x-archive',
+            importedFrom: 'x-archive',
+          });
+        } catch {
+          result.failed++;
+        }
+      }
+      if (span) span.textContent = `Saving media from the ZIP · ${fmt(at)} of ${fmt(files.length)}…`;
+      if (bar) bar.style.width = `${(at / Math.max(1, files.length)) * 100}%`;
+      const queued = items.length ? await call({ type: 'QUEUE_DOWNLOADS', items }).catch(() => null) : null;
+      const keys = queued?.addedKeys || [];
+      result.skipped += Math.max(0, items.length - keys.length);
+      // Wait until this batch has started (or finished) before freeing its blobs.
+      const deadline = Date.now() + 10 * 60000;
+      const waiting = ['queued', 'retry-wait', 'downloading'];
+      let pending = keys,
+        states = {};
+      while (pending.length && Date.now() < deadline && !cancelImport) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const state = await call({ type: 'DOWNLOAD_KEYS_STATE', keys: pending }).catch(() => null);
+        Object.assign(states, state?.states || {});
+        pending = pending.filter(key => waiting.includes(states[key]));
+      }
+      const failed = keys.filter(key => states[key] === 'failed').length;
+      result.failed += failed;
+      result.saved += keys.length - failed;
+      setTimeout(() => urls.forEach(url => URL.revokeObjectURL(url)), 60000);
+    }
+    return result;
   }
 
   // ── Downloads page: adaptive engine readout ──

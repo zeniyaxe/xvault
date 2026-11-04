@@ -9,6 +9,7 @@
     ['calendar', 'Calendar'],
     ['people', 'People'],
     ['duplicates', 'Duplicates'],
+    ['topics', 'Topics'],
   ];
   const store = {
     get(key, fallback) {
@@ -277,7 +278,9 @@
       state.rendered = state.view;
       return;
     }
-    target.innerHTML = { overview, review, calendar, people, duplicates }[state.view](data);
+    // XVault 21: Topics (meaning clusters) render from xv-forge.js into their own container.
+    const topics = () => '<section id="xfTopics" class="xf-topics-wrap" aria-label="Topics"></section>';
+    target.innerHTML = { overview, review, calendar, people, duplicates, topics }[state.view](data);
     state.rendered = state.view;
     if (state.view === 'overview') {
       drawGrowth(animate);
@@ -305,6 +308,7 @@
       hydrateShared();
       paintLab();
     }
+    if (state.view === 'topics') window.XVaultForge?.topics(target.querySelector('#xfTopics'));
   }
 
   /* ───────── Year in Review (XVault 20) ───────── */
@@ -1118,17 +1122,21 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
   };
   let derived = null;
 
-  // Same schema as sw/derived-store.mjs (v2: phash + ocr + meta). The service worker does the
+  // Same schema as sw/derived-store.mjs (v3: phash + ocr + meta + snapshots). The service worker does the
   // fetching and hashing; this page only reads fingerprints and groups them.
   function openDerived() {
     derived ||= new Promise((resolve, reject) => {
-      const request = indexedDB.open('xvault-derived', 2);
+      const request = indexedDB.open('xvault-derived', 3);
       request.onupgradeneeded = () => {
         const database = request.result;
         if (!database.objectStoreNames.contains('phash')) database.createObjectStore('phash', { keyPath: 'key' });
         if (!database.objectStoreNames.contains('ocr'))
           database.createObjectStore('ocr', { keyPath: 'key' }).createIndex('postId', 'postId', { unique: false });
         if (!database.objectStoreNames.contains('meta')) database.createObjectStore('meta', { keyPath: 'key' });
+        if (!database.objectStoreNames.contains('snapshots'))
+          database
+            .createObjectStore('snapshots', { keyPath: 'key' })
+            .createIndex('postId', 'postId', { unique: false });
       };
       request.onsuccess = () => {
         request.result.onversionchange = () => {
@@ -1704,6 +1712,7 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
     { name: 'Atlas: Calendar', hint: 'every archived day as a heatmap', run: () => openView('calendar') },
     { name: 'Atlas: People', hint: 'everyone you have archived', run: () => openView('people') },
     { name: 'Atlas: Duplicate Lab', hint: 'shared files and look-alike images', run: () => openView('duplicates') },
+    { name: 'Atlas: Topics', hint: 'posts grouped by meaning', run: () => openView('topics') },
   ]);
 
   window.XVaultAtlas = { show, open: openView, person: openPerson };
