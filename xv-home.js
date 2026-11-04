@@ -1,7 +1,6 @@
 /* Capture › Overview: a small, independent cursor page for the newest posts. */
 (() => {
   const $ = selector => document.querySelector(selector);
-  const basePage = page;
   let timer = 0,
     latestRows = [],
     latestLoaded = false,
@@ -122,14 +121,12 @@
     }
   }
 
-  page = function (name) {
-    const result = basePage(name);
+  window.XVaultDashboard.after('page', (result, name) => {
     if (name === 'home') {
       if (latestDirty || !latestLoaded) void refreshLatest();
       else render();
     }
-    return result;
-  };
+  });
 
   document.addEventListener('xv:library', () => {
     latestDirty = true;

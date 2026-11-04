@@ -23,7 +23,7 @@ assert.doesNotMatch(
   /GET_ALL|GET_LIBRARY_ROWS|GET_LIBRARY_CHUNK/,
   'normal Library queries must use the bounded page endpoint'
 );
-const settingsSync = dashboard.slice(dashboard.indexOf('function sync()'), dashboard.indexOf('function apply()'));
+const settingsSync = dashboard.slice(dashboard.indexOf('function builtinSync()'), dashboard.indexOf('function apply('));
 assert.match(
   settingsSync,
   /if\(!librarySearchInitialized\)\{librarySearchInitialized=true;/,

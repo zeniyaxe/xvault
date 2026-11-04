@@ -511,14 +511,11 @@
       change({ op: 'save', id: crypto.randomUUID(), name: $('#workspaceName').value });
     };
     $('#toolbarReset').onclick = () => save({ toolbarActions: ['refresh', 'openX', 'export'] }, false);
-    const baseApply = apply;
-    apply = function () {
-      const result = baseApply();
+    window.XVaultDashboard.after('apply', () => {
       applyToolbar();
       renderProfiles();
       renderToolbarSettings();
-      return result;
-    };
+    });
     applyToolbar();
     renderProfiles();
     renderToolbarSettings();

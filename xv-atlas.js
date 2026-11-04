@@ -1524,14 +1524,12 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
     store.set('xv-atlas-view', view);
     page('atlas');
   };
-  const previousCommands = window.XVaultExtraCommands;
-  window.XVaultExtraCommands = query => [
-    ...(previousCommands?.(query) || []),
+  window.XVaultDashboard.commands(() => [
     { name: 'Open Atlas', hint: 'growth, rhythm and people in your archive', run: () => openView('overview') },
     { name: 'Atlas: Calendar', hint: 'every archived day as a heatmap', run: () => openView('calendar') },
     { name: 'Atlas: People', hint: 'everyone you have archived', run: () => openView('people') },
     { name: 'Atlas: Duplicate Lab', hint: 'shared files and look-alike images', run: () => openView('duplicates') },
-  ];
+  ]);
 
   window.XVaultAtlas = { show, open: openView, person: openPerson };
 })();

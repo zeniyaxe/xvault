@@ -7,7 +7,6 @@
       labels: { health: 'Health', integrity: 'Integrity', activity: 'Activity' },
     },
   ];
-  const basePage = page;
   const $ = selector => document.querySelector(selector);
 
   function renderSubnav(name) {
@@ -37,9 +36,11 @@
     }
   }
 
-  page = function (name) {
-    const previous = document.querySelector('.page.show')?.id;
-    const result = basePage(name);
+  let previous = null;
+  window.XVaultDashboard.before('page', () => {
+    previous = document.querySelector('.page.show')?.id;
+  });
+  window.XVaultDashboard.after('page', (result, name) => {
     const shown = document.querySelector('.page.show')?.id?.replace('page-', '') || name;
     renderSubnav(shown);
     document.title = `${$('#title')?.textContent || 'XVault'} · XVault`;
@@ -69,8 +70,7 @@
         { spring: 'snappy' }
       );
     }
-    return result;
-  };
+  });
 
   function setNav(mode, persist = true) {
     document.body.dataset.nav = mode;
@@ -185,12 +185,7 @@
     for (const input of root.querySelectorAll('input[type=range]')) paintRange(input);
   }
   window.XVaultPaintRanges = paintRanges;
-  const baseSync = sync;
-  sync = function () {
-    const result = baseSync();
-    paintRanges();
-    return result;
-  };
+  window.XVaultDashboard.after('sync', () => paintRanges());
 
   function mount() {
     paintRanges();

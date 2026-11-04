@@ -281,12 +281,10 @@
       };
     });
   }
-  const originalOpen = window.openPalette;
-  window.openPalette = function () {
-    originalOpen();
+  window.XVaultDashboard.after('openPalette', () => {
     activeIndex = 0;
     render();
-  };
+  });
   window.renderPalette = render;
   $('#paletteInput')?.addEventListener('input', render);
   document.addEventListener(

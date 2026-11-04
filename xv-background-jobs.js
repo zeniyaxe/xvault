@@ -210,9 +210,7 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountAll, { once: true });
   else mountAll();
 
-  const previousCommands = window.XVaultExtraCommands;
-  window.XVaultExtraCommands = query => [
-    ...(previousCommands?.(query) || []),
+  window.XVaultDashboard.commands(() => [
     {
       name: 'Read text in images (local OCR)',
       hint: 'makes ocr: searches work · runs in the background',
@@ -224,6 +222,6 @@
       run: () => syncAction('bookmarks'),
     },
     { name: 'Sync likes now', hint: 'reads the newest likes in a background X tab', run: () => syncAction('likes') },
-  ];
+  ]);
   window.XVaultBackgroundJobs = { refresh, refreshSync, jobs, counts };
 })();
