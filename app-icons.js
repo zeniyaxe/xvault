@@ -16,6 +16,8 @@
     activity:
       '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M7 8h10M7 12h7M7 16h5"/><circle cx="17" cy="16" r="2"/>',
     studio: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M9 10h12"/>',
+    atlas:
+      '<path d="M4 6.5 9 4l6 2.5L20 4v13.5L15 20l-6-2.5L4 20z"/><path d="M9 4v13.5M15 6.5V20"/><circle cx="12" cy="11" r="1.3"/>',
     reader: '<path d="M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6z"/>',
     settings:
       '<circle cx="12" cy="12" r="8"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="9" r="1"/><circle cx="8" cy="14" r="1"/><path d="M12 20c-1.5-2 0-4 2-4h2"/>',

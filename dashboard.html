@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="xv-pages.css" />
     <link rel="stylesheet" href="xv-settings.css" />
     <link rel="stylesheet" href="xv-motion.css" />
+    <link rel="stylesheet" href="xv-atlas.css" />
     <link rel="stylesheet" href="xv-reader.css" />
     <script defer src="link-utils.js"></script>
     <script defer src="link-export.js"></script>
@@ -33,6 +34,7 @@
     <script defer src="xv-home.js"></script>
     <script defer src="xv-settings.js"></script>
     <script defer src="xv-reader.js"></script>
+    <script defer src="xv-atlas.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script>
   </head>
@@ -45,6 +47,7 @@
         </button>
         <nav id="primaryNav" aria-label="Sections">
           <button class="nav active" data-page="library"><span>Library</span></button>
+          <button class="nav" data-page="atlas"><span>Atlas</span></button>
           <button class="nav" data-page="explorer"><span>Explore</span></button>
           <button class="nav" data-page="home" data-pages="home archive sessions"><span>Capture</span></button>
           <button class="nav" data-page="media"><span>Downloads</span></button>
@@ -283,6 +286,7 @@
             <div id="debugLog" class="debuglog"><div>Waiting for a run…</div></div>
           </details>
         </section>
+        <section class="page" id="page-atlas" aria-label="Atlas"></section>
         <section class="page" id="page-library">
           <div class="lib-main">
             <header class="lib-toolbar libraryCommand">

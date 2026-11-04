@@ -247,7 +247,12 @@
     const query = $('#paletteInput')?.value || '',
       dynamic = dynamicCommands(query),
       normalized = query.trim().toLowerCase();
-    visible = [...dynamic, ...staticCommands, ...(window.XVaultWorkspaceCommands?.() || [])]
+    visible = [
+      ...dynamic,
+      ...staticCommands,
+      ...(window.XVaultExtraCommands?.(query) || []),
+      ...(window.XVaultWorkspaceCommands?.() || []),
+    ]
       .map((command, index) => ({
         command,
         index,
