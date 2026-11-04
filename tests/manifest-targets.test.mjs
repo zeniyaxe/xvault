@@ -22,6 +22,13 @@ assert.ok(firefox.permissions.includes('storage') && firefox.permissions.include
 assert.ok(!firefox.host_permissions.some(host => host.startsWith('file:')));
 assert.ok(firefox.browser_specific_settings.gecko.id.includes('@'));
 assert.equal(firefox.minimum_chrome_version, undefined);
+assert.deepEqual(firefox.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
+assert.deepEqual(
+  firefox.optional_host_permissions,
+  base.optional_host_permissions,
+  'saved-page snapshots ask the same way'
+);
+assert.ok(notes.some(note => /OCR runs in the event page/.test(note)));
 if (base.side_panel) {
   assert.equal(firefox.side_panel, undefined);
   assert.equal(firefox.sidebar_action.default_panel, base.side_panel.default_path);
