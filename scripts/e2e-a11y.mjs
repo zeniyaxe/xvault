@@ -89,7 +89,7 @@ try {
 
   const pages = (
     process.env.A11Y_PAGES ||
-    'home,library,atlas,explorer,archive,sessions,media,studio,health,integrity,activity,settings'
+    'home,library,atlas,explorer,archive,sessions,media,studio,health,integrity,activity,vault,settings'
   ).split(',');
   for (const name of pages) {
     await page.evaluate(target => window.page(target), name);
@@ -100,7 +100,7 @@ try {
   await audit(page, 'dashboard:shell', '.rail, nav, header');
 
   // Atlas sub-views.
-  for (const view of ['calendar', 'people', 'duplicates']) {
+  for (const view of ['review', 'calendar', 'people', 'duplicates']) {
     await page.evaluate(target => window.XVaultAtlas?.open(target), view);
     await page.waitForTimeout(900);
     await audit(page, `atlas:${view}`, '#page-atlas');
@@ -136,6 +136,43 @@ try {
   await page.waitForTimeout(300);
   await audit(page, 'command center', '#palette');
   await page.keyboard.press('Escape');
+
+  // XVault 20 Library dialogs: boards, auto-tag rules and the bulk editor.
+  for (const [tool, label] of [
+    ['boards', 'board manager'],
+    ['rules', 'auto-tag rules'],
+  ]) {
+    await page.evaluate(() => {
+      const menu = document.querySelector('#libraryToolsBody')?.closest('details');
+      if (menu) menu.open = true;
+    });
+    const opener = page.locator(`[data-l3-open="${tool}"]`).first();
+    if (!(await opener.count())) {
+      failures.push(`${label}: no opener in the Library tools menu`);
+      continue;
+    }
+    await opener.click();
+    await page.waitForTimeout(500);
+    await audit(page, label, 'dialog[open]');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+  }
+  // Keyboard only: select two posts with x, then e opens the bulk editor.
+  await page.evaluate(() => window.page('library'));
+  await page.evaluate(() => window.XVaultLibraryRunQuery?.(''));
+  await page.waitForSelector('#list .tweet', { timeout: 8000 });
+  await page.locator('#list .tweet').first().focus();
+  await page.keyboard.press('x');
+  await page.keyboard.press('j');
+  await page.keyboard.press('x');
+  await page.keyboard.press('e');
+  await page.waitForTimeout(600);
+  if (await page.locator('dialog[open] .xv-bulk-form').count()) {
+    await audit(page, 'bulk editor', 'dialog[open]');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+  } else failures.push('bulk editor: x, j, x, e did not open the editor for a keyboard selection');
+  await page.evaluate(() => window.XVaultLibrarySetSelection?.([]));
 
   // Keyboard focus must be visible: Tab a few times and check each focused control draws an outline/ring.
   await page.evaluate(() => window.page('library'));
