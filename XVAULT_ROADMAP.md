@@ -2,6 +2,66 @@
 
 This file is the hand-off document: another session should be able to resume from here.
 
+## v20 "Meridian" pass
+
+Branch: `xvault-20-transformation` (from `xvault-19-horizon` @ d0a1152, PR #2 not yet merged, so the v20 PR stacks on
+it). Version 20.0.0. Goal: one large pass across search, organisation, reading, import, backups, storage, downloads,
+Atlas, accessibility, cross-browser builds, architecture and benchmarks.
+
+| Area | Change |
+| --- | --- |
+| Router | `sw/router.mjs`: `register(type, handler, { allow })` and `mount(service, { denied })`; `dispatch` runs before the legacy `onMessage` switch and returns `null` for unknown types. Sender capabilities come from the existing `messageCapability`. Routed today: sync, derived jobs, semantic, `FETCH_MISSING_POST`, `RULES_PREVIEW/APPLY`, `BOARD_DELETE/COUNTS`, `STORAGE_REPORT`, `PRUNE_ACTIONS`, `X_ARCHIVE_IMPORT_BATCH`. |
+| Meaning search | `sw/semantic.mjs` (Random Indexing: 128-dim int8 post vectors, sparse ±1 index vectors, context vectors trained on up to 200k posts, `buildSemanticIndexAsync` yields every 2,000 posts, incremental `upsert/remove`, `UNKNOWN_MINIMUM` 0.3 for queries with only unknown words). `sw/semantic-service.mjs` stores the index in `xvault-derived/meta` and answers `SEMANTIC_STATUS/SEARCH/SIMILAR/SUGGEST/REBUILD/CLEAR`. Search: `about:`/`meaning:`/`like:`, `similar:`/`related:` (`kind: 'semantic'`), sort `relevance`. The worker joins scores into the search projection only when a semantic clause is present. |
+| Library 3.0 | `xv-library3.js/.css` (loaded after `library-workspace.js`): undo stack (`RESTORE_TWEET_META` from snapshots), bulk editor (`XVaultLibraryBulkMeta`), Select by, boards (`settings.boards`, `userMeta.boards`, drag onto facet), context menu, image search (dHash/pHash from `xvault-derived/phash`), rules dialog. `sw/organize.mjs` compiles rules with the search language and plans idempotent patches + undo snapshots. Table layout lives in `library-workspace.js` (`compactMode === 'table'`, 44px rows, sortable header). |
+| Reader | `xv-reader.js`: `readLater`/`readAt`/`readProgress {index, total, at}`/`highlights [{id, text, at, note?, color?, start?}]` via `UPDATE_TWEET_META` (validated by `validReadingPatch` in `library-storage.mjs`); keys `L`, `M`, `H`; resume banner; auto-read at 98% for Read-later threads. Search `is:later|read|unread|highlighted`, `later:`, `has:highlight`, `highlight:`. |
+| X archive import | `x-archive-import.mjs`: ZIP central-directory reader on a `Blob` (stored + deflate via `DecompressionStream('deflate-raw')`, ZIP64 directories, size caps), `window.YTD.*` parser, mapping to capture shape stamped as an old observation (`observedAt: 1`) so live data wins in `mergeTweetRows`. `importedArchiveRow` in `background.js` re-validates every row (ids, media hosts) and drops `userMeta`. UI on the Storage page (preview → import in batches of 250, cancellable → summary). |
+| Backups | `backup-crypto.mjs`: `XVENC1` container, PBKDF2-SHA-256 600k, AES-256-GCM 1 MiB frames, AAD = frame index + final flag, header `meta` nested. `archive-recovery-ui.mjs`: `XVaultCreateRecoveryFile({ passphrase })` (Storage page "Create encrypted backup" form, passphrase entered twice, min. 8 characters), `.xvenc` restore with passphrase retry; `xvault:backup-saved` event → last backup in `localStorage['xv-last-backup']`. |
+| Storage | `xv-vault.js` → `#page-vault` (System tab group): `navigator.storage.estimate/persisted/persist`, `STORAGE_REPORT` (per-store counts, derived stores, semantic status, adaptive status), cleanup buttons, last backup, import drop zone, engine readout. |
+| Downloads | `sw/adaptive-concurrency.mjs`: AIMD governor (halve on throttle-like interrupt reasons, one cut per cooldown, +1 after a clean streak, user setting is the ceiling); `pump()` uses `downloadGovernor.limit()`; status in `DOWNLOAD_QUEUE_STATS.adaptive`; setting `adaptiveDownloads` (default on). |
+| Atlas | `vault-insights.mjs`: per-year buckets, mention edges (capped 120k, graph ≤160 edges among top people), reading/organising totals. `xv-atlas.js`: Review tab (year picker, totals, month chart, topic drift, 14 badges, SVG people graph with keyboard focus). |
+| Accessibility | `xv-shortcuts.js`: settings `uiHighContrast`, `uiFocusRings`, `uiFontScale`, `readerFontSize`, `shortcutOverrides` (remap by translating keys in the capture phase; sheet repaints effective keys). `scripts/e2e-a11y.mjs` also audits Storage, Atlas Review, board manager, rules dialog and a keyboard-only bulk edit (`x`, `j`, `x`, `e`). |
+| Builds | `scripts/manifest-targets.mjs` + `scripts/build.mjs --target=chrome|edge|firefox|all` (`npm run build:all`); staging zips without directory entries. |
+| Bench | `scripts/bench.mjs` (`npm run bench [-- --sizes=…]`): synthetic Zipf/topic vaults; numbers in CHANGELOG. |
+
+### Decisions (v20)
+
+- **Meaning search without a model.** A neural embedding model would add tens of MB and a WASM runtime for modest
+  gains on tweet-length text; Random Indexing learns this vault's vocabulary in seconds, is deterministic, fully
+  local and rebuildable. It is weaker on words the archive barely uses, so unknown-only queries need a higher score.
+- **Organisation-only automation.** Rules and bulk edits only touch `userMeta`; every bulk write first snapshots the
+  previous `userMeta` so undo is exact, and re-applying a rule changes nothing.
+- **Imported posts never overwrite live captures.** X archive rows are older observations with less data (no
+  metrics, short author info); `mergeTweetRows` keeps live fields and only fills gaps.
+- **Encrypted backups wrap, not replace, recovery files.** The plaintext is the normal JSON Lines recovery file, so
+  restore reuses the existing validation and conflict review. Frame AAD makes truncation detectable.
+- **Firefox is experimental.** It is built from the same source with a manifest transform; no Firefox-specific code
+  paths exist yet, and nothing was run in Firefox.
+
+### Verification log (v20)
+
+- `npm run verify`: integrity OK, ESLint 0 errors (10 pre-existing warnings), 108/108 tests, Prettier clean.
+- `npm run e2e` (Chromium via `CHROMIUM_PATH`): every page at four viewports without console errors; seeded Library
+  filters + exports 9/9. `npm run e2e:a11y`: 24 audited surfaces, 0 violations.
+- Local Playwright smoke (not committed): 53 checks — meaning search, Reader later/highlights, new filters, boards,
+  bulk edit + undo, rules preview/apply/idempotence, Table, Storage report, X archive import of a synthetic ZIP (600
+  tweets + 40 likes; live data wins; invalid rows skipped), encrypted backup download/header/wrong passphrase/restore
+  preview, Year in Review + people graph, adaptive readout, shortcut sheet, remapping, high contrast.
+- `npm run build:all`: Chrome, Edge and Firefox zips (162 files each).
+- **Not verified:** live X capture with the new features, an archive ZIP issued by X (the reader follows the
+  documented `window.YTD` layout; tests use synthetic ZIPs), loading the Firefox build in Firefox, Edge Add-ons
+  store submission, adaptive back-off against real X throttling, screen readers.
+
+### Remaining after v20
+
+1. Keep moving legacy message types from the `background.js` switch into routed services (queue, capture, library
+   API, remote), one commit per move with behavioural tests.
+2. Firefox: run the build in Firefox, replace `chrome.offscreen` OCR with a worker-based path, decide on Remote.
+3. Meaning search: optional multilingual handling (per-language vocabularies) and incremental context-vector
+   retraining instead of periodic rebuilds.
+4. Real X archive fixtures (anonymised) for the importer, including `community-tweet.js` and `note-tweet.js`.
+5. Year in Review export (image/HTML) and a reply/quote graph alongside mentions.
+6. Remaining items from v19: delete superseded `dashboard.js` code, more behavioural tests, OCR languages.
+
 ## v19 "Horizon" pass
 
 Branch: `xvault-19-horizon` (from `main` @ 4dba980, the v18 merge). Version 19.0.0. Goal: implement the remaining
