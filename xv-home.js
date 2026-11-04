@@ -50,6 +50,8 @@
           const text = document.createElement('span');
           text.textContent = (post.text || 'No text').slice(0, 140);
           button.append(text);
+          // The accessible name must start with the visible text (WCAG 2.5.3 Label in Name).
+          button.setAttribute('aria-label', `${text.textContent} — post by @${post.author?.handle || 'unknown'}`);
         }
         button.onclick = () => {
           if (post.media?.length) openLightbox([post], 0, 0);

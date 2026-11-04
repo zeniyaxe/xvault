@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -87,6 +87,7 @@
           </div>
         </header>
         <section class="page" id="page-home">
+          <h2 class="xv-sr-only">Overview</h2>
           <div class="home-top">
             <dl class="vault-stats">
               <div>
@@ -177,6 +178,7 @@
           </section>
         </section>
         <section class="page" id="page-archive">
+          <h2 class="xv-sr-only">New archive</h2>
           <div class="archivegrid">
             <section class="panel">
               <h3>Choose a source</h3>
@@ -292,6 +294,7 @@
         </section>
         <section class="page" id="page-atlas" aria-label="Atlas"></section>
         <section class="page" id="page-library">
+          <h2 class="xv-sr-only">Library</h2>
           <div class="lib-main">
             <header class="lib-toolbar libraryCommand">
               <div class="searchWrap">
@@ -406,6 +409,7 @@
           </div>
         </section>
         <section class="page" id="page-media">
+          <h2 class="xv-sr-only">Media</h2>
           <dl class="vault-stats queue-stats">
             <div>
               <dt>Queued</dt>
@@ -487,6 +491,7 @@
           </details>
         </section>
         <section class="page" id="page-health">
+          <h2 class="xv-sr-only">Health</h2>
           <div class="grid">
             <section class="panel">
               <div class="panelhead">
@@ -516,6 +521,7 @@
           </div>
         </section>
         <section class="page" id="page-sessions">
+          <h2 class="xv-sr-only">Runs</h2>
           <section class="panel">
             <div class="panelhead">
               <div>
@@ -528,6 +534,7 @@
           </section>
         </section>
         <section class="page page-narrow" id="page-studio">
+          <h2 class="xv-sr-only">Studio</h2>
           <section class="panel">
             <h3>Work with one post</h3>
             <p>
@@ -559,6 +566,7 @@
           </section>
         </section>
         <section class="page" id="page-integrity">
+          <h2 class="xv-sr-only">Integrity</h2>
           <div class="grid">
             <section class="panel">
               <div class="panelhead">
@@ -590,7 +598,13 @@
                   <span>Duplicates</span>
                 </div>
               </div>
-              <div id="integrityList" class="debuglog"></div>
+              <div
+                id="integrityList"
+                class="debuglog"
+                tabindex="0"
+                role="region"
+                aria-label="Integrity check results"
+              ></div>
             </section>
             <section class="panel">
               <small>SNAPSHOTS & MANIFESTS</small>
@@ -614,6 +628,7 @@
           </div>
         </section>
         <section class="page" id="page-activity">
+          <h2 class="xv-sr-only">Activity</h2>
           <section class="panel">
             <div class="panelhead">
               <div>
@@ -626,6 +641,7 @@
           </section>
         </section>
         <section class="page" id="page-settings">
+          <h2 class="xv-sr-only">Settings</h2>
           <div class="settings-shell">
             <nav class="settings-nav" aria-label="Settings sections">
               <label class="settings-search"

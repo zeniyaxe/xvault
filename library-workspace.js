@@ -3313,7 +3313,7 @@
     facets.setAttribute('aria-label', 'Library locations');
     const destination = (id, label, icon) =>
       `<button type="button" class="facet-item" data-destination="${id}"><span class="facet-icon" data-facet-icon="${icon}"></span><span>${label}</span><em class="count"></em></button>`;
-    facets.innerHTML = `<nav aria-label="Collections">${destination('all', 'All posts', 'library')}${destination('inbox', 'Inbox', 'inbox')}${destination('favorites', 'Favorites', 'favorite')}${destination('untagged', 'Untagged', 'tag')}${destination('local', 'On disk', 'disk')}${destination('missing', 'Missing media', 'missing')}</nav>
+    facets.innerHTML = `<h2 class="xv-sr-only">Library locations</h2><nav aria-label="Collections">${destination('all', 'All posts', 'library')}${destination('inbox', 'Inbox', 'inbox')}${destination('favorites', 'Favorites', 'favorite')}${destination('untagged', 'Untagged', 'tag')}${destination('local', 'On disk', 'disk')}${destination('missing', 'Missing media', 'missing')}</nav>
 <section class="facet" aria-labelledby="facetSourcesTitle"><h3 id="facetSourcesTitle">Sources</h3><div><button type="button" class="facet-item" data-token="source:bookmarks"><span class="facet-icon" data-facet-icon="saved"></span><span>Bookmarks</span></button><button type="button" class="facet-item" data-token="source:likes"><span class="facet-icon" data-facet-icon="heart"></span><span>Likes</span></button><button type="button" class="facet-item" data-token="source:profile"><span class="facet-icon" data-facet-icon="person"></span><span>Profiles</span></button></div></section>
 <section class="facet" aria-labelledby="facetAuthorsTitle"><h3 id="facetAuthorsTitle">Authors</h3><div id="facetAuthors"></div></section>
 <section class="facet" aria-labelledby="facetTagsTitle"><h3 id="facetTagsTitle">Tags</h3><div id="facetTags"></div></section>
@@ -3478,7 +3478,7 @@
       selectResults.className = 'quiet';
       selectResults.textContent = 'Select page';
       selectResults.title = 'Select the posts currently loaded for this search page (up to 1,500)';
-      selectResults.setAttribute('aria-label', 'Select posts on the current Library page');
+      selectResults.setAttribute('aria-label', 'Select page: select the posts on the current Library page');
       selectResults.onclick = selectAllMatching;
       const exportButton = document.createElement('button');
       exportButton.id = 'libraryExportOpen';

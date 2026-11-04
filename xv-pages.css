@@ -266,6 +266,9 @@
 .source.selected b {
   color: var(--text);
 }
+.source.selected span {
+  color: color-mix(in oklab, var(--muted), var(--text) 30%);
+}
 .archiveopts {
   margin: 6px 0 14px;
 }

@@ -366,7 +366,7 @@
     tools.id = 'xvQueueTools';
     tools.className = 'xv-queue-tools';
     tools.innerHTML =
-      '<input id="xvQueueSearch" placeholder="Filter queue…" aria-label="Filter download queue"><select id="xvQueueKind"><option value="">All items</option><option value="image">Images</option><option value="video">Videos</option><option value="gif">Animations</option><option value="conversion">Conversions</option><option value="failed">Failed</option><option value="complete">Completed</option></select><button type="button" id="xvPauseQueue">Pause all</button><button type="button" id="xvResumeQueue">Resume all</button>';
+      '<input id="xvQueueSearch" placeholder="Filter queue…" aria-label="Filter download queue"><select id="xvQueueKind" aria-label="Show queue items"><option value="">All items</option><option value="image">Images</option><option value="video">Videos</option><option value="gif">Animations</option><option value="conversion">Conversions</option><option value="failed">Failed</option><option value="complete">Completed</option></select><button type="button" id="xvPauseQueue">Pause all</button><button type="button" id="xvResumeQueue">Resume all</button>';
     history.parentNode.insertBefore(tools, history);
     const filter = () => {
       const query = tools.querySelector('#xvQueueSearch').value.toLowerCase(),

@@ -705,7 +705,7 @@ ${data.topLiked?.length ? `<section class="xa-section"><header class="xa-section
   <div class="xa-cal-scroll"><div class="xa-cal" style="--weeks:${weeks}">
     <div class="xa-cal-months" aria-hidden="true">${monthLabels}</div>
     <div class="xa-cal-days" aria-hidden="true"><span>${html(weekdays[0])}</span><span></span><span>${html(weekdays[2])}</span><span></span><span>${html(weekdays[4])}</span><span></span><span></span></div>
-    <div class="xa-cal-grid" role="grid" aria-label="${html(state.calYear)} by day, ${verb}">${cells.join('')}</div>
+    <div class="xa-cal-grid" role="group" aria-label="${html(state.calYear)} by day, ${verb}">${cells.join('')}</div>
   </div></div>
   <div class="xa-cal-scale" aria-hidden="true"><small>Less</small>${[0, 1, 2, 3, 4, 5].map(value => `<i class="xa-day" data-level="${value}"></i>`).join('')}<small>More</small></div>
 </div>

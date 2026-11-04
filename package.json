@@ -13,6 +13,7 @@
     "vendor:ocr": "node scripts/vendor-ocr.mjs",
     "postinstall": "node scripts/vendor-ocr.mjs",
     "e2e": "node scripts/e2e-extension.mjs && node scripts/e2e-library.mjs",
+    "e2e:a11y": "node scripts/e2e-a11y.mjs",
     "verify": "npm run check && npm run lint && npm test && npm run format:check"
   },
   "devDependencies": {
