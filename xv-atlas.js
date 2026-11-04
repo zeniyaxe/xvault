@@ -245,6 +245,15 @@
     else update();
   }
 
+  // On narrow screens the year scrolls sideways; bring the selected day into view.
+  function revealDay(target) {
+    const scroller = target.querySelector('.xa-cal-scroll'),
+      day = scroller?.querySelector('[aria-current="date"]');
+    if (!scroller || !day || scroller.scrollWidth <= scroller.clientWidth) return;
+    const offset = day.getBoundingClientRect().left - scroller.getBoundingClientRect().left;
+    scroller.scrollLeft += offset - scroller.clientWidth / 2;
+  }
+
   function render({ animate = false } = {}) {
     const target = body(),
       data = state.data;
@@ -264,7 +273,10 @@
           window.XVaultMotion?.countUp(element, Number(element.dataset.count), { from: 0 });
       window.XVaultMotion?.stagger(target.querySelectorAll('.xa-kpi,.xa-section'), 'rise', { step: 26, max: 14 });
     }
-    if (state.view === 'calendar') paintDay(state.calDay);
+    if (state.view === 'calendar') {
+      paintDay(state.calDay);
+      revealDay(target);
+    }
     if (state.view === 'people') paintPeople();
     if (state.view === 'duplicates') {
       hydrateShared();
@@ -681,11 +693,11 @@ ${data.topLiked?.length ? `<section class="xa-section"><header class="xa-section
   <div class="xa-year" role="group" aria-label="Year"><button type="button" class="quiet" data-cal-year="${html(years[index - 1] || '')}" aria-label="Previous year" ${index > 0 ? '' : 'disabled'}>‹</button><b>${html(state.calYear)}</b><button type="button" class="quiet" data-cal-year="${html(years[index + 1] || '')}" aria-label="Next year" ${index < years.length - 1 ? '' : 'disabled'}>›</button></div>
 </header>
 <div class="xa-cal-wrap">
-  <div class="xa-cal" style="--weeks:${weeks}">
+  <div class="xa-cal-scroll"><div class="xa-cal" style="--weeks:${weeks}">
     <div class="xa-cal-months" aria-hidden="true">${monthLabels}</div>
     <div class="xa-cal-days" aria-hidden="true"><span>${html(weekdays[0])}</span><span></span><span>${html(weekdays[2])}</span><span></span><span>${html(weekdays[4])}</span><span></span><span></span></div>
     <div class="xa-cal-grid" role="grid" aria-label="${html(state.calYear)} by day, ${verb}">${cells.join('')}</div>
-  </div>
+  </div></div>
   <div class="xa-cal-scale" aria-hidden="true"><small>Less</small>${[0, 1, 2, 3, 4, 5].map(value => `<i class="xa-day" data-level="${value}"></i>`).join('')}<small>More</small></div>
 </div>
 <div class="xa-cal-foot">
