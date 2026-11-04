@@ -52,9 +52,28 @@
   const RELATIVE_UNITS = { h: 3600000, d: DAY, w: 7 * DAY, m: 30 * DAY, y: 365 * DAY };
   const IS_VALUES = ['reply', 'quote', 'repost', 'original', 'thread', 'favorite', 'sensitive', 'media', 'text'];
 
+  // Day filters follow the calendar setting (XVault 19): 'utc' (XVault 18 behaviour) or 'local'.
+  let calendarZone = 'utc';
+  function setCalendarTimeZone(zone) {
+    calendarZone = zone === 'local' ? 'local' : 'utc';
+  }
+  function getCalendarTimeZone() {
+    return calendarZone;
+  }
   function dayStamp(value) {
     const stamp = /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
-    return Number.isFinite(stamp) && new Date(stamp).toISOString().slice(0, 10) === value ? stamp : NaN;
+    if (!Number.isFinite(stamp) || new Date(stamp).toISOString().slice(0, 10) !== value) return NaN;
+    if (calendarZone !== 'local') return stamp;
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day).getTime();
+  }
+  function nextDay(stamp) {
+    if (calendarZone !== 'local') return stamp + DAY;
+    const date = new Date(stamp);
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
+  }
+  function yearStart(year) {
+    return calendarZone === 'local' ? new Date(year, 0, 1).getTime() : Date.UTC(year, 0, 1);
   }
 
   function compileSingle(token) {
@@ -70,15 +89,15 @@
     if (key === 'on' || key === 'archived-on') {
       const stamp = dayStamp(value);
       if (!Number.isFinite(stamp)) return { kind: 'never', issue: `${key}: use a valid YYYY-MM-DD date` };
-      return { kind: 'range', field: key === 'on' ? 'postedAt' : 'archivedAt', start: stamp, end: stamp + DAY };
+      return { kind: 'range', field: key === 'on' ? 'postedAt' : 'archivedAt', start: stamp, end: nextDay(stamp) };
     }
     if (key === 'year' || key === 'archived-year') {
       if (!/^\d{4}$/.test(value)) return { kind: 'never', issue: `${key}: use a four-digit year` };
       return {
         kind: 'range',
         field: key === 'year' ? 'postedAt' : 'archivedAt',
-        start: Date.UTC(Number(value), 0, 1),
-        end: Date.UTC(Number(value) + 1, 0, 1),
+        start: yearStart(Number(value)),
+        end: yearStart(Number(value) + 1),
       };
     }
     if (key === 'within' || key === 'archived-within') {
@@ -115,9 +134,8 @@
       return { kind: 'mediaCount', operator: match[1] || '=', number: Number(match[2]) };
     }
     if (['before', 'after', 'archived-before', 'archived-after'].includes(key)) {
-      const stamp = /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
-      if (!Number.isFinite(stamp) || new Date(stamp).toISOString().slice(0, 10) !== value)
-        return { kind: 'never', issue: `${key}: use a valid YYYY-MM-DD date` };
+      const stamp = dayStamp(value);
+      if (!Number.isFinite(stamp)) return { kind: 'never', issue: `${key}: use a valid YYYY-MM-DD date` };
       return {
         kind: 'date',
         field: key.startsWith('archived-') ? 'archivedAt' : 'postedAt',
@@ -152,9 +170,10 @@
       if (key === 'has' && (value === 'note' || value === 'notes')) return { kind: 'note', value: true };
       if (key === 'has' && (value === 'tag' || value === 'tags')) return { kind: 'untagged', value: false };
       if (key === 'has' && (value === 'download' || value === 'file')) return { kind: 'downloaded', value: true };
+      if (key === 'has' && (value === 'ocr' || value === 'text-in-image')) return { kind: 'ocr' };
       return {
         kind: 'never',
-        issue: `${key}: use video, gif, image, media${key === 'has' ? ', note, tag or download' : ''}`,
+        issue: `${key}: use video, gif, image, media${key === 'has' ? ', note, tag, download or ocr' : ''}`,
       };
     }
     if (key === 'source') return { kind: 'source', value };
@@ -168,6 +187,7 @@
     }
     if (key === 'id') return { kind: 'id', value };
     if (key === 'annotation') return { kind: 'annotationText', value };
+    if (key === 'ocr' || key === 'image-text') return { kind: 'ocrText', value };
     if (key === 'media-note' || key === 'medianote') return { kind: 'mediaNoteText', value };
     if (key === 'note' && value !== 'true' && value !== 'false') return { kind: 'noteText', value };
     if (key === 'downloaded' || key === 'missing' || key === 'note') {
@@ -233,6 +253,8 @@
     if (rule.kind === 'conversation') return row.conversationId === rule.value || row.id === rule.value;
     if (rule.kind === 'quotes') return row.quotedPostId === rule.value;
     if (rule.kind === 'mediaCount') return compareNumber(Number(row.mediaCount) || 0, rule.operator, rule.number);
+    if (rule.kind === 'ocr') return !!row.ocrText;
+    if (rule.kind === 'ocrText') return String(row.ocrText || '').includes(rule.value);
     if (rule.kind === 'date') {
       const value = Number(row[rule.field]);
       return Number.isFinite(value) && value > 0 && (rule.after ? value >= rule.value : value < rule.value);
@@ -398,6 +420,10 @@
       noteText: [String(meta.note || '').toLowerCase(), ...mediaNotes, ...annotationTexts].join(' '),
       mediaNoteText: mediaNotes.join(' '),
       annotationText: annotationTexts.join(' '),
+      // Text recognised locally in images (xvault-derived/ocr), joined only for ocr:/has:ocr queries.
+      ocrText: String(options.ocrText || '')
+        .toLowerCase()
+        .replace(/\s+/g, ' '),
       archivedAt: Number(post.archivedAt || 0),
       postedAt: new Date(post.createdAt || 0).getTime(),
       language: String(post.language || '').toLowerCase(),
@@ -453,6 +479,8 @@
   }
 
   return Object.freeze({
+    setCalendarTimeZone,
+    getCalendarTimeZone,
     tokenizeQuery,
     parseNum,
     compileQuery,

@@ -62,9 +62,11 @@
   let helperObserver = null;
   let helperActive = 0;
   const helperQueue = [];
-  const baseRender = renderLib;
-  const baseTokenMatch = tokenMatch;
-  const baseLightbox = renderLightbox;
+  // The workspace owns the Library list, search matching and lightbox; dashboard.js keeps the built-in
+  // versions, which these providers receive and call where they still apply.
+  let baseRender = null,
+    baseTokenMatch = null,
+    baseLightbox = null;
   const model = XVaultLibraryModel;
   let compactRows = [];
   let compactKey = '';
@@ -717,7 +719,7 @@
     void refreshActiveLibrarySurfaces(ids?.length ? new Set(ids.map(String)) : null);
   };
 
-  tokenMatch = (post, token) => {
+  const workspaceTokenMatch = (post, token) => {
     const match = /^downloaded:(true|false)$/i.exec(token);
     if (match) {
       const downloaded = model.isDownloaded(post, libraryDownloads);
@@ -740,6 +742,10 @@
       );
     return baseTokenMatch(post, token);
   };
+  window.XVaultDashboard.provide('tokenMatch', builtin => {
+    baseTokenMatch = builtin;
+    return workspaceTokenMatch;
+  });
 
   function resultRows() {
     if (!loadedQueryKey) return null;
@@ -931,7 +937,7 @@
     }
   }
 
-  renderLib = function (dataReady = false) {
+  const workspaceRenderLib = function (dataReady = false) {
     const q = ($('#search')?.value || '').trim(),
       sort = $('#sort')?.value || 'new';
     // loadLib calls renderLib(true) immediately after installing a completed
@@ -1060,8 +1066,12 @@
     hydrateHelperMedia($('#list'));
     return rows;
   };
+  window.XVaultDashboard.provide('renderLib', builtin => {
+    baseRender = builtin;
+    return workspaceRenderLib;
+  });
 
-  loadLib = async function () {
+  const workspaceLoadLib = async function () {
     if (mutationBusy) return toast('Wait for the current Library change to finish');
     const generation = ++libraryLoadGeneration;
     const previous = library;
@@ -1358,6 +1368,7 @@
       }
     }
   };
+  window.XVaultDashboard.provide('loadLib', () => workspaceLoadLib);
 
   function renderPaging(pages, hasMore = false) {
     const target = $('#libraryPages');
@@ -2470,7 +2481,7 @@
   }
   window.XVaultHydrateHelperMedia = hydrateHelperMedia;
 
-  renderLightbox = function () {
+  const workspaceRenderLightbox = function () {
     releaseHelperMedia($('#lbContent'));
     baseLightbox();
     const context = window.XVaultLightboxContext?.();
@@ -2496,6 +2507,10 @@
     if (video) installPlayer(video);
     renderMediaAnnotations(video);
   };
+  window.XVaultDashboard.provide('renderLightbox', builtin => {
+    baseLightbox = builtin;
+    return workspaceRenderLightbox;
+  });
 
   function installPlayer(video) {
     const meta = $('#lbMeta');
@@ -3298,7 +3313,7 @@
     facets.setAttribute('aria-label', 'Library locations');
     const destination = (id, label, icon) =>
       `<button type="button" class="facet-item" data-destination="${id}"><span class="facet-icon" data-facet-icon="${icon}"></span><span>${label}</span><em class="count"></em></button>`;
-    facets.innerHTML = `<nav aria-label="Collections">${destination('all', 'All posts', 'library')}${destination('inbox', 'Inbox', 'inbox')}${destination('favorites', 'Favorites', 'favorite')}${destination('untagged', 'Untagged', 'tag')}${destination('local', 'On disk', 'disk')}${destination('missing', 'Missing media', 'missing')}</nav>
+    facets.innerHTML = `<h2 class="xv-sr-only">Library locations</h2><nav aria-label="Collections">${destination('all', 'All posts', 'library')}${destination('inbox', 'Inbox', 'inbox')}${destination('favorites', 'Favorites', 'favorite')}${destination('untagged', 'Untagged', 'tag')}${destination('local', 'On disk', 'disk')}${destination('missing', 'Missing media', 'missing')}</nav>
 <section class="facet" aria-labelledby="facetSourcesTitle"><h3 id="facetSourcesTitle">Sources</h3><div><button type="button" class="facet-item" data-token="source:bookmarks"><span class="facet-icon" data-facet-icon="saved"></span><span>Bookmarks</span></button><button type="button" class="facet-item" data-token="source:likes"><span class="facet-icon" data-facet-icon="heart"></span><span>Likes</span></button><button type="button" class="facet-item" data-token="source:profile"><span class="facet-icon" data-facet-icon="person"></span><span>Profiles</span></button></div></section>
 <section class="facet" aria-labelledby="facetAuthorsTitle"><h3 id="facetAuthorsTitle">Authors</h3><div id="facetAuthors"></div></section>
 <section class="facet" aria-labelledby="facetTagsTitle"><h3 id="facetTagsTitle">Tags</h3><div id="facetTags"></div></section>
@@ -3463,7 +3478,7 @@
       selectResults.className = 'quiet';
       selectResults.textContent = 'Select page';
       selectResults.title = 'Select the posts currently loaded for this search page (up to 1,500)';
-      selectResults.setAttribute('aria-label', 'Select posts on the current Library page');
+      selectResults.setAttribute('aria-label', 'Select page: select the posts on the current Library page');
       selectResults.onclick = selectAllMatching;
       const exportButton = document.createElement('button');
       exportButton.id = 'libraryExportOpen';

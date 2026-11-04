@@ -292,24 +292,28 @@
   stroke-width: 3.4;
   animation: xa-fade 600ms var(--ease) both;
 }
-.xa-ring.is-photo,
-.xa-swatch.is-photo {
+.xa-ring.is-photo {
   stroke: var(--xa-photo);
+}
+.xa-swatch.is-photo {
   background: var(--xa-photo);
 }
-.xa-ring.is-video,
-.xa-swatch.is-video {
+.xa-ring.is-video {
   stroke: var(--xa-video);
+}
+.xa-swatch.is-video {
   background: var(--xa-video);
 }
-.xa-ring.is-gif,
-.xa-swatch.is-gif {
+.xa-ring.is-gif {
   stroke: var(--xa-gif);
+}
+.xa-swatch.is-gif {
   background: var(--xa-gif);
 }
-.xa-ring.is-other,
-.xa-swatch.is-other {
+.xa-ring.is-other {
   stroke: var(--xa-other);
+}
+.xa-swatch.is-other {
   background: var(--xa-other);
 }
 .xa-donut-label {
@@ -1296,4 +1300,14 @@ html.xv-calm .xa-area,
 html.xv-calm .xa-ring {
   animation: none !important;
   stroke-dashoffset: 0;
+}
+
+/* Large archives: let the browser skip layout/paint for off-screen tiles and groups. */
+.xa-person {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+.xa-group {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
 }

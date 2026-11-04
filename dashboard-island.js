@@ -1,7 +1,5 @@
 /* Compact queue status for the dashboard. Reuses the existing queue poll. */
 (() => {
-  const baseQueueStats = queueStats;
-  const basePage = page;
   let latestQueue = null;
 
   function updateIsland() {
@@ -38,18 +36,11 @@
     island.querySelector('.xv-island-count').textContent = converting || active || failed || queued || '✓';
   }
 
-  queueStats = async function () {
-    const result = await baseQueueStats();
+  window.XVaultDashboard.after('queueStats', result => {
     latestQueue = result;
     updateIsland();
-    return result;
-  };
-
-  page = function (name) {
-    const result = basePage(name);
-    updateIsland();
-    return result;
-  };
+  });
+  window.XVaultDashboard.after('page', () => updateIsland());
 
   function mount() {
     const island = document.createElement('aside');

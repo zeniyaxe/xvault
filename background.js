@@ -7,6 +7,9 @@ import {
   matchRecoveryDownload,
 } from './reliability.mjs';
 import { createInsightsAccumulator, orderThread, compactPost, previewUrl, mediaKind } from './vault-insights.mjs';
+import { createDerivedService } from './sw/derived-service.mjs';
+import { createSyncScheduler } from './sw/sync-scheduler.mjs';
+import { createMissingPostFetcher } from './sw/missing-posts.mjs';
 import {
   readLibraryPage,
   readLibraryRecords,
@@ -446,6 +449,16 @@ const defaults = {
   recentProfiles: [],
   pinnedProfiles: [],
   savedViews: [],
+  // XVault 19: scheduled Bookmarks/Likes sync (opt-in), calendar time zone.
+  syncEnabled: false,
+  syncPaused: false,
+  syncBookmarksMinutes: 360,
+  syncLikesMinutes: 0,
+  syncMaxPages: 3,
+  syncNotifications: true,
+  syncNotifyAll: false,
+  syncNotifyViews: [],
+  calendarTimeZone: 'local',
   quietCompletionOnly: false,
   dashboardSounds: true,
   soundVolume: 0.14,
@@ -1073,6 +1086,15 @@ function normalizeSettings(raw = {}) {
   if (!['off', 'reduced', 'subtle', 'normal', 'rich', 'extreme'].includes(out.motionLevel)) out.motionLevel = 'normal';
   if (!(Number(out.inboxSince) > 0)) out.inboxSince = Date.now();
   out.libraryTileSize = Math.min(440, Math.max(150, Number(out.libraryTileSize) || 260));
+  for (const key of ['syncBookmarksMinutes', 'syncLikesMinutes']) {
+    const minutes = Math.round(Number(out[key]));
+    out[key] = !Number.isFinite(minutes) || minutes <= 0 ? 0 : Math.min(10080, Math.max(30, minutes));
+  }
+  out.syncMaxPages = Math.min(20, Math.max(1, Math.round(Number(out.syncMaxPages)) || 3));
+  out.syncNotifyViews = Array.isArray(out.syncNotifyViews)
+    ? [...new Set(out.syncNotifyViews.map(String).filter(id => id.length <= 128))].slice(0, 50)
+    : [];
+  if (!['local', 'utc'].includes(out.calendarTimeZone)) out.calendarTimeZone = 'local';
   return out;
 }
 async function getSettings() {
@@ -1080,6 +1102,7 @@ async function getSettings() {
     raw =
       stored.settings && typeof stored.settings === 'object' && !Array.isArray(stored.settings) ? stored.settings : {},
     out = normalizeSettings(raw);
+  globalThis.XVaultLibrarySearch?.setCalendarTimeZone?.(out.calendarTimeZone);
   if (JSON.stringify(raw) !== JSON.stringify(out)) await chrome.storage.local.set({ settings: out });
   return out;
 }
@@ -1097,6 +1120,8 @@ async function writeSettingsPatch(p) {
   h.unshift({ at: Date.now(), settings: cur });
   await chrome.storage.local.set({ settings: next, settingsHistory: h.slice(0, 12) });
   if (next.crossPostDuplicates === 'skip') void runDownloadAssetIndexBackfill();
+  if (['syncEnabled', 'syncBookmarksMinutes', 'syncLikesMinutes'].some(key => key in p))
+    queueMicrotask(() => syncScheduler.schedule().catch(() => {}));
   return next;
 }
 const updateSmartCollections = createSmartCollectionService({
@@ -1151,6 +1176,15 @@ function invalidateActiveLibraryQueries() {
   rankedLibraryPlanCache.clear();
   for (const control of activeLibraryQueries.values()) control.cancelled = true;
 }
+// OCR text lives in xvault-derived; only queries that mention ocr:/has:ocr load the index.
+async function ocrTextFor(compiled) {
+  if (!globalThis.XVaultLibrarySearch.usesRuleKind(compiled, ['ocr', 'ocrText'])) return { revision: 0, map: null };
+  try {
+    return { revision: await derived.ocrIndex.revision(), map: await derived.ocrIndex.map() };
+  } catch {
+    return { revision: 0, map: new Map() };
+  }
+}
 function stableRandomOrder(id, seed) {
   let value = 2166136261;
   for (const character of `${seed}:${id}`) {
@@ -1169,7 +1203,8 @@ async function scanSortedLibraryPage(database, message, settings, control) {
     limit = Math.max(1, Math.min(1500, Math.floor(Number(message.limit) || 120)));
   const query = String(message.query || '').slice(0, 1000),
     compiled = globalThis.XVaultLibrarySearch.compileQuery(query),
-    needsDownloads = globalThis.XVaultLibrarySearch.usesRuleKind(compiled, ['downloaded', 'missing', 'size']);
+    needsDownloads = globalThis.XVaultLibrarySearch.usesRuleKind(compiled, ['downloaded', 'missing', 'size']),
+    ocrText = await ocrTextFor(compiled);
   const revision = await readLibraryRevision(database),
     downloadRevision = needsDownloads ? await readLibraryDownloadRevision(database) : null;
   if (
@@ -1183,7 +1218,15 @@ async function scanSortedLibraryPage(database, message, settings, control) {
     planId = String(message.rankPlanId || queryId),
     randomSeed = Number(message.randomSeed) || 1,
     inboxSince = Number(settings.inboxSince) || 0;
-  const identityKey = JSON.stringify([query, sort, randomSeed, revision, downloadRevision, inboxSince]);
+  const identityKey = JSON.stringify([
+    query,
+    sort,
+    randomSeed,
+    revision,
+    downloadRevision,
+    inboxSince,
+    ocrText.revision,
+  ]);
   let downloadsByTweet = new Map(),
     cursorOperations = 0,
     downloadRowsRead = 0,
@@ -1224,6 +1267,7 @@ async function scanSortedLibraryPage(database, message, settings, control) {
             downloads: downloadsByTweet.get(String(post.id)) || [],
             inboxSince,
             randomOrder: stableRandomOrder(String(post.id), randomSeed),
+            ocrText: ocrText.map?.get(String(post.id)),
           })
         : globalThis.XVaultLibrarySearch.projectRankPost(post, index, {
             randomOrder: stableRandomOrder(String(post.id), randomSeed),
@@ -1409,6 +1453,7 @@ async function executeLibraryPage(message = {}, control = { cancelled: false }) 
     if (control.cancelled) return { ok: true, cancelled: true, rows: [] };
     const compiled = globalThis.XVaultLibrarySearch.compileQuery(query),
       needsDownloads = globalThis.XVaultLibrarySearch.usesRuleKind(compiled, ['downloaded', 'missing', 'size']),
+      ocrText = await ocrTextFor(compiled),
       queryPlanningMs = performance.now() - planStarted;
     if (!['new', 'old'].includes(sort)) {
       const pageReadStarted = performance.now(),
@@ -1441,7 +1486,10 @@ async function executeLibraryPage(message = {}, control = { cancelled: false }) 
       cancelled: () => control.cancelled,
       match: (post, download) => {
         if (!query) return true;
-        const projection = globalThis.XVaultLibrarySearch.projectPost(post, 0, { inboxSince: settings.inboxSince });
+        const projection = globalThis.XVaultLibrarySearch.projectPost(post, 0, {
+          inboxSince: settings.inboxSince,
+          ocrText: ocrText.map?.get(String(post.id)),
+        });
         if (download) {
           projection.downloaded = download.downloaded;
           projection.missing = download.missing;
@@ -1757,50 +1805,84 @@ const readIndexRows = (database, storeName, indexName, value, limit = 400) =>
     request.onsuccess = () => ok(request.result || []);
     request.onerror = () => no(request.error || new Error(`${indexName} lookup failed`));
   });
-async function vaultInsights(force = false) {
-  if (vaultInsightsPending) return vaultInsightsPending;
-  vaultInsightsPending = (async () => {
-    const database = await db();
-    try {
-      const [revision, total] = await Promise.all([
-        readLibraryRevision(database).catch(() => 0),
-        new Promise(ok => {
-          const request = database.transaction('tweets', 'readonly').objectStore('tweets').count();
-          request.onsuccess = () => ok(request.result);
-          request.onerror = () => ok(-1);
-        }),
-      ]);
-      const key = `${revision}:${total}`;
-      if (!force && vaultInsightsCache?.key === key && Date.now() - vaultInsightsCache.at < 15 * 60000)
-        return { ...vaultInsightsCache.data, cached: true };
-      const started = performance.now(),
-        accumulator = createInsightsAccumulator({ now: Date.now() });
-      let afterKey = null;
-      for (let guard = 0; guard < 100000; guard++) {
-        const page = await readLibraryPage(database, afterKey, 1000);
-        for (const row of page.rows) accumulator.add(row);
-        if (page.done || !page.rows.length) break;
-        afterKey = page.nextKey;
-      }
-      const [stored, downloads] = await Promise.all([
-        navigator.storage?.estimate?.().catch(() => null),
-        queueStats().catch(() => null),
-      ]);
-      const data = accumulator.finish({
-        revision,
-        storage: stored ? { usage: stored.usage || 0, quota: stored.quota || 0 } : null,
-        downloads,
-        computeMs: Math.round(performance.now() - started),
-      });
-      vaultInsightsCache = { key, at: Date.now(), data };
-      return data;
-    } finally {
-      database.close();
+// Atlas statistics. Stale-while-revalidate: the last result is persisted in xvault-derived/meta so a
+// cold service worker answers instantly, then recomputes in the background and broadcasts
+// INSIGHTS_READY on 'xvault-insights' when fresh numbers are available.
+async function vaultInsightsKey(database) {
+  const [revision, total, settings] = await Promise.all([
+    readLibraryRevision(database).catch(() => 0),
+    new Promise(ok => {
+      const request = database.transaction('tweets', 'readonly').objectStore('tweets').count();
+      request.onsuccess = () => ok(request.result);
+      request.onerror = () => ok(-1);
+    }),
+    getSettings(),
+  ]);
+  const timeZone = settings.calendarTimeZone === 'utc' ? 'utc' : 'local';
+  const zoneName = timeZone === 'local' ? Intl.DateTimeFormat().resolvedOptions().timeZone || 'local' : 'UTC';
+  return { revision, timeZone, key: `${revision}:${total}:${timeZone}:${zoneName}:${new Date().toDateString()}` };
+}
+async function computeVaultInsights() {
+  const database = await db();
+  try {
+    const { revision, timeZone, key } = await vaultInsightsKey(database);
+    const started = performance.now(),
+      accumulator = createInsightsAccumulator({ now: Date.now(), timeZone });
+    let afterKey = null;
+    for (let guard = 0; guard < 100000; guard++) {
+      const page = await readLibraryPage(database, afterKey, 1000);
+      for (const row of page.rows) accumulator.add(row);
+      if (page.done || !page.rows.length) break;
+      afterKey = page.nextKey;
     }
-  })().finally(() => {
-    vaultInsightsPending = null;
-  });
-  return vaultInsightsPending;
+    const [stored, downloads] = await Promise.all([
+      navigator.storage?.estimate?.().catch(() => null),
+      queueStats().catch(() => null),
+    ]);
+    const data = accumulator.finish({
+      revision,
+      storage: stored ? { usage: stored.usage || 0, quota: stored.quota || 0 } : null,
+      downloads,
+      computeMs: Math.round(performance.now() - started),
+    });
+    vaultInsightsCache = { key, at: Date.now(), data };
+    derived.store.putMany('meta', [{ key: 'insights', value: { key, at: Date.now(), data } }]).catch(() => {});
+    try {
+      new BroadcastChannel('xvault-insights').postMessage({ type: 'INSIGHTS_READY', key, at: Date.now() });
+    } catch {}
+    return data;
+  } finally {
+    database.close();
+  }
+}
+async function vaultInsights(force = false) {
+  if (vaultInsightsPending && force) return vaultInsightsPending;
+  const database = await db();
+  let current;
+  try {
+    current = await vaultInsightsKey(database);
+  } finally {
+    database.close();
+  }
+  if (!force && vaultInsightsCache?.key === current.key && Date.now() - vaultInsightsCache.at < 15 * 60000)
+    return { ...vaultInsightsCache.data, cached: true };
+  if (!vaultInsightsCache && !force) {
+    const persisted = (await derived.store.getMany('meta', ['insights']).catch(() => new Map())).get('insights')?.value;
+    if (persisted?.data) vaultInsightsCache = { ...persisted, at: persisted.key === current.key ? Date.now() : 0 };
+    if (persisted?.key === current.key) return { ...persisted.data, cached: true };
+  }
+  const refresh = () => {
+    vaultInsightsPending ||= computeVaultInsights().finally(() => {
+      vaultInsightsPending = null;
+    });
+    return vaultInsightsPending;
+  };
+  // Serve the previous numbers immediately (marked stale) and refresh in the background.
+  if (!force && vaultInsightsCache?.data && vaultInsightsCache.data.timeZone === current.timeZone) {
+    refresh().catch(() => {});
+    return { ...vaultInsightsCache.data, cached: true, stale: true };
+  }
+  return refresh();
 }
 async function threadFor(id) {
   if (!/^\d{1,32}$/.test(String(id || ''))) throw Error('Thread lookup requires a post ID');
@@ -3095,10 +3177,65 @@ async function librarySummary() {
     bytes: downloads.filter(x => x.state === 'complete').reduce((n, x) => n + Number(x.totalBytes || 0), 0),
   };
 }
+// Look-alike fingerprints and OCR run as resumable service-worker jobs (see sw/derived-jobs.mjs).
+const derived = createDerivedService({
+  listPage: async (cursor, limit) => mediaFingerprintPage(cursor, limit),
+});
+derived.resume().catch(() => {});
+
+async function postsArchivedSince(since, limit = 2000) {
+  const database = await db();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = database.transaction('tweets', 'readonly'),
+        request = tx
+          .objectStore('tweets')
+          .index('archivedAt')
+          .getAll(IDBKeyRange.lowerBound(Number(since) || 0), limit);
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+const syncScheduler = createSyncScheduler({
+  getSettings,
+  setSettings,
+  activeXTab,
+  sendToX,
+  getJob: id => store('jobs', 'readonly', os => req(os.get(String(id)))),
+  postsArchivedSince,
+  matchesQuery: (post, query) =>
+    globalThis.XVaultLibrarySearch.matchesQuery(globalThis.XVaultLibrarySearch.projectPost(post, 0, {}), query),
+  notify: async (title, message) => {
+    try {
+      await chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon128.png', title, message, priority: 0 });
+    } catch {}
+  },
+});
+syncScheduler.schedule().catch(() => {});
+const missingPosts = createMissingPostFetcher({
+  activeXTab,
+  hasPost: async id => !!(await store('tweets', 'readonly', os => req(os.get(String(id)))).catch(() => null)),
+});
+
 chrome.runtime.onMessage.addListener((m, s, reply) => {
   (async () => {
     const messageCapability = authorizeMessage(m, s, chrome.runtime.id);
     await privateStorageReady;
+    if (m.type === 'FETCH_MISSING_POST') {
+      if (messageCapability === 'content') throw Error('Missing posts are fetched from XVault pages');
+      return await missingPosts.fetchPost(m.id);
+    }
+    if (syncScheduler.handles(m.type)) {
+      if (messageCapability === 'content') throw Error('Scheduled sync is managed from XVault pages');
+      return await syncScheduler.handle(m);
+    }
+    if (derived.handles(m.type)) {
+      if (messageCapability === 'content') throw Error('Derived-data jobs are managed from XVault pages');
+      return await derived.handle(m);
+    }
     if (m.type === 'REMOTE_COMMAND') {
       const allowed = new Set([
         'remote.start',
@@ -5734,6 +5871,8 @@ async function verifyCompletedDownloadCore(downloadId) {
 // Completion verification is awaited by the primary download-state listener so cleanup cannot
 // remove a file before its metadata/magic-byte result is persisted.
 chrome.alarms.onAlarm.addListener(async alarm => {
+  if (derived.onAlarm(alarm?.name)) return;
+  if (syncScheduler.onAlarm(alarm?.name)) return;
   if (alarm?.name === DOWNLOAD_ASSET_INDEX_ALARM) {
     await runDownloadAssetIndexBackfill();
     return;

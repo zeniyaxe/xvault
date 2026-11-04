@@ -2,6 +2,60 @@
 
 This file is the hand-off document: another session should be able to resume from here.
 
+## v19 "Horizon" pass
+
+Branch: `xvault-19-horizon` (from `main` @ 4dba980, the v18 merge). Version 19.0.0. Goal: implement the remaining
+roadmap (v18 follow-ups + "Next milestones" below).
+
+| Area | Change |
+| --- | --- |
+| Background jobs | `sw/derived-store.mjs` (IndexedDB `xvault-derived` v2: `phash`, `ocr` with `postId` index, `meta`), `sw/image-hash.mjs` (dHash compatible with v18 + DCT pHash), `sw/derived-jobs.mjs` (checkpointed runner, alarm `xv-derived-resume`, BroadcastChannel `xvault-derived-jobs`, 429/5xx backoff, unavailable rows, retry cap), `sw/derived-service.mjs` (`DERIVED_JOB_STATUS/START/PAUSE/CANCEL`, `DERIVED_CLEAR`, `OCR_TEXT_FOR_POSTS`, `DERIVED_SUMMARY`). The Duplicate Lab drives the worker job and groups cached fingerprints. |
+| OCR | `offscreen-ocr.html/js` hosts tesseract.js 7 (vendored by `scripts/vendor-ocr.mjs` into ignored `vendor/ocr/`), `sw/ocr.mjs` (offscreen lifecycle, medium renditions, index). Search: `ocr:`, `image-text:`, `has:ocr` (`library-search-core.js` `ocrText` projection; the worker joins OCR text only for those queries and includes the OCR revision in the query identity). UI: Settings → Library `#g-ocr` (`xv-background-jobs.js`). |
+| Sync | `sw/sync-scheduler.mjs`: alarm `xv-sync-tick` (5 min), background tab on `/i/history` (bookmarks) or `/i/history/likes`, `XV_SMART_START` with `scheduled:true` and `maxPages`, run timeout, failure backoff, notifications for watched Smart Collections; `SYNC_STATUS/RUN_NOW/PAUSE/RESUME/STOP`. `content.js` scheduled runs skip checkpoints, fallback scroll, verification and toasts. Settings → X.com `#g-sync`. |
+| Exports | `library-exporters.mjs`: thread grouping (`threadGroups`, `buildThread` via `orderThread`), Markdown note per thread + index, single-file HTML. Buttons `#exportThreadsMarkdown` / `#exportThreadsHtml`. |
+| Atlas | `calendarTimeZone` setting (`'local'`/`'utc'`) used by insights (`dayKeyIn`, streaks) and search (`setCalendarTimeZone`); insights persisted in `xvault-derived/meta` and served stale-while-revalidate (`INSIGHTS_READY` on `xvault-insights`); People grid windowed with an IntersectionObserver. |
+| Reader | Inline note editor (`UPDATE_TWEET_META` with `expectedNote`), `FETCH_MISSING_POST` (`sw/missing-posts.mjs`, user-initiated only), position indicator, more keys, HTML save, phone CSS. |
+| Search assist | `search-ranking.js` (usage map in `localStorage['xv-search-usage']`, decayed frequency × recency), contextual help row, groups, OCR keys, `Ctrl+Space`, paging keys, time-zone-aware dates. |
+| Architecture | `dashboard-hooks.js`: `XVaultDashboard.before/after/provide/commands`. `dashboard.js` routes `page, sync, apply, queueStats, loadLib, renderLib, tokenMatch, renderLightbox, openPalette` through `invoke()`; no script reassigns those functions any more. `XVaultExtraCommands` is now an aggregate of registered sources. |
+| Accessibility | `scripts/e2e-a11y.mjs` (`npm run e2e:a11y`, CI e2e job): axe-core on all pages and dialogs; currently 0 violations of any impact. |
+| Release | `.github/workflows/release.yml` on `v*` tags (version check, verify, Python tests, build, zip check, SHA-256, `gh release`). |
+
+### Decisions (v19)
+
+- **Derived data is a cache.** Fingerprints and OCR text live in `xvault-derived`, never in the archive DB or in
+  recovery/export files, so they cannot corrupt an archive and can be cleared or rebuilt.
+- **OCR ships with the extension** (no runtime model download): predictable, offline, nothing leaves the device. The
+  cost is ~8 MB in the zip (15 MB unpacked) and `'wasm-unsafe-eval'` in the extension CSP (no remote code).
+- **Scheduled sync is conservative:** off by default, only with a signed-in x.com tab available, newest pages only,
+  long intervals, backoff on errors; it reuses the existing collector instead of a new X client.
+- **Calendar time zone defaults to UTC** so v18 behaviour, saved searches and counts are unchanged until the user opts
+  into local time.
+- **Hooks over reassignment:** one provider per replaced function, any number of observers; providers receive the
+  built-in implementation, so the superseded code in `dashboard.js` stays reachable where the workspace still uses it.
+
+### Verification log (v19)
+
+- `npm run verify`: integrity OK, ESLint 0 errors (10 pre-existing warnings), 99/99 tests, Prettier clean.
+- `npm run e2e` (Chromium 153 via `CHROMIUM_PATH`): every page at four viewports without console errors; seeded
+  Library filters + exports 9/9. `npm run e2e:a11y`: 0 axe violations; focus ring, Reader focus return and reduced
+  motion checks pass.
+- Local Playwright smoke (not committed): 42 checks across Atlas, background Duplicate Lab scan, Reader, search
+  suggestions (help row, `has:ocr`, `Ctrl+Space`, usage memory), `thread:` filter, phone/tablet overflow. OCR verified
+  inside the extension on a generated image ("Hello XVault OCR", confidence 93) and through the job messages.
+- **Not verified:** scheduled sync against live X (no account in the sandbox), real X CDN images for OCR/pHash at
+  scale, notifications on a desktop OS, screen-reader sessions.
+
+### Remaining after v19
+
+1. Split `background.js` (~6.5k lines) further: the message switch into a handler map/router and queue/capture/remote
+   modules. v19 added new features as `sw/` modules but did not move existing code.
+2. Delete the parts of `dashboard.js` that providers fully replace (`builtinLoadLib`) once nothing calls them.
+3. Convert more structural source-text tests (`tests/library-performance.test.mjs` has ~100 regex assertions) into
+   behavioral tests; v19 added behavioral tests for all new modules only.
+4. Incremental insights: true per-record deltas instead of stale-while-revalidate full recomputes.
+5. OCR languages beyond English (ship or opt-in additional `traineddata`), OCR of video thumbnails.
+6. Keyboard-only Library walkthrough test; screen-reader pass (NVDA/VoiceOver).
+
 ## v18 "Atlas" pass
 
 Branch: `xvault-18-atlas` (from `main` @ 424b2fb, "Publish current XVault v17.0.0 source"). Version 18.0.0.
@@ -108,7 +162,7 @@ Branch: `overhaul/v17` (from `main` @ 21e6d74, "Publish XVault v16.0.0 extension
   (sandbox has no access to X media), the Windows helper/Remote scripts (`.bat`/`.ps1`), Markdown export through a
   real folder picker (needs a user gesture + native dialog).
 
-## Next milestones (not yet implemented)
+## Next milestones (from pass 1 — items 2–8 done in v19, see "Remaining after v19")
 
 1. Split `background.js` (6k lines) into modules: `queue/`, `capture/`, `remote/`, `storage-api/`, `messages.mjs`
    router. Start with the message switch (one handler map keyed by type) — it is the main merge-conflict hotspot.

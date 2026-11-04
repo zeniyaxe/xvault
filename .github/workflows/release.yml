@@ -1,0 +1,77 @@
+name: Release
+# Publishes a versioned extension ZIP when a version tag (v19.0.0, v19.1.0-beta.1, …) is pushed.
+# The tag must match manifest.json/package.json; the full verification suite runs before packaging.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)build, e.g. v19.0.0'
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tag matches manifest and package versions
+        run: |
+          manifest=$(node -p "require('./manifest.json').version")
+          pkg=$(node -p "require('./package.json').version")
+          tag="${TAG#v}"
+          echo "tag=$tag manifest=$manifest package=$pkg"
+          if [ "${tag%%-*}" != "$manifest" ] || [ "$manifest" != "$pkg" ]; then
+            echo "::error::Tag $TAG does not match manifest $manifest / package $pkg"; exit 1
+          fi
+      - run: npm run verify
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python helper tests
+        run: |
+          python -m py_compile FFmpeg_Helper/*.py
+          python -m unittest discover -s tests/python -v
+      - name: Build extension ZIP (includes the local OCR engine)
+        run: npm run build
+      - name: Validate package
+        run: |
+          zip="dist/XVault-$(node -p "require('./manifest.json').version").zip"
+          test -f "$zip"
+          unzip -l "$zip" | grep -q ' manifest.json$'
+          unzip -l "$zip" | grep -q ' background.js$'
+          unzip -l "$zip" | grep -q 'vendor/ocr/worker.min.js$'
+          unzip -l "$zip" | grep -q 'vendor/ocr/lang/eng.traineddata.gz$'
+          if unzip -l "$zip" | grep -E ' (node_modules|tests|scripts|\.github)/' ; then echo "::error::dev files leaked into the ZIP"; exit 1; fi
+          unzip -p "$zip" manifest.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const m=JSON.parse(s);if(m.manifest_version!==3)process.exit(1);console.log('manifest ok',m.version)})"
+          sha256sum "$zip" > "$zip.sha256"
+          cat "$zip.sha256"
+      - name: Release notes from CHANGELOG
+        run: |
+          version="${TAG#v}"
+          awk -v v="$version" 'BEGIN{p=0} /^## /{ if(p) exit; if(index($0,v)) p=1 } p' CHANGELOG.md > release-notes.md
+          [ -s release-notes.md ] || echo "XVault $TAG" > release-notes.md
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$TAG" in *-*) prerelease="--prerelease";; esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.zip dist/*.zip.sha256 --clobber
+          else
+            gh release create "$TAG" dist/*.zip dist/*.zip.sha256 --title "XVault $TAG" --notes-file release-notes.md $prerelease
+          fi

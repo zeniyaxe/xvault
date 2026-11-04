@@ -319,12 +319,7 @@
         showTheme(pendingTheme || committed());
       }
     });
-    const baseApply = apply;
-    apply = function () {
-      const result = baseApply();
-      applyAll();
-      return result;
-    };
+    window.XVaultDashboard.after('apply', () => applyAll());
     if (settings && Object.keys(settings).length) applyAll();
     if (ALIASES[settings.theme]) save({ theme: ALIASES[settings.theme] }, false);
   }

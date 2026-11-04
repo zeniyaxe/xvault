@@ -1,4 +1,18 @@
 /* exported openDetails */
+// Extension points other dashboard scripts register with instead of reassigning these functions (dashboard-hooks.js).
+const dashboardHooks = window.XVaultDashboardHooks.createHooks([
+  'page',
+  'sync',
+  'apply',
+  'queueStats',
+  'loadLib',
+  'renderLib',
+  'tokenMatch',
+  'renderLightbox',
+  'openPalette',
+]);
+window.XVaultDashboard = dashboardHooks;
+window.XVaultExtraCommands = query => dashboardHooks.extraCommands(query);
 const $ = s => document.querySelector(s),
   $$ = s => [...document.querySelectorAll(s)],
   call = m => {
@@ -431,7 +445,10 @@ function bind() {
     { passive: false }
   );
 }
-function page(n) {
+function page(...args) {
+  return dashboardHooks.invoke('page', builtinPage, this, args);
+}
+function builtinPage(n) {
   if (!$('#page-' + n)) n = 'home';
   $$('.page').forEach(x => x.classList.toggle('show', x.id === `page-${n}`));
   $$('.nav').forEach(x => {
@@ -754,7 +771,10 @@ function debug(x) {
   debugLines = debugLines.slice(0, 80);
   $('#debugLog').innerHTML = debugLines.map(x => `<div>${esc(x)}</div>`).join('');
 }
-async function loadLib() {
+function loadLib(...args) {
+  return dashboardHooks.invoke('loadLib', builtinLoadLib, this, args);
+}
+async function builtinLoadLib() {
   const limit = Math.max(1, Math.min(1500, Number(settings.libraryPageSize) || 120));
   const r = await call({
     type: 'QUERY_LIBRARY_PAGE',
@@ -1010,7 +1030,10 @@ function parseNum(v) {
   if (m[2] === 'b') n *= 1e9;
   return n;
 }
-function tokenMatch(t, token) {
+function tokenMatch(...args) {
+  return dashboardHooks.invoke('tokenMatch', builtinTokenMatch, this, args);
+}
+function builtinTokenMatch(t, token) {
   let [k, ...rest] = token.split(':'),
     v = rest.join(':');
   if (!v)
@@ -1060,7 +1083,10 @@ function mediaLogical(m) {
   if (m.type === 'photo') return 'image';
   return /gif|animated/i.test(m.type || '') ? 'gif' : 'media';
 }
-function renderLib(options = {}) {
+function renderLib(...args) {
+  return dashboardHooks.invoke('renderLib', builtinRenderLib, this, args);
+}
+function builtinRenderLib(options = {}) {
   const box = $('#list');
   if (!box) return;
   const videoTimes = new Map([...box.querySelectorAll('video')].map(v => [v.src, v.currentTime || 0]));
@@ -1317,7 +1343,10 @@ function verificationText(r) {
     state
   );
 }
-async function queueStats() {
+function queueStats(...args) {
+  return dashboardHooks.invoke('queueStats', builtinQueueStats, this, args);
+}
+async function builtinQueueStats() {
   if (!$('#qQueued')) return;
   const q = await call({ type: 'DOWNLOAD_QUEUE_STATS' });
   if (!q?.ok) return;
@@ -1453,12 +1482,16 @@ async function save(p, notify = true) {
   if (notify) flashSaved();
   return settings;
 }
-function sync() {
+function sync(...args) {
+  return dashboardHooks.invoke('sync', builtinSync, this, args);
+}
+function builtinSync() {
   $$('[data-setting]').forEach(e => {
     const v = settings[e.dataset.setting];
     if (e.type === 'checkbox') e.checked = !!v;
     else if (v != null) e.value = String(v);
   });
+  window.XVaultLibrarySearch?.setCalendarTimeZone?.(settings.calendarTimeZone);
   $('#capture').checked = settings.captureWhileBrowsing !== false;
   $('#runMirror').checked = !!settings.fullMirrorMode;
   $('#collectionHandles').value = (settings.profileCollections || []).join('\n');
@@ -1479,7 +1512,10 @@ function sync() {
       $('#search').value = settings.lastLibraryQuery;
   }
 }
-function apply() {
+function apply(...args) {
+  return dashboardHooks.invoke('apply', builtinApply, this, args);
+}
+function builtinApply() {
   const level =
     matchMedia('(prefers-reduced-motion: reduce)').matches || settings.safeMode || settings.reducedMotion
       ? 'reduced'
@@ -1625,7 +1661,10 @@ const commands = [
   ['Test crawler', testCrawler],
   ['Test download', testDownload],
 ];
-function openPalette() {
+function openPalette(...args) {
+  return dashboardHooks.invoke('openPalette', builtinOpenPalette, this, args);
+}
+function builtinOpenPalette() {
   const invoker = document.activeElement;
   $('#palette').classList.remove('hidden');
   $('#paletteInput').value = '';
@@ -2632,7 +2671,10 @@ function openLightbox(rows, ti, mi) {
   renderLightbox();
   window.XVaultOpenFocusScope?.('lightbox', invokingElement);
 }
-function renderLightbox() {
+function renderLightbox(...args) {
+  return dashboardHooks.invoke('renderLightbox', builtinRenderLightbox, this, args);
+}
+function builtinRenderLightbox() {
   const x = lightboxItems[lightboxIndex];
   if (!x) return;
   const { t, m } = x,

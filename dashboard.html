@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -36,7 +36,9 @@
     <script defer src="xv-settings.js"></script>
     <script defer src="xv-reader.js"></script>
     <script defer src="xv-atlas.js"></script>
+    <script defer src="search-ranking.js"></script>
     <script defer src="xv-search-assist.js"></script>
+    <script defer src="xv-background-jobs.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script>
   </head>
@@ -85,6 +87,7 @@
           </div>
         </header>
         <section class="page" id="page-home">
+          <h2 class="xv-sr-only">Overview</h2>
           <div class="home-top">
             <dl class="vault-stats">
               <div>
@@ -175,6 +178,7 @@
           </section>
         </section>
         <section class="page" id="page-archive">
+          <h2 class="xv-sr-only">New archive</h2>
           <div class="archivegrid">
             <section class="panel">
               <h3>Choose a source</h3>
@@ -290,6 +294,7 @@
         </section>
         <section class="page" id="page-atlas" aria-label="Atlas"></section>
         <section class="page" id="page-library">
+          <h2 class="xv-sr-only">Library</h2>
           <div class="lib-main">
             <header class="lib-toolbar libraryCommand">
               <div class="searchWrap">
@@ -374,6 +379,8 @@
                     <button id="csv" type="button">Export CSV</button>
                     <button id="exportMarkdown" type="button">Export Markdown (Obsidian)</button>
                     <button id="exportHtml" type="button">Export offline HTML</button>
+                    <button id="exportThreadsMarkdown" type="button">Export threads (Markdown)</button>
+                    <button id="exportThreadsHtml" type="button">Export threads (HTML)</button>
                     <button id="remoteQuick" type="button">Browse on phone</button>
                     <hr />
                     <button id="clearLibrary" type="button" class="danger">Clear library…</button>
@@ -402,6 +409,7 @@
           </div>
         </section>
         <section class="page" id="page-media">
+          <h2 class="xv-sr-only">Media</h2>
           <dl class="vault-stats queue-stats">
             <div>
               <dt>Queued</dt>
@@ -483,6 +491,7 @@
           </details>
         </section>
         <section class="page" id="page-health">
+          <h2 class="xv-sr-only">Health</h2>
           <div class="grid">
             <section class="panel">
               <div class="panelhead">
@@ -512,6 +521,7 @@
           </div>
         </section>
         <section class="page" id="page-sessions">
+          <h2 class="xv-sr-only">Runs</h2>
           <section class="panel">
             <div class="panelhead">
               <div>
@@ -524,6 +534,7 @@
           </section>
         </section>
         <section class="page page-narrow" id="page-studio">
+          <h2 class="xv-sr-only">Studio</h2>
           <section class="panel">
             <h3>Work with one post</h3>
             <p>
@@ -555,6 +566,7 @@
           </section>
         </section>
         <section class="page" id="page-integrity">
+          <h2 class="xv-sr-only">Integrity</h2>
           <div class="grid">
             <section class="panel">
               <div class="panelhead">
@@ -586,7 +598,13 @@
                   <span>Duplicates</span>
                 </div>
               </div>
-              <div id="integrityList" class="debuglog"></div>
+              <div
+                id="integrityList"
+                class="debuglog"
+                tabindex="0"
+                role="region"
+                aria-label="Integrity check results"
+              ></div>
             </section>
             <section class="panel">
               <small>SNAPSHOTS & MANIFESTS</small>
@@ -610,6 +628,7 @@
           </div>
         </section>
         <section class="page" id="page-activity">
+          <h2 class="xv-sr-only">Activity</h2>
           <section class="panel">
             <div class="panelhead">
               <div>
@@ -622,6 +641,7 @@
           </section>
         </section>
         <section class="page" id="page-settings">
+          <h2 class="xv-sr-only">Settings</h2>
           <div class="settings-shell">
             <nav class="settings-nav" aria-label="Settings sections">
               <label class="settings-search"
@@ -791,6 +811,24 @@
                       ><button id="inboxAll">Put unreviewed posts back in Inbox</button>
                     </div>
                   </section>
+                  <section class="settinggroup" id="g-ocr">
+                    <h3>Text in images (local OCR)</h3>
+                    <p class="settingHint">
+                      Reads text inside archived images with the OCR engine bundled in XVault, so
+                      <code>ocr:receipt</code> and <code>has:ocr</code> work in search. Runs in the background, resumes
+                      after Chrome restarts and never sends images or text to any service.
+                    </p>
+                    <div class="xv-job" id="xvOcrPanel">
+                      <div class="xv-job-meter" aria-hidden="true"><i data-ocr-meter></i></div>
+                      <p class="xv-job-status" data-ocr-status role="status" aria-live="polite">Checking…</p>
+                      <div class="row">
+                        <button type="button" class="primary" data-ocr="start" aria-pressed="false">
+                          Read text in images</button
+                        ><button type="button" data-ocr="cancel" hidden>Cancel</button
+                        ><button type="button" class="quiet" data-ocr="clear">Forget image text</button>
+                      </div>
+                    </div>
+                  </section>
                   <section class="settinggroup" id="g-layout">
                     <h3>Layout and detail</h3>
                     <div class="formgrid two">
@@ -798,6 +836,13 @@
                         ><span>Posts per page</span
                         ><input type="number" min="50" max="1500" data-setting="libraryPageSize"
                       /></label>
+                      <label class="field"
+                        ><span>Calendar days and streaks</span
+                        ><select data-setting="calendarTimeZone">
+                          <option value="local">Local time (this computer)</option>
+                          <option value="utc">UTC (XVault 18 behaviour)</option>
+                        </select></label
+                      >
                     </div>
                     <div class="toggles">
                       <label
@@ -1278,6 +1323,77 @@
                 </header>
                 <div class="groups">
                   <div id="xSlot"></div>
+                  <section class="settinggroup" id="g-sync">
+                    <h3>Scheduled sync</h3>
+                    <p class="settingHint">
+                      Keeps Bookmarks and Likes current while an x.com tab is open. XVault reads only the newest pages
+                      in a background tab using your signed-in session, at a gentle pace, and backs off when X asks it
+                      to.
+                    </p>
+                    <div class="toggles">
+                      <label
+                        ><span
+                          ><b>Sync automatically</b
+                          ><small>Off by default. Nothing runs without an open X tab.</small></span
+                        ><input type="checkbox" data-setting="syncEnabled"
+                      /></label>
+                    </div>
+                    <div class="formgrid two">
+                      <label class="field"
+                        ><span>Bookmarks</span
+                        ><select data-setting="syncBookmarksMinutes">
+                          <option value="0">Off</option>
+                          <option value="60">Every hour</option>
+                          <option value="180">Every 3 hours</option>
+                          <option value="360">Every 6 hours</option>
+                          <option value="720">Every 12 hours</option>
+                          <option value="1440">Daily</option>
+                          <option value="10080">Weekly</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Likes</span
+                        ><select data-setting="syncLikesMinutes">
+                          <option value="0">Off</option>
+                          <option value="60">Every hour</option>
+                          <option value="180">Every 3 hours</option>
+                          <option value="360">Every 6 hours</option>
+                          <option value="720">Every 12 hours</option>
+                          <option value="1440">Daily</option>
+                          <option value="10080">Weekly</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Newest pages per run</span
+                        ><input type="number" min="1" max="20" data-setting="syncMaxPages"
+                      /></label>
+                    </div>
+                    <div class="toggles">
+                      <label
+                        ><span
+                          ><b>Notify about matching posts</b
+                          ><small>For the Smart Collections ticked below.</small></span
+                        ><input type="checkbox" data-setting="syncNotifications"
+                      /></label>
+                      <label
+                        ><span><b>Notify after every sync with new posts</b></span
+                        ><input type="checkbox" data-setting="syncNotifyAll"
+                      /></label>
+                    </div>
+                    <fieldset class="xv-sync-views" id="xvSyncViews">
+                      <legend>Smart Collections to watch</legend>
+                      <p class="settingHint">Save a search as a Smart Collection in the Library to watch it here.</p>
+                    </fieldset>
+                    <div class="xv-job" id="xvSyncPanel">
+                      <p class="xv-job-status" data-sync-status role="status" aria-live="polite">Checking…</p>
+                      <div class="row">
+                        <button type="button" data-sync="bookmarks">Sync bookmarks now</button
+                        ><button type="button" data-sync="likes">Sync likes now</button
+                        ><button type="button" class="quiet" data-sync="pause" aria-pressed="false">Pause</button
+                        ><button type="button" class="quiet" data-sync="stop" hidden>Stop</button>
+                      </div>
+                    </div>
+                  </section>
                   <section class="settinggroup" id="g-floating">
                     <h3>XV button</h3>
                     <p class="settingHint">The floating shortcut on x.com.</p>
@@ -1610,6 +1726,7 @@
         </div>
       </div>
     </div>
+    <script src="dashboard-hooks.js"></script>
     <script src="dashboard.js"></script>
     <script src="command-match.js"></script>
     <script src="command-center.js"></script>

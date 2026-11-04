@@ -640,6 +640,7 @@ try {
         profileHandle: opts.profileHandle || null,
         runId,
         fullMirror: opts.fullMirror ?? settings.fullMirrorMode,
+        scheduled: !!opts.scheduled,
       };
     if (ctx.scope === 'profile') {
       const body = (document.body?.innerText || '').toLowerCase();
@@ -679,14 +680,20 @@ try {
     let directOk = false;
     if (opts.template) {
       const wait = await waitDirect(runId),
-        cp = settings.checkpointResume ? await send({ type: 'GET_CHECKPOINT', key: checkpointKey(ctx) }) : null;
+        // Scheduled syncs read only the newest pages from the top; manual runs may resume a checkpoint.
+        cp =
+          settings.checkpointResume && !opts.scheduled
+            ? await send({ type: 'GET_CHECKPOINT', key: checkpointKey(ctx) })
+            : null;
       window.postMessage(
         {
           source: CONTENT,
           type: 'DIRECT_START',
           runId,
           template: opts.template,
-          settings,
+          settings: opts.maxPages
+            ? { ...settings, maxPages: Math.max(1, Math.min(20, Number(opts.maxPages) || 3)) }
+            : settings,
           checkpoint: cp?.checkpoint || null,
         },
         '*'
@@ -720,6 +727,21 @@ try {
         });
       }
     }
+    if (!directOk && opts.scheduled) {
+      // Never fall back to scrolling a background tab; the scheduler reports and backs off instead.
+      await send({
+        type: 'STORE_JOB',
+        job: {
+          id: runId,
+          state: 'error',
+          phase: 'scheduled',
+          error: 'Direct crawler unavailable',
+          updatedAt: Date.now(),
+          context: ctx,
+        },
+      });
+      return { ok: false, error: 'Direct crawler unavailable' };
+    }
     if (!directOk && settings.smartFallback !== false) {
       await send({
         type: 'STORE_ACTION',
@@ -732,7 +754,7 @@ try {
         context: ctx,
         verificationPasses: settings.completionVerification ? settings.verificationPasses : 0,
       });
-    } else if (directOk && settings.completionVerification && settings.verificationPasses > 0) {
+    } else if (directOk && !opts.scheduled && settings.completionVerification && settings.verificationPasses > 0) {
       await verificationSweep(runId, ctx, settings.verificationPasses);
     }
     await send({
@@ -752,7 +774,7 @@ try {
       text: `${ctx.scope} archive complete`,
       meta: { runId },
     });
-    if (settings.completionNotifications)
+    if (settings.completionNotifications && !opts.scheduled)
       send({
         type: 'NOTIFY',
         title: 'XVault archive complete',

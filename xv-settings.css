@@ -1325,3 +1325,60 @@ body[data-theme='terminal'] {
 body.settings-changed-only .settinggroup .advancedOnly {
   display: block !important;
 }
+
+/* Background job panels (local OCR, scheduled sync) */
+.xv-job {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+}
+.xv-job-meter {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--sunk, rgba(127, 127, 127, 0.18));
+}
+.xv-job-meter i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.35s ease;
+}
+.xv-job-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+@media (prefers-reduced-motion: reduce) {
+  .xv-job-meter i {
+    transition: none;
+  }
+}
+.xv-sync-views {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line, rgba(127, 127, 127, 0.25));
+  border-radius: 10px;
+}
+.xv-sync-views legend {
+  padding: 0 4px;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.xv-sync-views label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+}
+.xv-sync-views small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

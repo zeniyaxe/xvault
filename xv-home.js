@@ -1,7 +1,6 @@
 /* Capture › Overview: a small, independent cursor page for the newest posts. */
 (() => {
   const $ = selector => document.querySelector(selector);
-  const basePage = page;
   let timer = 0,
     latestRows = [],
     latestLoaded = false,
@@ -51,6 +50,8 @@
           const text = document.createElement('span');
           text.textContent = (post.text || 'No text').slice(0, 140);
           button.append(text);
+          // The accessible name must start with the visible text (WCAG 2.5.3 Label in Name).
+          button.setAttribute('aria-label', `${text.textContent} — post by @${post.author?.handle || 'unknown'}`);
         }
         button.onclick = () => {
           if (post.media?.length) openLightbox([post], 0, 0);
@@ -122,14 +123,12 @@
     }
   }
 
-  page = function (name) {
-    const result = basePage(name);
+  window.XVaultDashboard.after('page', (result, name) => {
     if (name === 'home') {
       if (latestDirty || !latestLoaded) void refreshLatest();
       else render();
     }
-    return result;
-  };
+  });
 
   document.addEventListener('xv:library', () => {
     latestDirty = true;
