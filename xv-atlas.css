@@ -1311,3 +1311,180 @@ html.xv-calm .xa-ring {
   content-visibility: auto;
   contain-intrinsic-size: auto 180px;
 }
+
+/* ── Year in Review, achievements, connections (XVault 20) ── */
+.xa-review-head {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.xa-review-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.xa-years {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.xa-years button {
+  font-variant-numeric: tabular-nums;
+}
+.xa-months {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: end;
+  gap: 6px;
+  height: 168px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.xa-months li {
+  height: 100%;
+}
+.xa-months button {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  align-items: end;
+  justify-items: stretch;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.xa-months i {
+  display: block;
+  height: max(3px, calc(var(--h) * 100%));
+  border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 45%, transparent));
+  transform-origin: bottom;
+  animation: xaGrow var(--t-slow) var(--ease) both;
+}
+.xa-months button:hover i {
+  background: var(--accent);
+  filter: brightness(1.12);
+}
+.xa-months button:disabled i {
+  background: var(--line);
+}
+.xa-months span {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+@keyframes xaGrow {
+  from {
+    transform: scaleY(0);
+  }
+}
+.xa-chip.is-up small {
+  color: var(--ok);
+}
+.xa-chip.is-down small {
+  color: var(--danger);
+}
+.xa-badges {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.xa-badge {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 1px 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-m);
+  background: var(--surface);
+}
+/* Locked badges recede through colour, not opacity, so their text keeps AA contrast. */
+.xa-badge:not(.is-earned) b {
+  color: var(--soft);
+  font-weight: 500;
+}
+.xa-badge:not(.is-earned) i {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.xa-badge i {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--raised);
+  color: var(--muted);
+  font-style: normal;
+}
+.xa-badge b {
+  font-size: 13px;
+}
+.xa-badge small {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.xa-badge.is-earned {
+  border-color: var(--accent-line);
+  background: linear-gradient(135deg, var(--accent-soft), transparent 70%), var(--surface);
+  opacity: 1;
+}
+.xa-badge.is-earned i {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.xa-graph svg {
+  display: block;
+  width: min(100%, 620px);
+  height: auto;
+  margin: 0 auto;
+  overflow: visible;
+}
+.xa-graph path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: calc(0.6px + var(--w) * 3.4px);
+  opacity: calc(0.18 + var(--w) * 0.6);
+}
+.xa-node {
+  cursor: pointer;
+  outline: none;
+}
+.xa-node circle {
+  fill: var(--raised-hi);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  transition: r var(--t-fast);
+}
+.xa-node text {
+  fill: var(--soft);
+  font: 500 11px var(--font-ui);
+}
+.xa-node:hover circle,
+.xa-node:focus-visible circle {
+  fill: var(--accent);
+}
+.xa-node:focus-visible text,
+.xa-node:hover text {
+  fill: var(--text);
+}
+.xa-graph:has(.xa-node:hover, .xa-node:focus-visible) path {
+  opacity: 0.08;
+}
+.xa-graph path.is-lit,
+.xa-graph:has(.xa-node:hover, .xa-node:focus-visible) path.is-lit {
+  opacity: 0.95;
+}
+@media (prefers-reduced-motion: reduce) {
+  .xa-months i {
+    animation: none;
+  }
+}

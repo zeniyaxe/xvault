@@ -1,6 +1,6 @@
 // Service-worker wiring for derived-data jobs: message handling, alarms and progress broadcast.
 import { createDerivedStore } from './derived-store.mjs';
-import { fingerprintBlob } from './image-hash.mjs';
+import { fingerprintBlob, fromHex, hamming } from './image-hash.mjs';
 import { createOcrProcessor, createOffscreenHost, createOcrIndex } from './ocr.mjs';
 import {
   createDerivedJobs,
@@ -56,6 +56,35 @@ export function createDerivedService({ listPage, extraProcessors = {}, chromeApi
       index = await ocrIndex.map();
     return { ok: true, text: Object.fromEntries(ids.filter(id => index.has(id)).map(id => [id, index.get(id)])) };
   };
+  // Search by image (XVault 20): the page fingerprints the uploaded image with the same hashes and the
+  // worker compares it against every stored look-alike fingerprint. Nothing leaves the browser.
+  MESSAGES.SEARCH_BY_IMAGE = async m => {
+    const valid = value => /^[0-9a-f]{16}$/i.test(String(value || ''));
+    if (typeof m.key === 'string' && m.key.length <= 128) {
+      // "Find look-alikes" for an archived image reuses its stored fingerprint.
+      const own = (await store.getMany('phash', [m.key])).get(m.key);
+      if (!own?.h)
+        throw Error('This image has no fingerprint yet. Run look-alike fingerprinting in Atlas › Duplicate Lab.');
+      m = { ...m, p: own.p, h: own.h };
+    }
+    if (!valid(m.p) && !valid(m.h)) throw Error('Image fingerprint required');
+    const wantedP = valid(m.p) ? fromHex(m.p) : null,
+      wantedH = valid(m.h) ? fromHex(m.h) : null,
+      limit = Math.max(1, Math.min(200, Number(m.limit) || 60)),
+      threshold = Math.max(0, Math.min(24, Number(m.threshold) || 14)),
+      rows = await store.getAll('phash'),
+      hits = [];
+    for (const row of rows) {
+      if (!row.h) continue;
+      const p = wantedP && valid(row.p) ? hamming(wantedP, fromHex(row.p)) : 64,
+        h = wantedH && valid(row.h) ? hamming(wantedH, fromHex(row.h)) : 64,
+        distance = Math.min(p, h + 2);
+      if (distance <= threshold)
+        hits.push({ key: row.key, postId: String(row.key).split(':')[0], thumb: row.thumb, distance });
+    }
+    hits.sort((a, b) => a.distance - b.distance || a.key.localeCompare(b.key));
+    return { ok: true, fingerprinted: rows.filter(row => row.h).length, hits: hits.slice(0, limit) };
+  };
   MESSAGES.DERIVED_SUMMARY = async () => ({
     ok: true,
     jobs: await jobs.status(),
@@ -65,6 +94,7 @@ export function createDerivedService({ listPage, extraProcessors = {}, chromeApi
     store,
     jobs,
     ocrIndex,
+    types: Object.keys(MESSAGES),
     handles: type => Object.hasOwn(MESSAGES, type),
     handle: message => MESSAGES[message.type](message),
     onAlarm: name => (name === RESUME_ALARM ? (jobs.resume(), true) : false),

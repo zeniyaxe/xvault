@@ -8,6 +8,10 @@ import {
 } from './reliability.mjs';
 import { createInsightsAccumulator, orderThread, compactPost, previewUrl, mediaKind } from './vault-insights.mjs';
 import { createDerivedService } from './sw/derived-service.mjs';
+import { createSemanticService } from './sw/semantic-service.mjs';
+import { createMessageRouter } from './sw/router.mjs';
+import { createConcurrencyGovernor } from './sw/adaptive-concurrency.mjs';
+import { sanitizeBoards, sanitizeAutoTagRules, planRules, rulePatch } from './sw/organize.mjs';
 import { createSyncScheduler } from './sw/sync-scheduler.mjs';
 import { createMissingPostFetcher } from './sw/missing-posts.mjs';
 import {
@@ -27,6 +31,7 @@ import {
   readLibraryDownloadRevision,
   clearLibraryData,
   updateLibraryMetadata,
+  restoreLibraryMetadata,
   updateLibraryRecord,
   updateLibraryMediaMetadata,
   previewLibraryMediaSidecar,
@@ -459,6 +464,16 @@ const defaults = {
   syncNotifyAll: false,
   syncNotifyViews: [],
   calendarTimeZone: 'local',
+  // XVault 20: boards, auto-tag rules, shortcuts and accessibility preferences.
+  adaptiveDownloads: true,
+  boards: [],
+  autoTagRules: [],
+  autoTagOnCapture: true,
+  shortcutOverrides: {},
+  uiFontScale: 1,
+  uiHighContrast: false,
+  uiFocusRings: 'auto',
+  readerFontSize: 19,
   quietCompletionOnly: false,
   dashboardSounds: true,
   soundVolume: 0.14,
@@ -1095,6 +1110,19 @@ function normalizeSettings(raw = {}) {
     ? [...new Set(out.syncNotifyViews.map(String).filter(id => id.length <= 128))].slice(0, 50)
     : [];
   if (!['local', 'utc'].includes(out.calendarTimeZone)) out.calendarTimeZone = 'local';
+  out.boards = sanitizeBoards(out.boards);
+  out.autoTagRules = sanitizeAutoTagRules(out.autoTagRules);
+  out.uiFontScale = Math.min(1.5, Math.max(0.85, Number(out.uiFontScale) || 1));
+  out.readerFontSize = Math.min(28, Math.max(13, Math.round(Number(out.readerFontSize)) || 19));
+  if (!['auto', 'always'].includes(out.uiFocusRings)) out.uiFocusRings = 'auto';
+  out.shortcutOverrides =
+    out.shortcutOverrides && typeof out.shortcutOverrides === 'object' && !Array.isArray(out.shortcutOverrides)
+      ? Object.fromEntries(
+          Object.entries(out.shortcutOverrides)
+            .filter(([id, keys]) => /^[a-z0-9.-]{1,48}$/i.test(id) && typeof keys === 'string' && keys.length <= 40)
+            .slice(0, 80)
+        )
+      : {};
   return out;
 }
 async function getSettings() {
@@ -1146,7 +1174,8 @@ const updateWorkspace = createWorkspaceService({
 });
 async function mergeTweetRows(rows = []) {
   let n = 0;
-  const changed = [];
+  const changed = [],
+    created = [];
   for (const row of rows) {
     if (!row?.id) continue;
     const captureDb = await db();
@@ -1157,6 +1186,7 @@ async function mergeTweetRows(rows = []) {
       if (result.stored) {
         n++;
         changed.push(String(row.id));
+        if (!result.changed) created.push(String(row.id));
         if (result.revision)
           void action('revision', `Post ${row.id} changed; prior revision retained`, {
             tweetId: String(row.id),
@@ -1168,6 +1198,7 @@ async function mergeTweetRows(rows = []) {
     }
   }
   if (changed.length) announceLibraryChanges(changed, 'capture');
+  if (created.length) void applyCaptureRules(created);
   return n;
 }
 const activeLibraryQueries = new Map();
@@ -1185,6 +1216,24 @@ async function ocrTextFor(compiled) {
     return { revision: 0, map: new Map() };
   }
 }
+// Meaning rules (about:/similar:) are scored by the local semantic index; other queries skip it.
+async function semanticFor(compiled) {
+  const rules = globalThis.XVaultLibrarySearch.semanticRules(compiled);
+  if (!rules.length) return { revision: 0, scores: null };
+  try {
+    return await semantic.scoresFor(rules, globalThis.XVaultLibrarySearch.semanticKey);
+  } catch (error) {
+    console.warn('Meaning search unavailable', error);
+    return { revision: 'error', scores: new Map() };
+  }
+}
+// Boards (XVault 20) are defined in settings.boards; posts store board ids in userMeta.boards.
+function boardNamesOf(settings) {
+  return Object.fromEntries(
+    (Array.isArray(settings?.boards) ? settings.boards : []).map(board => [String(board.id), String(board.name || '')])
+  );
+}
+const semanticScoresFor = (semanticScores, id) => (semanticScores.scores ? semanticScores.scores.get(id) || {} : null);
 function stableRandomOrder(id, seed) {
   let value = 2166136261;
   for (const character of `${seed}:${id}`) {
@@ -1204,7 +1253,8 @@ async function scanSortedLibraryPage(database, message, settings, control) {
   const query = String(message.query || '').slice(0, 1000),
     compiled = globalThis.XVaultLibrarySearch.compileQuery(query),
     needsDownloads = globalThis.XVaultLibrarySearch.usesRuleKind(compiled, ['downloaded', 'missing', 'size']),
-    ocrText = await ocrTextFor(compiled);
+    ocrText = await ocrTextFor(compiled),
+    semanticScores = await semanticFor(compiled);
   const revision = await readLibraryRevision(database),
     downloadRevision = needsDownloads ? await readLibraryDownloadRevision(database) : null;
   if (
@@ -1226,6 +1276,7 @@ async function scanSortedLibraryPage(database, message, settings, control) {
     downloadRevision,
     inboxSince,
     ocrText.revision,
+    semanticScores.revision,
   ]);
   let downloadsByTweet = new Map(),
     cursorOperations = 0,
@@ -1268,6 +1319,8 @@ async function scanSortedLibraryPage(database, message, settings, control) {
             inboxSince,
             randomOrder: stableRandomOrder(String(post.id), randomSeed),
             ocrText: ocrText.map?.get(String(post.id)),
+            semanticScores: semanticScoresFor(semanticScores, String(post.id)),
+            boardNames: boardNamesOf(settings),
           })
         : globalThis.XVaultLibrarySearch.projectRankPost(post, index, {
             randomOrder: stableRandomOrder(String(post.id), randomSeed),
@@ -1284,6 +1337,7 @@ async function scanSortedLibraryPage(database, message, settings, control) {
       mediaCount: projection.mediaCount,
       handle: projection.handle,
       randomOrder: projection.randomOrder,
+      semanticScore: Number(projection.semanticScore || 0),
     }),
     compare: (a, b) => compareLibraryRank(a, b, sort),
     cancelled: () => control.cancelled,
@@ -1454,6 +1508,8 @@ async function executeLibraryPage(message = {}, control = { cancelled: false }) 
     const compiled = globalThis.XVaultLibrarySearch.compileQuery(query),
       needsDownloads = globalThis.XVaultLibrarySearch.usesRuleKind(compiled, ['downloaded', 'missing', 'size']),
       ocrText = await ocrTextFor(compiled),
+      semanticScores = await semanticFor(compiled),
+      boardNames = boardNamesOf(settings),
       queryPlanningMs = performance.now() - planStarted;
     if (!['new', 'old'].includes(sort)) {
       const pageReadStarted = performance.now(),
@@ -1489,6 +1545,8 @@ async function executeLibraryPage(message = {}, control = { cancelled: false }) 
         const projection = globalThis.XVaultLibrarySearch.projectPost(post, 0, {
           inboxSince: settings.inboxSince,
           ocrText: ocrText.map?.get(String(post.id)),
+          semanticScores: semanticScoresFor(semanticScores, String(post.id)),
+          boardNames,
         });
         if (download) {
           projection.downloaded = download.downloaded;
@@ -1820,7 +1878,7 @@ async function vaultInsightsKey(database) {
   ]);
   const timeZone = settings.calendarTimeZone === 'utc' ? 'utc' : 'local';
   const zoneName = timeZone === 'local' ? Intl.DateTimeFormat().resolvedOptions().timeZone || 'local' : 'UTC';
-  return { revision, timeZone, key: `${revision}:${total}:${timeZone}:${zoneName}:${new Date().toDateString()}` };
+  return { revision, timeZone, key: `v2:${revision}:${total}:${timeZone}:${zoneName}:${new Date().toDateString()}` };
 }
 async function computeVaultInsights() {
   const database = await db();
@@ -3219,23 +3277,277 @@ const missingPosts = createMissingPostFetcher({
   activeXTab,
   hasPost: async id => !!(await store('tweets', 'readonly', os => req(os.get(String(id)))).catch(() => null)),
 });
+async function withLibraryDatabase(work) {
+  const database = await db();
+  try {
+    return await work(database);
+  } finally {
+    database.close();
+  }
+}
+// Streams every archived post through visit(post) in key order, 1,000 at a time.
+function scanLibraryRows(visit) {
+  return withLibraryDatabase(async database => {
+    let afterKey = null;
+    for (;;) {
+      const page = await readLibraryPage(database, afterKey, 1000);
+      for (const row of page.rows) if (visit(row) === false) return;
+      if (page.done || !page.rows.length) return;
+      afterKey = page.nextKey;
+    }
+  });
+}
+const semantic = createSemanticService({
+  store: derived.store,
+  readRevision: () => withLibraryDatabase(database => readLibraryRevision(database)),
+  scanDocuments: visit => scanLibraryRows(row => void visit(row)),
+  documentsSince: since => postsArchivedSince(since, 20000),
+  readRecords: ids => withLibraryDatabase(database => readLibraryRecords(database, ids.slice(0, 1000))),
+  ocrMap: () => derived.ocrIndex.map(),
+});
+// Feature services own their message types and sender policy (sw/router.mjs); everything else is
+// still handled by the legacy switch below.
+const router = createMessageRouter();
+router.register('FETCH_MISSING_POST', m => missingPosts.fetchPost(m.id), {
+  denied: 'Missing posts are fetched from XVault pages',
+});
+router.mount(syncScheduler, { denied: 'Scheduled sync is managed from XVault pages' });
+router.mount(derived, { denied: 'Derived-data jobs are managed from XVault pages' });
+router.mount(semantic, { denied: 'Meaning search runs from XVault pages' });
+
+// ---- Auto-tag rules and boards (sw/organize.mjs) ----
+async function ruleMatcher(rule, settings) {
+  const search = globalThis.XVaultLibrarySearch,
+    compiled = search.compileQuery(rule.query),
+    ocrText = await ocrTextFor(compiled),
+    semanticScores = await semanticFor(compiled),
+    boardNames = boardNamesOf(settings);
+  if (search.usesRuleKind(compiled, ['downloaded', 'missing', 'size']))
+    throw Error('Rules cannot use download filters (downloaded:, missing:, size:)');
+  return post =>
+    search.matchesCompiledQuery(
+      search.projectPost(post, 0, {
+        inboxSince: settings.inboxSince,
+        ocrText: ocrText.map?.get(String(post.id)),
+        semanticScores: semanticScoresFor(semanticScores, String(post.id)),
+        boardNames,
+      }),
+      compiled
+    );
+}
+async function planRulesOver(posts, rules, settings) {
+  const matchers = new Map();
+  for (const rule of rules) matchers.set(rule.id, await ruleMatcher(rule, settings));
+  return planRules(posts, rules, (post, rule) => matchers.get(rule.id)(post));
+}
+async function applyRulePlan(plan, { undoLimit = 5000 } = {}) {
+  const previous = new Map();
+  let changed = 0;
+  for (const { rule, ids } of plan)
+    for (let start = 0; start < ids.length; start += 500) {
+      const batch = ids.slice(start, start + 500),
+        result = await withLibraryDatabase(database => updateLibraryMetadata(database, batch, rulePatch(rule)));
+      changed += result.updated;
+      for (const entry of result.previous) if (!previous.has(entry.id)) previous.set(entry.id, entry);
+      announceMetadata(result.rows.map(row => row.id));
+      announceLibraryChanges(
+        result.rows.map(row => row.id),
+        'metadata'
+      );
+    }
+  const snapshots = [...previous.values()];
+  return { changed, previous: snapshots.slice(0, undoLimit), undoTruncated: snapshots.length > undoLimit };
+}
+// New captures run through enabled on-capture rules; failures never block archiving.
+async function applyCaptureRules(ids) {
+  try {
+    const settings = await getSettings(),
+      rules = settings.autoTagOnCapture ? settings.autoTagRules.filter(rule => rule.enabled && rule.onCapture) : [];
+    if (!rules.length || !ids.length) return;
+    const posts = await withLibraryDatabase(database => readLibraryRecords(database, ids.slice(0, 1000)));
+    const plan = await planRulesOver(posts, rules, settings);
+    if (!plan.length) return;
+    const result = await applyRulePlan(plan, { undoLimit: 0 });
+    void action('rules', `Auto-tag rules organised ${result.changed} new post${result.changed === 1 ? '' : 's'}`, {
+      rules: plan.map(entry => entry.rule.id),
+    }).catch(() => {});
+  } catch (error) {
+    console.warn('Auto-tag rules skipped for this capture', error);
+  }
+}
+function ruleFromMessage(raw, settings) {
+  if (raw && typeof raw === 'object') {
+    const [rule] = sanitizeAutoTagRules([{ ...raw, enabled: true }]);
+    if (!rule) throw Error('A rule needs a search and at least one action');
+    return [rule];
+  }
+  return settings.autoTagRules.filter(rule => rule.enabled);
+}
+router.register('RULES_PREVIEW', async m => {
+  const settings = await getSettings(),
+    rules = ruleFromMessage(m.rule, settings),
+    posts = [];
+  await scanLibraryRows(post => void posts.push(post));
+  const plan = await planRulesOver(posts, rules, settings);
+  return {
+    ok: true,
+    scanned: posts.length,
+    rules: plan.map(({ rule, ids }) => ({
+      id: rule.id,
+      name: rule.name,
+      changes: ids.length,
+      sample: ids.slice(0, 12),
+    })),
+    changes: new Set(plan.flatMap(entry => entry.ids)).size,
+  };
+});
+router.register('RULES_APPLY', async m => {
+  const settings = await getSettings(),
+    rules = m.ruleId
+      ? settings.autoTagRules.filter(rule => rule.id === String(m.ruleId))
+      : ruleFromMessage(m.rule, settings),
+    posts = [];
+  if (!rules.length) throw Error('Rule not found');
+  await scanLibraryRows(post => void posts.push(post));
+  const plan = await planRulesOver(posts, rules, settings),
+    result = await applyRulePlan(plan);
+  const stamped = settings.autoTagRules.map(rule => {
+    const entry = plan.find(item => item.rule.id === rule.id);
+    return rules.some(item => item.id === rule.id)
+      ? { ...rule, lastRunAt: Date.now(), lastMatched: entry?.ids.length || 0 }
+      : rule;
+  });
+  await setSettings({ autoTagRules: stamped });
+  await action('rules', `Rules organised ${result.changed} archived post${result.changed === 1 ? '' : 's'}`, {});
+  return { ok: true, ...result };
+});
+router.register('BOARD_DELETE', async m => {
+  const id = String(m.id || ''),
+    settings = await getSettings(),
+    members = [];
+  await scanLibraryRows(post => void ((post.userMeta?.boards || []).includes(id) && members.push(String(post.id))));
+  const previous = [];
+  for (let start = 0; start < members.length; start += 500) {
+    const result = await withLibraryDatabase(database =>
+      updateLibraryMetadata(database, members.slice(start, start + 500), { removeBoards: [id] })
+    );
+    previous.push(...result.previous);
+    announceLibraryChanges(
+      result.rows.map(row => row.id),
+      'metadata'
+    );
+  }
+  const board = settings.boards.find(item => item.id === id) || null;
+  await setSettings({ boards: settings.boards.filter(item => item.id !== id) });
+  return { ok: true, removedFrom: members.length, board, previous: previous.slice(0, 5000) };
+});
+router.register('BOARD_COUNTS', async () => {
+  const counts = {},
+    covers = {};
+  let later = 0,
+    highlighted = 0;
+  await scanLibraryRows(post => {
+    const meta = post.userMeta || {};
+    if (meta.readLater && !meta.readAt) later++;
+    if (meta.highlights?.length) highlighted++;
+    for (const board of meta.boards || []) {
+      counts[board] = (counts[board] || 0) + 1;
+      if (!covers[board] && post.media?.length) covers[board] = String(post.id);
+    }
+  });
+  return { ok: true, counts, covers, later, highlighted };
+});
+
+// ---- Storage manager and X data-archive import (XVault 20) ----
+router.register('STORAGE_REPORT', async () => {
+  const stores = await withLibraryDatabase(async database => {
+    const names = [...database.objectStoreNames],
+      out = {};
+    if (!names.length) return out;
+    const transaction = database.transaction(names, 'readonly');
+    await Promise.all(names.map(async name => (out[name] = await req(transaction.objectStore(name).count()))));
+    return out;
+  });
+  const [phash, ocr, meta, semanticIndex, bytesInUse] = await Promise.all([
+    derived.store.count('phash').catch(() => 0),
+    derived.store.count('ocr').catch(() => 0),
+    derived.store.count('meta').catch(() => 0),
+    semantic.handle({ type: 'SEMANTIC_STATUS' }).catch(() => null),
+    chrome.storage.local.getBytesInUse(null).catch(() => 0),
+  ]);
+  return {
+    ok: true,
+    stores,
+    derived: { phash, ocr, meta },
+    semantic: semanticIndex?.index || null,
+    settingsBytes: bytesInUse,
+    adaptive: downloadGovernor.status(),
+  };
+});
+router.register('PRUNE_ACTIONS', async m => {
+  const keep = Math.max(0, Math.min(5000, Math.floor(Number(m.keep) || 0)));
+  const rows = await all('actions');
+  rows.sort((a, b) => (b.at || 0) - (a.at || 0));
+  const drop = rows.slice(keep);
+  if (drop.length) await store('actions', 'readwrite', os => drop.forEach(row => os.delete(row.id)));
+  return { ok: true, removed: drop.length, kept: Math.min(keep, rows.length) };
+});
+const ARCHIVE_MEDIA_HOST = /^https:\/\/(pbs|video)\.twimg\.com\//;
+function importedArchiveRow(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row) || !/^\d{1,32}$/.test(String(row.id || ''))) return null;
+  if (row.text != null && (typeof row.text !== 'string' || row.text.length > 100000)) return null;
+  const media = (Array.isArray(row.media) ? row.media : [])
+    .slice(0, 32)
+    .filter(
+      item =>
+        item &&
+        ARCHIVE_MEDIA_HOST.test(String(item.url || '')) &&
+        ARCHIVE_MEDIA_HOST.test(String(item.preview || item.url))
+    )
+    .map(item => ({
+      ...item,
+      variants: (Array.isArray(item.variants) ? item.variants : [])
+        .filter(variant => ARCHIVE_MEDIA_HOST.test(String(variant?.url || '')))
+        .slice(0, 12),
+      playbackUrl: ARCHIVE_MEDIA_HOST.test(String(item.playbackUrl || '')) ? item.playbackUrl : null,
+    }));
+  const { userMeta: _ignored, ...rest } = row;
+  return {
+    ...rest,
+    id: String(row.id),
+    media,
+    sourceFlags: [
+      ...new Set([...(Array.isArray(row.sourceFlags) ? row.sourceFlags : []), 'x-archive'].map(String)),
+    ].slice(0, 6),
+    archiveSources: [
+      ...new Set((Array.isArray(row.archiveSources) ? row.archiveSources : ['x-archive']).map(String)),
+    ].slice(0, 6),
+    observedAt: 1,
+    contentObservedAt: 1,
+    profileObservedAt: 1,
+    metricsObservedAt: 1,
+  };
+}
+router.register('X_ARCHIVE_IMPORT_BATCH', async m => {
+  const rows = (Array.isArray(m.tweets) ? m.tweets.slice(0, 1000) : []).map(importedArchiveRow).filter(Boolean);
+  if (!rows.length) return { ok: true, stored: 0, created: 0, skipped: (m.tweets || []).length };
+  const existing = new Set();
+  await store('tweets', 'readonly', async os => {
+    for (const row of rows) if (await req(os.get(row.id))) existing.add(row.id);
+  });
+  const stored = await mergeTweetRows(rows);
+  const created = rows.filter(row => !existing.has(row.id)).length;
+  if (m.final)
+    void action('import', `Imported X data archive (${m.label || 'posts'})`, { created, stored }).catch(() => {});
+  return { ok: true, stored, created, updated: stored - created, skipped: (m.tweets || []).length - rows.length };
+});
 
 chrome.runtime.onMessage.addListener((m, s, reply) => {
   (async () => {
     const messageCapability = authorizeMessage(m, s, chrome.runtime.id);
     await privateStorageReady;
-    if (m.type === 'FETCH_MISSING_POST') {
-      if (messageCapability === 'content') throw Error('Missing posts are fetched from XVault pages');
-      return await missingPosts.fetchPost(m.id);
-    }
-    if (syncScheduler.handles(m.type)) {
-      if (messageCapability === 'content') throw Error('Scheduled sync is managed from XVault pages');
-      return await syncScheduler.handle(m);
-    }
-    if (derived.handles(m.type)) {
-      if (messageCapability === 'content') throw Error('Derived-data jobs are managed from XVault pages');
-      return await derived.handle(m);
-    }
+    const routed = await router.dispatch(m, messageCapability, s);
+    if (routed.handled) return routed.value;
     if (m.type === 'REMOTE_COMMAND') {
       const allowed = new Set([
         'remote.start',
@@ -3602,7 +3914,8 @@ chrome.runtime.onMessage.addListener((m, s, reply) => {
       await decisionsReady;
       return { ok: true, rows: downloadDecisions.slice(-Number(m.limit || 200)).reverse() };
     }
-    if (m.type === 'DOWNLOAD_QUEUE_STATS') return { ok: true, ...(await queueStats()) };
+    if (m.type === 'DOWNLOAD_QUEUE_STATS')
+      return { ok: true, ...(await queueStats()), adaptive: downloadGovernor.status() };
     if (m.type === 'GET_DOWNLOAD_HISTORY') {
       const database = await db();
       try {
@@ -3864,6 +4177,19 @@ chrome.runtime.onMessage.addListener((m, s, reply) => {
         );
         await action('library', `Updated ${result.updated} selected posts`, { count: result.updated });
         return { ok: true, ...result };
+      } finally {
+        database.close();
+      }
+    }
+    if (m.type === 'RESTORE_TWEET_META') {
+      // Undo for bulk edits, rules and triage: puts back userMeta snapshots taken before the change.
+      const database = await db();
+      try {
+        const result = await restoreLibraryMetadata(database, m.entries);
+        const ids = result.rows.map(row => row.id);
+        announceMetadata(ids);
+        announceLibraryChanges(ids, 'metadata');
+        return { ok: true, restored: result.restored };
       } finally {
         database.close();
       }
@@ -5000,6 +5326,7 @@ async function queueStats() {
     },
   };
 }
+const downloadGovernor = createConcurrencyGovernor();
 async function pump() {
   if (pumping) return;
   pumping = true;
@@ -5007,7 +5334,7 @@ async function pump() {
     moreQueued = false;
   try {
     s = await getSettings();
-    const max = Math.min(8, Math.max(1, s.maxConcurrentDownloads || 4));
+    const max = downloadGovernor.limit(s.maxConcurrentDownloads || 4, s.adaptiveDownloads !== false);
     while (active.size < max) {
       if (!queue.length) {
         const filled = await fillQueueBuffer();
@@ -5737,6 +6064,7 @@ async function reconcileDownloadChange(d, rowOverride = null) {
       await putMany('downloads', [row]);
       await action('download', 'Download complete; verifying', { file: row.target?.filename, key: row.key });
       await finalizeVerifiedDownload(row, d.id);
+      downloadGovernor.success();
       pump();
     } catch (error) {
       await action('error', 'Download completion could not be finalized', {
@@ -5747,6 +6075,10 @@ async function reconcileDownloadChange(d, rowOverride = null) {
       verifyingDownloads.delete(d.id);
     }
   } else if (d.state?.current === 'interrupted' || d.error?.current) {
+    if (downloadGovernor.failure(d.error?.current || 'interrupted'))
+      void action('download', `X is pushing back; parallel downloads reduced to ${downloadGovernor.status().limit}`, {
+        reason: String(d.error?.current || 'interrupted'),
+      }).catch(() => {});
     await failOrRetry(row, d.error?.current || 'interrupted', await getSettings());
   } else {
     row.updatedAt = Date.now();

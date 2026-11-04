@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="xv-atlas.css" />
     <link rel="stylesheet" href="xv-reader.css" />
     <link rel="stylesheet" href="xv-search-assist.css" />
+    <link rel="stylesheet" href="xv-library3.css" />
     <script defer src="link-utils.js"></script>
     <script defer src="link-export.js"></script>
     <script defer src="media-asset.js"></script>
@@ -39,6 +40,9 @@
     <script defer src="search-ranking.js"></script>
     <script defer src="xv-search-assist.js"></script>
     <script defer src="xv-background-jobs.js"></script>
+    <script defer src="xv-library3.js"></script>
+    <script defer src="xv-shortcuts.js"></script>
+    <script defer src="xv-vault.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script>
   </head>
@@ -56,7 +60,9 @@
           <button class="nav" data-page="home" data-pages="home archive sessions"><span>Capture</span></button>
           <button class="nav" data-page="media"><span>Downloads</span></button>
           <button class="nav" data-page="studio"><span>Tools</span></button>
-          <button class="nav" data-page="health" data-pages="health integrity activity"><span>System</span></button>
+          <button class="nav" data-page="health" data-pages="health integrity activity vault">
+            <span>System</span>
+          </button>
         </nav>
         <div class="rail-spacer"></div>
         <button class="nav" data-page="settings"><span>Settings</span></button>
@@ -340,6 +346,9 @@
                   <button type="button" role="radio" data-layout="compact" title="List: one row per post">
                     <span class="sr">List</span>
                   </button>
+                  <button type="button" role="radio" data-layout="table" title="Table: sortable columns">
+                    <span class="sr">Table</span>
+                  </button>
                 </div>
                 <label class="tile-size" title="Tile size"
                   ><span class="sr">Tile size</span
@@ -355,6 +364,7 @@
                   <option value="replies">Most replied</option>
                   <option value="media">Most media</option>
                   <option value="author">Author A–Z</option>
+                  <option value="relevance">Best match (about:/similar:)</option>
                 </select>
                 <select id="libraryView" class="sr" tabindex="-1" aria-hidden="true">
                   <option value="timeline">Timeline</option>
@@ -362,6 +372,7 @@
                   <option value="gallery">Grid</option>
                   <option value="masonry">Wall</option>
                   <option value="compact">List</option>
+                  <option value="table">Table</option>
                 </select>
                 <details class="menu" id="libraryTools">
                   <summary aria-label="Library actions" title="Library actions">
@@ -619,7 +630,7 @@
                 <button id="snapshotNow">Create snapshot</button>
                 <button id="manifestNow">Generate manifest</button>
               </div>
-              <input id="recoveryFile" type="file" accept=".jsonl,.ndjson,application/x-ndjson" hidden />
+              <input id="recoveryFile" type="file" accept=".jsonl,.ndjson,.xvenc,application/x-ndjson" hidden />
               <div id="recoveryStatus" class="xv-recovery-status" role="status" aria-live="polite"></div>
               <button id="recoveryConflictExport" type="button" hidden>Export conflict evidence</button>
               <button id="recoveryAssetExport" type="button" hidden>Export recovered file references</button>
@@ -640,6 +651,7 @@
             <div id="activityList" class="activitylist"></div>
           </section>
         </section>
+        <section class="page" id="page-vault" aria-label="Storage and backups"></section>
         <section class="page" id="page-settings">
           <h2 class="xv-sr-only">Settings</h2>
           <div class="settings-shell">
@@ -714,6 +726,34 @@
                         ><input type="range" min="0.6" max="1.8" step="0.05" data-setting="dashboardScale"
                       /></label>
                     </div>
+                  </section>
+                  <section class="settinggroup" id="g-accessibility">
+                    <h3>Accessibility</h3>
+                    <p class="settingHint">
+                      Stronger contrast, larger reading text and always-visible focus rings. Keyboard shortcuts can be
+                      remapped below; press <kbd>?</kbd> anywhere for the full list.
+                    </p>
+                    <div class="formgrid two">
+                      <label class="check"
+                        ><input type="checkbox" data-setting="uiHighContrast" /><span>High contrast</span></label
+                      >
+                      <label class="field"
+                        ><span>Focus rings</span
+                        ><select data-setting="uiFocusRings">
+                          <option value="auto">When using the keyboard</option>
+                          <option value="always">Always</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Reading text size</span
+                        ><input type="range" min="0.85" max="1.5" step="0.05" data-setting="uiFontScale"
+                      /></label>
+                      <label class="field"
+                        ><span>Reader text size (px)</span
+                        ><input type="number" min="13" max="28" step="1" data-setting="readerFontSize"
+                      /></label>
+                    </div>
+                    <div id="xvShortcutEditor" class="xv-shortcut-editor"></div>
                   </section>
                   <section class="settinggroup" id="g-layout-type">
                     <h3>Layout and type</h3>
@@ -1185,6 +1225,11 @@
                         <span>Concurrent downloads</span>
                         <input type="number" data-setting="maxConcurrentDownloads" />
                       </label>
+                      <label class="check"
+                        ><input type="checkbox" data-setting="adaptiveDownloads" /><span
+                          >Adaptive parallelism — back off when X's media servers push back</span
+                        ></label
+                      >
                       <label class="field">
                         <span>Retries</span>
                         <input type="number" data-setting="downloadRetries" />

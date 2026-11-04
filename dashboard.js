@@ -470,6 +470,7 @@ function builtinPage(n) {
       health: 'System',
       integrity: 'System',
       activity: 'System',
+      vault: 'System',
       sessions: 'Capture',
       studio: 'Tools',
       settings: 'Settings',
@@ -1175,7 +1176,17 @@ function builtinRenderLib(options = {}) {
             (allTags.length > shownTags.length
               ? `<button type="button" class="tagOverflow" data-expand-tags="${idx}" aria-expanded="false" aria-label="Show ${allTags.length - shownTags.length} more tags">+${allTags.length - shownTags.length} tags</button>`
               : '');
-        return `<article class="tweet ${t.sensitive ? 'sensitive' : ''} ${um.favorite ? 'favorite' : ''}" data-id="${esc(t.id)}"><div class="who">${settings.libraryShowAvatars !== false && avatar ? `<img class="avatar" src="${esc(avatar)}">` : `<div class="avatar fallback">${esc(handle[0]?.toUpperCase() || '?')}</div>`}<div class="identity">${settings.libraryShowNames !== false ? `<b>${esc(name)} ${t.author?.verified ? '✓' : ''}</b>` : ''}<small>@${esc(handle)}</small></div>${t.createdAt && Number.isFinite(new Date(t.createdAt).getTime()) ? `<time datetime="${esc(new Date(t.createdAt).toISOString())}" title="${esc(new Date(t.createdAt).toLocaleString())}">${esc(new Date(t.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }))}</time>` : ''}</div><div class="tweetMetaBadges">${window.XVaultLibraryModel?.isInbox?.(t, settings.inboxSince) ? '<span class="new">New</span>' : ''}${t.sensitive ? '<span class="flag">Sensitive</span>' : ''}${
+        return `<article class="tweet ${t.sensitive ? 'sensitive' : ''} ${um.favorite ? 'favorite' : ''}" data-id="${esc(t.id)}"><div class="who">${settings.libraryShowAvatars !== false && avatar ? `<img class="avatar" src="${esc(avatar)}">` : `<div class="avatar fallback">${esc(handle[0]?.toUpperCase() || '?')}</div>`}<div class="identity">${settings.libraryShowNames !== false ? `<b>${esc(name)} ${t.author?.verified ? '✓' : ''}</b>` : ''}<small>@${esc(handle)}</small></div>${t.createdAt && Number.isFinite(new Date(t.createdAt).getTime()) ? `<time datetime="${esc(new Date(t.createdAt).toISOString())}" title="${esc(new Date(t.createdAt).toLocaleString())}">${esc(new Date(t.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }))}</time>` : ''}</div><div class="tweetMetaBadges">${window.XVaultLibraryModel?.isInbox?.(t, settings.inboxSince) ? '<span class="new" title="New since your last review">New</span>' : ''}${um.readLater && !um.readAt ? '<span class="later" title="Saved for later">Later</span>' : ''}${um.highlights?.length ? `<span class="hl" title="Highlighted passages">${fmt(um.highlights.length)} highlight${um.highlights.length === 1 ? '' : 's'}</span>` : ''}${(
+          um.boards || []
+        )
+          .slice(0, 2)
+          .map(id => (settings.boards || []).find(board => board.id === id))
+          .filter(Boolean)
+          .map(
+            board =>
+              `<span class="board" style="--board:${esc(board.color || 'var(--accent)')}">${esc(board.name)}</span>`
+          )
+          .join('')}${t.sensitive ? '<span class="flag">Sensitive</span>' : ''}${
           t.sourceFlags
             ?.slice(0, 2)
             .map(x => `<span>${esc(x)}</span>`)

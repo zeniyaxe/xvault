@@ -5,6 +5,7 @@
   const DAY = 86400000;
   const VIEWS = [
     ['overview', 'Overview'],
+    ['review', 'Year in Review'],
     ['calendar', 'Calendar'],
     ['people', 'People'],
     ['duplicates', 'Duplicates'],
@@ -39,6 +40,7 @@
     peopleQuery: '',
     peopleSort: 'count',
     peopleLimit: 60,
+    reviewYear: '',
   };
   let root = null,
     growthModel = null,
@@ -154,6 +156,15 @@
 <div id="xaBody" class="xa-body"></div>`;
     root.addEventListener('click', onClick);
     root.addEventListener('keydown', onKeydown);
+    const lightGraph = event => {
+      const node = event.target.closest?.('.xa-node'),
+        svg = event.target.closest?.('.xa-graph svg');
+      if (!svg) return;
+      const handle = event.type === 'pointerout' || event.type === 'focusout' ? '' : node?.dataset.person || '';
+      for (const path of svg.querySelectorAll('path'))
+        path.classList.toggle('is-lit', !!handle && (path.dataset.from === handle || path.dataset.to === handle));
+    };
+    for (const type of ['pointerover', 'pointerout', 'focusin', 'focusout']) root.addEventListener(type, lightGraph);
     root.addEventListener('input', onInput);
     root.addEventListener('focusin', onFocus);
     root.addEventListener('pointerover', onHover);
@@ -266,7 +277,7 @@
       state.rendered = state.view;
       return;
     }
-    target.innerHTML = { overview, calendar, people, duplicates }[state.view](data);
+    target.innerHTML = { overview, review, calendar, people, duplicates }[state.view](data);
     state.rendered = state.view;
     if (state.view === 'overview') {
       drawGrowth(animate);
@@ -280,10 +291,164 @@
       revealDay(target);
     }
     if (state.view === 'people') paintPeople();
+    if (state.view === 'review') {
+      if (animate || state.reviewAnimate)
+        for (const element of target.querySelectorAll('[data-count]'))
+          window.XVaultMotion?.countUp(element, Number(element.dataset.count), { from: 0 });
+      state.reviewAnimate = false;
+      window.XVaultMotion?.stagger(target.querySelectorAll('.xa-kpi,.xa-section,.xa-badge'), 'rise', {
+        step: 22,
+        max: 18,
+      });
+    }
     if (state.view === 'duplicates') {
       hydrateShared();
       paintLab();
     }
+  }
+
+  /* ───────── Year in Review (XVault 20) ───────── */
+  // Achievements are computed from the same single-pass statistics; nothing is stored or sent anywhere.
+  function achievements(data) {
+    const streak = data.streaks?.archived || {},
+      personal = data.personal || {},
+      reading = data.reading || {},
+      years = data.years || [];
+    const list = [
+      ['first', 'First keep', 'Archived your first post', data.total >= 1],
+      ['hundred', 'Collector', '100 posts archived', data.total >= 100],
+      ['thousand', 'Archivist', '1,000 posts archived', data.total >= 1000],
+      ['tenk', 'Librarian', '10,000 posts archived', data.total >= 10000],
+      ['people', 'Wide circle', '500 different people kept', data.authorsTotal >= 500],
+      ['media', 'Gallery', '1,000 media files', (data.media?.items || 0) >= 1000],
+      ['week', 'Habit', 'Archived 7 days in a row', (streak.longest || 0) >= 7],
+      ['month', 'Ritual', 'Archived 30 days in a row', (streak.longest || 0) >= 30],
+      ['tagger', 'Tagger', '100 posts tagged', (personal.tagged || 0) >= 100],
+      ['notes', 'Annotator', '25 posts with notes', (personal.notes || 0) >= 25],
+      ['reader', 'Close reader', '10 posts with highlights', (reading.highlighted || 0) >= 10],
+      ['curator', 'Curator', '50 posts on boards', (reading.boarded || 0) >= 50],
+      ['inbox', 'Inbox zero-ish', '500 posts reviewed', (personal.reviewed || 0) >= 500],
+      ['decade', 'Time traveller', 'Posts from 10 different years', years.filter(year => year.posted).length >= 10],
+    ];
+    return list.map(([id, title, detail, earned]) => ({ id, title, detail, earned }));
+  }
+  function drift(current, previous) {
+    if (!current?.hashtags?.length) return { rising: [], fading: [] };
+    const share = (list, total) => new Map((list || []).map(item => [item.key, item.count / Math.max(1, total)]));
+    const now = share(current.hashtags, current.posted),
+      before = share(previous?.hashtags, previous?.posted || 0);
+    const rows = [...new Set([...now.keys(), ...before.keys()])].map(key => ({
+      key,
+      delta: (now.get(key) || 0) - (before.get(key) || 0),
+      count: current.hashtags.find(item => item.key === key)?.count || 0,
+    }));
+    return {
+      rising: rows
+        .filter(row => row.delta > 0 && row.count >= 2)
+        .sort((a, b) => b.delta - a.delta)
+        .slice(0, 8),
+      fading: previous
+        ? rows
+            .filter(row => row.delta < 0)
+            .sort((a, b) => a.delta - b.delta)
+            .slice(0, 8)
+        : [],
+    };
+  }
+  function review(data) {
+    const years = (data.years || []).filter(year => year.posted || year.archived);
+    if (!years.length)
+      return `<div class="empty xa-empty"><h2>Year in Review needs a fresh count</h2><p>Recount the archive to add yearly statistics, topic drift and achievements.</p><button type="button" class="primary" data-act="recount">Recount now</button></div>`;
+    if (!years.some(year => year.year === state.reviewYear))
+      state.reviewYear = (years.find(year => year.posted) || years[0]).year;
+    const index = years.findIndex(year => year.year === state.reviewYear),
+      year = years[index],
+      previous = years[index + 1]?.year === String(Number(year.year) - 1) ? years[index + 1] : null,
+      months = Array.from({ length: 12 }, (_, month) => {
+        const key = `${year.year}-${String(month + 1).padStart(2, '0')}`;
+        return { key, count: data.months?.posted?.[key] || 0 };
+      }),
+      peak = months.reduce((best, month) => (month.count > best.count ? month : best), months[0]),
+      maxMonth = Math.max(1, ...months.map(month => month.count)),
+      busiestDay = Object.entries(data.days?.posted || {})
+        .filter(([key]) => key.startsWith(`${year.year}-`))
+        .sort((a, b) => b[1] - a[1])[0],
+      change = previous?.posted ? Math.round(((year.posted - previous.posted) / previous.posted) * 100) : null,
+      topics = drift(year, previous),
+      badges = achievements(data),
+      earned = badges.filter(badge => badge.earned).length;
+    const yearChips = years
+      .slice(0, 16)
+      .map(
+        item =>
+          `<button type="button" role="radio" data-review-year="${html(item.year)}" aria-checked="${item.year === year.year}">${html(item.year)}</button>`
+      )
+      .join('');
+    const topicRow = (rows, sign) =>
+      rows.length
+        ? `<div class="xa-cloud">${rows.map(row => `<button type="button" class="xa-chip is-${sign}" data-q="#${html(row.key)} year:${html(year.year)}" title="${count(row.count)} posts in ${html(year.year)}">#${html(row.key)}<small>${sign === 'up' ? '▲' : '▼'}</small></button>`).join('')}</div>`
+        : `<p class="xa-quiet">${sign === 'up' ? 'No hashtag stands out this year.' : previous ? 'Nothing faded noticeably.' : 'No earlier year to compare with.'}</p>`;
+    return `<section class="xa-review-head"><div class="seg xa-years" role="radiogroup" aria-label="Year">${yearChips}</div><p>${html(year.year)} in your vault — posts written that year, whenever you archived them.</p></section>
+<section class="xa-kpis" aria-label="${html(year.year)} totals">
+${kpi('Posts written', year.posted, change == null ? `${count(year.archived)} archived during ${year.year}` : `${change >= 0 ? '+' : ''}${change}% vs ${previous.year}`)}
+${kpi('People', year.authors, `${count(year.newAuthors)} first seen this year`)}
+${kpi('Media files', year.media, `${percent(year.media, Math.max(1, year.posted))} per 100 posts`)}
+${kpi('Likes on them', year.likes, 'as last captured')}
+${kpi('Highlights', year.highlights, year.highlights ? 'passages you marked' : 'mark passages in the Reader')}
+</section>
+<div class="xa-split">
+  <section class="xa-section"><header class="xa-section-head"><h2>Month by month</h2><small>Busiest: ${html(monthText(peak.key, 'long'))}${busiestDay ? ` · top day ${html(dayText(busiestDay[0]))} (${count(busiestDay[1])})` : ''}</small></header>
+  <ol class="xa-months">${months.map(month => `<li><button type="button" data-q="on:${month.key}" title="${count(month.count)} posts in ${html(monthText(month.key, 'long'))}" ${month.count ? '' : 'disabled'}><i style="--h:${(month.count / maxMonth).toFixed(4)}"></i><span>${html(monthText(month.key).slice(0, 3))}</span></button></li>`).join('')}</ol></section>
+  <section class="xa-section"><header class="xa-section-head"><h2>Who you kept</h2><button type="button" class="quiet" data-q="year:${html(year.year)}">Open ${html(year.year)} in Library →</button></header>${bars(year.topAuthors.slice(0, 8), { query: item => `from:${item.key} year:${year.year}`, label: item => `@${item.key}` })}</section>
+</div>
+<div class="xa-split">
+  <section class="xa-section"><header class="xa-section-head"><h2>Rising topics</h2><small>${previous ? `vs ${html(previous.year)}` : 'most used'}</small></header>${topicRow(topics.rising, 'up')}</section>
+  <section class="xa-section"><header class="xa-section-head"><h2>Fading topics</h2></header>${topicRow(topics.fading, 'down')}</section>
+</div>
+${year.tags?.length ? `<section class="xa-section"><header class="xa-section-head"><h2>Your tags in ${html(year.year)}</h2></header>${chips(year.tags.slice(0, 30), item => `tag:${item.key} year:${year.year}`)}</section>` : ''}
+<section class="xa-section"><header class="xa-section-head"><h2>Achievements</h2><small>${earned} of ${badges.length} earned</small></header><ul class="xa-badges">${badges
+      .map(
+        badge =>
+          `<li class="xa-badge${badge.earned ? ' is-earned' : ''}"><i aria-hidden="true">${badge.earned ? '★' : '☆'}</i><b>${html(badge.title)}</b><small>${html(badge.detail)}</small><span class="xv-sr-only">${badge.earned ? 'earned' : 'not yet'}</span></li>`
+      )
+      .join('')}</ul></section>
+<p class="xa-foot">Counted locally from ${count(data.total)} archived posts. Years follow ${data.timeZone === 'utc' ? 'UTC' : 'local time'}.</p>`;
+  }
+  // People graph: the most archived people on a circle, linked when one mentions the other.
+  function connections(data) {
+    const graph = data?.graph;
+    if (!graph?.edges?.length) return '';
+    const byHandle = new Map((data.authors || []).map(author => [author.handle, author])),
+      linked = [...new Set(graph.edges.flatMap(edge => [edge.from, edge.to]))].slice(0, 28),
+      size = 520,
+      center = size / 2,
+      radius = size / 2 - 70,
+      position = new Map(
+        linked.map((handle, index) => {
+          const angle = (index / linked.length) * Math.PI * 2 - Math.PI / 2;
+          return [handle, { x: center + Math.cos(angle) * radius, y: center + Math.sin(angle) * radius, angle }];
+        })
+      ),
+      edges = graph.edges.filter(edge => position.has(edge.from) && position.has(edge.to)).slice(0, 90),
+      heaviest = Math.max(1, ...edges.map(edge => edge.weight));
+    const lines = edges
+      .map(edge => {
+        const a = position.get(edge.from),
+          b = position.get(edge.to);
+        return `<path d="M${a.x.toFixed(1)},${a.y.toFixed(1)} Q${center},${center} ${b.x.toFixed(1)},${b.y.toFixed(1)}" style="--w:${(edge.weight / heaviest).toFixed(3)}" data-from="${html(edge.from)}" data-to="${html(edge.to)}"><title>@${html(edge.from)} mentioned @${html(edge.to)} ${count(edge.weight)}×</title></path>`;
+      })
+      .join('');
+    const nodes = linked
+      .map(handle => {
+        const point = position.get(handle),
+          author = byHandle.get(handle),
+          anchor = Math.cos(point.angle) > 0.2 ? 'start' : Math.cos(point.angle) < -0.2 ? 'end' : 'middle',
+          dx = anchor === 'start' ? 10 : anchor === 'end' ? -10 : 0,
+          dy = anchor === 'middle' ? (Math.sin(point.angle) > 0 ? 18 : -10) : 4;
+        return `<g class="xa-node" tabindex="0" role="button" data-person="${html(handle)}" data-raw="${html(author?.raw || handle)}" aria-label="@${html(author?.raw || handle)}, ${count(author?.count || 0)} posts"><circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${(4 + Math.min(8, Math.sqrt(author?.count || 1) / 3)).toFixed(1)}"></circle><text x="${(point.x + dx).toFixed(1)}" y="${(point.y + dy).toFixed(1)}" text-anchor="${anchor}">@${html(author?.raw || handle)}</text></g>`;
+      })
+      .join('');
+    return `<section class="xa-section xa-graph"><header class="xa-section-head"><h2>Connections</h2><small>Who mentions whom among the people you keep most · ${count(edges.length)} links</small></header><svg viewBox="0 0 ${size} ${size}" role="img" aria-label="Mention graph of ${linked.length} people">${lines}${nodes}</svg></section>`;
   }
 
   /* ───────── Overview ───────── */
@@ -762,7 +927,7 @@ ${data.topLiked?.length ? `<section class="xa-section"><header class="xa-section
 </header>
 <div class="xa-people-grid" id="xaPeopleGrid"></div>
 <div class="xa-more" id="xaPeopleMore"></div>
-</section>`;
+</section>${connections(state.data)}`;
   }
 
   function filteredPeople() {
@@ -1373,10 +1538,15 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
   /* ───────── Events ───────── */
   function onClick(event) {
     const target = event.target.closest(
-      '[data-view],[data-q],[data-read],[data-person],[data-growth],[data-cal-field],[data-cal-zone],[data-cal-year],[data-day],[data-sort],[data-act],[data-dup],[data-page-go]'
+      '[data-view],[data-q],[data-read],[data-person],[data-growth],[data-cal-field],[data-cal-zone],[data-cal-year],[data-day],[data-sort],[data-act],[data-dup],[data-page-go],[data-review-year]'
     );
     if (!target || target.disabled) return;
     const set = target.dataset;
+    if (set.reviewYear) {
+      state.reviewYear = set.reviewYear;
+      state.reviewAnimate = true;
+      return render();
+    }
     if (set.view && target.closest('.xa-head, .xa-section-head')) return setView(set.view);
     if (set.q) {
       if (sheet?.open) sheet.close();
@@ -1462,6 +1632,11 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
   }
 
   function onKeydown(event) {
+    const node = event.target.closest?.('.xa-node');
+    if (node && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      return openPerson(node.dataset.person, node.dataset.raw, node);
+    }
     const cell = event.target.closest?.('.xa-cal-grid .xa-day');
     if (!cell || event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.key === 'Enter') {

@@ -1,5 +1,6 @@
 import { RECOVERY_STORES, createRecoveryHeader, encodeRecoveryLine, scanRecoveryArchive } from './archive-recovery.mjs';
 import * as exporters from './library-exporters.mjs';
+import { BACKUP_EXTENSION, decryptBackup, encryptingWriter, isEncryptedBackup } from './backup-crypto.mjs';
 
 const $ = selector => document.querySelector(selector);
 const BATCH_ROWS = 40;
@@ -156,7 +157,7 @@ if (dialog && fileInput && typeof chrome !== 'undefined' && chrome.runtime?.send
     let size = 0;
     return {
       write: value => {
-        size += encoderLength(value);
+        size += typeof value === 'string' ? encoderLength(value) : value.byteLength;
         if (size > FALLBACK_FILE_LIMIT) {
           chunks.length = 0;
           throw new RangeError(
@@ -188,15 +189,28 @@ if (dialog && fileInput && typeof chrome !== 'undefined' && chrome.runtime?.send
     cancelButton.textContent = 'Close';
   };
 
-  async function exportRecoveryFile() {
+  // options.passphrase (XVault 20) wraps the same JSONL stream in the AES-GCM container from backup-crypto.mjs.
+  async function exportRecoveryFile(options = {}) {
     let writer;
+    const passphrase = typeof options?.passphrase === 'string' ? options.passphrase : '';
     try {
       // Open the save picker first while the click still carries user activation.
-      writer = await makeWriter(`xvault-recovery-${new Date().toISOString().slice(0, 10)}.jsonl`, {
-        description: 'XVault recovery file',
-        mime: 'application/x-ndjson',
-        extension: '.jsonl',
-      });
+      const day = new Date().toISOString().slice(0, 10);
+      writer = passphrase
+        ? encryptingWriter(
+            await makeWriter(`xvault-recovery-${day}${BACKUP_EXTENSION}`, {
+              description: 'Encrypted XVault recovery file',
+              mime: 'application/octet-stream',
+              extension: BACKUP_EXTENSION,
+            }),
+            passphrase,
+            { meta: { contains: 'xvault-recovery-jsonl' } }
+          )
+        : await makeWriter(`xvault-recovery-${day}.jsonl`, {
+            description: 'XVault recovery file',
+            mime: 'application/x-ndjson',
+            extension: '.jsonl',
+          });
     } catch (error) {
       if (error?.name !== 'AbortError') {
         status.textContent = error?.message || String(error);
@@ -263,7 +277,10 @@ if (dialog && fileInput && typeof chrome !== 'undefined' && chrome.runtime?.send
         );
       await write(encodeRecoveryLine({ type: 'end', recordCount, archiveRevision, downloadRevision }));
       await writer.close();
-      status.textContent = `Recovery file saved · ${recordCount.toLocaleString()} records · ${bytesLabel(bytes)}. Media files were not copied.`;
+      status.textContent = `${passphrase ? 'Encrypted recovery file' : 'Recovery file'} saved · ${recordCount.toLocaleString()} records · ${bytesLabel(passphrase ? writer.bytesWritten : bytes)}. Media files were not copied.`;
+      window.dispatchEvent(
+        new CustomEvent('xvault:backup-saved', { detail: { encrypted: !!passphrase, recordCount, bytes } })
+      );
       setProgress(`Saved ${recordCount.toLocaleString()} records · ${bytesLabel(bytes)}`, 1);
     } catch (error) {
       try {
@@ -957,10 +974,55 @@ if (dialog && fileInput && typeof chrome !== 'undefined' && chrome.runtime?.send
   $('#exportThreadsHtml')?.addEventListener('click', () => exportThreads('html'));
   window.XVaultCreateRecoveryFile = exportRecoveryFile;
   $('#recoveryImport')?.addEventListener('click', () => fileInput.click());
+  // Encrypted backups are decrypted in memory first; the decrypted JSONL then follows the normal preview.
+  const askPassphrase = name =>
+    new Promise(resolve => {
+      const ask = document.createElement('dialog');
+      ask.className = 'xv-sheet xv-l3-dialog is-compact';
+      ask.setAttribute('aria-labelledby', 'xvDecryptTitle');
+      ask.innerHTML = `<form method="dialog"><header><h2 id="xvDecryptTitle">Unlock encrypted backup</h2></header><p class="xv-l3-hint"></p><label class="xv-field"><span>Passphrase</span><input type="password" name="passphrase" autocomplete="current-password" required minlength="8"></label><footer><button type="button" class="quiet" value="cancel" data-cancel>Cancel</button><button type="submit" class="primary" value="ok">Unlock</button></footer></form>`;
+      ask.querySelector('.xv-l3-hint').textContent =
+        `${name} is protected with a passphrase. Nothing is uploaded; decryption happens on this device.`;
+      document.body.append(ask);
+      const finish = value => {
+        ask.close();
+        ask.remove();
+        resolve(value);
+      };
+      ask.querySelector('[data-cancel]').onclick = () => finish(null);
+      ask.addEventListener('cancel', () => finish(null));
+      ask.querySelector('form').onsubmit = event => {
+        event.preventDefault();
+        finish(ask.querySelector('input').value);
+      };
+      ask.showModal();
+      ask.querySelector('input').focus();
+    });
+  async function openRecoveryFile(file) {
+    if (!(await isEncryptedBackup(file).catch(() => false))) return previewRecoveryFile(file);
+    for (;;) {
+      const passphrase = await askPassphrase(file.name);
+      if (passphrase == null) return;
+      try {
+        status.textContent = 'Decrypting backup…';
+        const plain = await decryptBackup(file, passphrase);
+        status.textContent = '';
+        return previewRecoveryFile(
+          new File([plain], file.name.replace(/\.xvenc$/i, '') || 'xvault-recovery.jsonl', {
+            type: 'application/x-ndjson',
+          })
+        );
+      } catch (error) {
+        status.textContent = error?.message || String(error);
+        if (!/passphrase/i.test(status.textContent)) return;
+      }
+    }
+  }
+  window.XVaultOpenRecoveryFile = openRecoveryFile;
   fileInput.addEventListener('change', () => {
     const file = fileInput.files?.[0] || null;
     fileInput.value = '';
-    if (file) void previewRecoveryFile(file);
+    if (file) void openRecoveryFile(file);
   });
   applyButton.addEventListener('click', () => {
     if (operation === 'preview') return;

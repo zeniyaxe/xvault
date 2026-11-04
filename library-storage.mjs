@@ -1915,11 +1915,131 @@ export function updateLibraryRecord(database, id, patch = {}, expectedNote) {
       const meta = { ...(row.userMeta || {}) };
       for (const field of ['note', 'favorite', 'tags', 'colorLabel', 'reviewedAt'])
         if (Object.hasOwn(patch, field)) meta[field] = patch[field];
+      // XVault 20 reading and organisation fields. Validated here so every writer (dashboard, Reader,
+      // Remote, rules) gets the same limits; null removes a field.
+      for (const [field, value] of Object.entries(validReadingPatch(patch))) {
+        if (value === null) delete meta[field];
+        else meta[field] = value;
+      }
       const next = { ...row, userMeta: meta, updatedAt: Date.now() };
       store.put(next);
       bumpLibraryRevision(tx);
       result = { ok: true, row: next };
     };
+  });
+}
+
+// ---- XVault 20: reading state, highlights and boards on userMeta ----
+const BOARD_ID = /^[a-z0-9-]{1,64}$/i;
+function timestampOrNull(value, field) {
+  if (value === null || value === false) return null;
+  if (value === true) return Date.now();
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) throw new RangeError(`${field} must be a timestamp`);
+  return Math.round(number);
+}
+export function validHighlights(value) {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.length > 500) throw new RangeError('A post can keep at most 500 highlights');
+  return value.map(entry => {
+    if (!entry || typeof entry !== 'object') throw new TypeError('Invalid highlight');
+    const text = String(entry.text || '').slice(0, 4000);
+    if (!text.trim()) throw new RangeError('A highlight needs text');
+    const id =
+      String(entry.id || '').slice(0, 64) || `h${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+    const out = { id, text, at: Number(entry.at) > 0 ? Math.round(Number(entry.at)) : Date.now() };
+    if (entry.note) out.note = String(entry.note).slice(0, 10000);
+    if (entry.color && /^[a-z]{1,16}$/.test(entry.color)) out.color = entry.color;
+    if (Number.isInteger(entry.start) && entry.start >= 0) out.start = entry.start;
+    return out;
+  });
+}
+function validBoards(value) {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.length > 200 || value.some(id => typeof id !== 'string' || !BOARD_ID.test(id)))
+    throw new RangeError('Boards must be a list of at most 200 board IDs');
+  return [...new Set(value)];
+}
+function validProgress(value) {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object') throw new TypeError('Invalid reading progress');
+  const total = Math.max(1, Math.min(100000, Math.round(Number(value.total) || 1)));
+  const index = Math.max(0, Math.min(total - 1, Math.round(Number(value.index) || 0)));
+  return {
+    index,
+    total,
+    at: Date.now(),
+    ...(typeof value.postId === 'string' ? { postId: value.postId.slice(0, 32) } : {}),
+  };
+}
+export function validReadingPatch(patch = {}) {
+  const out = {};
+  if (Object.hasOwn(patch, 'readLater')) out.readLater = timestampOrNull(patch.readLater, 'readLater');
+  if (Object.hasOwn(patch, 'readAt')) out.readAt = timestampOrNull(patch.readAt, 'readAt');
+  if (Object.hasOwn(patch, 'highlights')) out.highlights = validHighlights(patch.highlights);
+  if (Object.hasOwn(patch, 'boards')) out.boards = validBoards(patch.boards);
+  if (Object.hasOwn(patch, 'readProgress')) out.readProgress = validProgress(patch.readProgress);
+  if (Array.isArray(out.highlights) && !out.highlights.length) out.highlights = null;
+  if (Array.isArray(out.boards) && !out.boards.length) out.boards = null;
+  return out;
+}
+const RESTORABLE_META = [
+  'note',
+  'favorite',
+  'tags',
+  'colorLabel',
+  'reviewedAt',
+  'readLater',
+  'readAt',
+  'highlights',
+  'boards',
+  'readProgress',
+];
+const cleanTag = tag =>
+  String(tag || '')
+    .trim()
+    .replace(/^#/, '')
+    .trim()
+    .slice(0, 40);
+
+// Puts back userMeta snapshots taken before a bulk change (undo). Only the organisation fields are touched,
+// and only when the post still exists; archived content is never rewritten.
+export function restoreLibraryMetadata(database, entries = []) {
+  if (!Array.isArray(entries) || entries.length > 1000)
+    throw new RangeError('Undo restores at most 1000 posts at a time');
+  const wanted = new Map();
+  for (const entry of entries) {
+    const [id] = mutationIds([entry?.id]);
+    wanted.set(id, entry?.userMeta && typeof entry.userMeta === 'object' ? entry.userMeta : {});
+  }
+  return new Promise((resolve, reject) => {
+    const names = database.objectStoreNames.contains('checkpoints') ? ['tweets', 'checkpoints'] : ['tweets'];
+    const tx = database.transaction(names, 'readwrite'),
+      store = tx.objectStore('tweets'),
+      rows = [];
+    let bumped = false;
+    tx.oncomplete = () => resolve({ restored: rows.length, rows });
+    tx.onabort = () => reject(tx.error || new Error('Undo aborted; nothing was changed'));
+    tx.onerror = () => reject(tx.error || new Error('Undo failed'));
+    for (const [id, snapshot] of wanted) {
+      const request = store.get(id);
+      request.onsuccess = () => {
+        const row = request.result;
+        if (!row) return;
+        const meta = { ...(row.userMeta || {}) };
+        for (const field of RESTORABLE_META) {
+          if (Object.hasOwn(snapshot, field) && snapshot[field] !== undefined) meta[field] = snapshot[field];
+          else delete meta[field];
+        }
+        const next = { ...row, userMeta: meta, updatedAt: Date.now() };
+        store.put(next);
+        rows.push(next);
+        if (!bumped) {
+          bumped = true;
+          bumpLibraryRevision(tx);
+        }
+      };
+    }
   });
 }
 
@@ -3768,13 +3888,20 @@ export function mergeTrashMetadata(database, id, options = {}) {
 
 export function updateLibraryMetadata(database, ids, patch = {}) {
   const wanted = mutationIds(ids);
+  const list = value => (Array.isArray(value) ? value : []);
+  const addTags = list(patch.addTags).map(cleanTag).filter(Boolean).slice(0, 50),
+    removeTags = list(patch.removeTags).map(cleanTag).filter(Boolean).slice(0, 50),
+    addBoards = validBoards(list(patch.addBoards)) || [],
+    removeBoards = validBoards(list(patch.removeBoards)) || [],
+    noteAppend = typeof patch.noteAppend === 'string' ? patch.noteAppend.trim().slice(0, 20000) : '';
+  const previous = [];
   return new Promise((resolve, reject) => {
     const names = database.objectStoreNames.contains('checkpoints') ? ['tweets', 'checkpoints'] : ['tweets'];
     const tx = database.transaction(names, 'readwrite'),
       store = tx.objectStore('tweets'),
       rows = [];
     let revisionQueued = false;
-    tx.oncomplete = () => resolve({ updated: rows.length, rows });
+    tx.oncomplete = () => resolve({ updated: rows.length, rows, previous });
     tx.onabort = () => reject(tx.error || new Error('Library update aborted; this batch was not applied'));
     tx.onerror = () => reject(tx.error || new Error('Library update failed'));
     for (const id of wanted) {
@@ -3782,6 +3909,7 @@ export function updateLibraryMetadata(database, ids, patch = {}) {
       request.onsuccess = () => {
         const row = request.result;
         if (!row) return;
+        previous.push({ id: String(row.id), userMeta: { ...(row.userMeta || {}) } });
         const meta = { ...(row.userMeta || {}) };
         if (typeof patch.favorite === 'boolean') meta.favorite = patch.favorite;
         if (typeof patch.colorLabel === 'string') meta.colorLabel = patch.colorLabel.slice(0, 24);
@@ -3793,6 +3921,26 @@ export function updateLibraryMetadata(database, ids, patch = {}) {
           meta.tags = meta.tags.filter(tag => tag !== patch.removeTag.trim().replace(/^#/, ''));
         const tag = typeof patch.addTag === 'string' ? patch.addTag.trim().replace(/^#/, '').trim().slice(0, 40) : '';
         if (tag) meta.tags = [...new Set([...(meta.tags || []), tag])];
+        // XVault 20 bulk editor: several tags at once, read later, boards and note appends.
+        if (removeTags.length && meta.tags?.length) meta.tags = meta.tags.filter(value => !removeTags.includes(value));
+        if (addTags.length) meta.tags = [...new Set([...(meta.tags || []), ...addTags])].slice(0, 200);
+        if (meta.tags && !meta.tags.length) delete meta.tags;
+        if (typeof patch.readLater === 'boolean') {
+          if (patch.readLater) meta.readLater = meta.readLater || Date.now();
+          else delete meta.readLater;
+        }
+        if (typeof patch.read === 'boolean') {
+          if (patch.read) meta.readAt = meta.readAt || Date.now();
+          else delete meta.readAt;
+        }
+        if (addBoards.length || removeBoards.length) {
+          const boards = new Set(meta.boards || []);
+          addBoards.forEach(id => boards.add(id));
+          removeBoards.forEach(id => boards.delete(id));
+          if (boards.size) meta.boards = [...boards].slice(0, 200);
+          else delete meta.boards;
+        }
+        if (noteAppend) meta.note = meta.note ? `${meta.note}\n\n${noteAppend}` : noteAppend;
         const next = { ...row, userMeta: meta, updatedAt: Date.now() };
         store.put(next);
         rows.push(next);

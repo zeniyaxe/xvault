@@ -125,6 +125,35 @@ export function createInsightsAccumulator(options = {}) {
     topLiked: [],
     onThisDay: [],
     mediaOwners: new Map(),
+    // XVault 20: per-year review, mention graph and reading/organising totals.
+    years: new Map(),
+    edges: new Map(),
+    reading: { later: 0, read: 0, highlights: 0, highlighted: 0, boarded: 0 },
+  };
+  const yearOf = stamp => {
+    if (!stamp) return '';
+    const date = new Date(stamp);
+    return String(timeZone === 'utc' ? date.getUTCFullYear() : date.getFullYear());
+  };
+  function yearBucket(year) {
+    let bucket = state.years.get(year);
+    if (!bucket) {
+      bucket = {
+        posted: 0,
+        archived: 0,
+        media: 0,
+        likes: 0,
+        authors: new Map(),
+        hashtags: new Map(),
+        tags: new Map(),
+        highlights: 0,
+      };
+      state.years.set(year, bucket);
+    }
+    return bucket;
+  }
+  const capped = (map, key, limit = 6000) => {
+    if (map.has(key) || map.size < limit) bump(map, key);
   };
 
   function add(post) {
@@ -197,6 +226,32 @@ export function createInsightsAccumulator(options = {}) {
     for (const source of new Set([...(post.archiveSources || []), ...(post.sourceFlags || [])].map(String)))
       if (/^[a-z-]{2,24}$/i.test(source)) bump(state.sources, source.toLowerCase());
     for (const tag of Array.isArray(meta.tags) ? meta.tags : []) bump(state.tags, String(tag).toLowerCase());
+    const postedYear = yearOf(postedAt),
+      archivedYear = yearOf(archivedAt);
+    if (archivedYear) yearBucket(archivedYear).archived++;
+    if (postedYear) {
+      const bucket = yearBucket(postedYear);
+      bucket.posted++;
+      bucket.media += media.length;
+      bucket.likes += Number(post.metrics?.likes || 0);
+      bucket.highlights += Array.isArray(meta.highlights) ? meta.highlights.length : 0;
+      if (handle) capped(bucket.authors, handle);
+      for (const tag of Array.isArray(post.hashtags) ? post.hashtags.slice(0, 30) : [])
+        capped(bucket.hashtags, String(tag).toLowerCase());
+      for (const tag of Array.isArray(meta.tags) ? meta.tags.slice(0, 30) : []) capped(bucket.tags, String(tag));
+    }
+    if (handle)
+      for (const mention of Array.isArray(post.mentions) ? post.mentions.slice(0, 12) : []) {
+        const target = String(mention).toLowerCase();
+        if (target && target !== handle) capped(state.edges, `${handle}>${target}`, 120000);
+      }
+    if (meta.readLater && !meta.readAt) state.reading.later++;
+    if (meta.readAt) state.reading.read++;
+    if (Array.isArray(meta.highlights) && meta.highlights.length) {
+      state.reading.highlighted++;
+      state.reading.highlights += meta.highlights.length;
+    }
+    if (Array.isArray(meta.boards) && meta.boards.length) state.reading.boarded++;
     if (meta.favorite) state.personal.favorites++;
     if (Array.isArray(meta.tags) && meta.tags.length) state.personal.tagged++;
     if (String(meta.note || '').trim()) state.personal.notes++;
@@ -257,9 +312,42 @@ export function createInsightsAccumulator(options = {}) {
       if (posts.length > 1) sharedMedia.push({ mediaId, posts });
       if (sharedMedia.length >= 400) break;
     }
+    // Year in Review: newest year first; authors new that year are those first posted in it.
+    const firstYear = new Map();
+    for (const author of state.authors.values()) {
+      const year = yearOf(author.firstPosted);
+      if (year) firstYear.set(year, (firstYear.get(year) || 0) + 1);
+    }
+    const years = [...state.years]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .slice(0, 30)
+      .map(([year, bucket]) => ({
+        year,
+        posted: bucket.posted,
+        archived: bucket.archived,
+        media: bucket.media,
+        likes: bucket.likes,
+        highlights: bucket.highlights,
+        authors: bucket.authors.size,
+        newAuthors: firstYear.get(year) || 0,
+        topAuthors: topEntries(bucket.authors, 10),
+        hashtags: topEntries(bucket.hashtags, 40),
+        tags: topEntries(bucket.tags, 24),
+      }));
+    // People graph: who mentions whom among the most archived people.
+    const nodeSet = new Set(authors.slice(0, 36).map(author => author.handle));
+    const graph = [];
+    for (const [key, weight] of state.edges) {
+      const [from, to] = key.split('>');
+      if (from !== to && nodeSet.has(from) && nodeSet.has(to)) graph.push({ from, to, weight });
+    }
+    graph.sort((a, b) => b.weight - a.weight || a.from.localeCompare(b.from));
     return {
-      version: 1,
+      version: 2,
       computedAt: now,
+      years,
+      graph: { nodes: [...nodeSet], edges: graph.slice(0, 160) },
+      reading: { ...state.reading },
       timeZone,
       total: state.total,
       authorsTotal: state.authors.size,
@@ -418,6 +506,12 @@ export function readerPost(post) {
     language: post.language || null,
     favorite: !!post.userMeta?.favorite,
     note: String(post.userMeta?.note || '').slice(0, 4000),
+    // XVault 20 reading state.
+    tags: Array.isArray(post.userMeta?.tags) ? post.userMeta.tags.slice(0, 50) : [],
+    readLater: Number(post.userMeta?.readLater) || 0,
+    readAt: Number(post.userMeta?.readAt) || 0,
+    readProgress: post.userMeta?.readProgress || null,
+    highlights: Array.isArray(post.userMeta?.highlights) ? post.userMeta.highlights.slice(0, 200) : [],
   };
 }
 
@@ -438,6 +532,11 @@ export function threadMarkdown(thread, { includeReplies = false } = {}) {
     lines.push(...(post.spine ? body.split('\n') : body.split('\n').map(line => `> ${line}`)));
     for (const item of post.media) if (item.url) lines.push('', `![${item.type}](${item.url})`);
     if (post.quoted) lines.push('', `> Quoting @${post.quoted.author.handle}: ${post.quoted.text.split('\n')[0]}`);
+    for (const highlight of post.highlights || [])
+      lines.push(
+        '',
+        `> ==${String(highlight.text).replace(/\s+/g, ' ')}==${highlight.note ? ` — ${highlight.note}` : ''}`
+      );
     lines.push(
       '',
       `<sub>${post.createdAt ? new Date(post.createdAt).toISOString().slice(0, 16).replace('T', ' ') : ''} · ${post.url}</sub>`,
