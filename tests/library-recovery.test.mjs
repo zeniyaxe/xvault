@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-const dashboard = fs.readFileSync(new URL('../dashboard.js', import.meta.url), 'utf8');
-const workspace = fs.readFileSync(new URL('../library-workspace.js', import.meta.url), 'utf8');
+import { collapseSource, compactSource, readSource } from './source-text.mjs';
+const dashboard = compactSource(readSource('dashboard.js'));
+const workspace = collapseSource(readSource('library-workspace.js'));
 assert.match(dashboard, /const downloadPostBusy=new Set\(\)/, 'a post should have at most one in-flight Library queue request');
 assert.match(dashboard, /downloadPostBusy\.has\(id\)/, 'repeat post clicks should be ignored while queueing');
 assert.match(dashboard, /button\.setAttribute\('aria-busy','true'\);button\.textContent='Queuing…'/, 'the Library action should announce and show its in-flight state');

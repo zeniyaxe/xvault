@@ -1,13 +1,15 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
+import { collapseSource, compactSource, readSource } from './source-text.mjs';
 
-const workspace = fs.readFileSync(new URL('../library-workspace.js', import.meta.url), 'utf8');
-const background = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8');
+const workspaceText = readSource('library-workspace.js');
+const workspace = collapseSource(workspaceText);
+const background = compactSource(readSource('background.js'));
 const remoteControls = fs.readFileSync(new URL('../remote-query-controls.mjs', import.meta.url), 'utf8');
-const storage = fs.readFileSync(new URL('../library-storage.mjs', import.meta.url), 'utf8');
-const dashboard = fs.readFileSync(new URL('../dashboard.js', import.meta.url), 'utf8');
+const storage = collapseSource(readSource('library-storage.mjs'));
+const dashboard = compactSource(readSource('dashboard.js'));
 const bulkUi = fs.readFileSync(new URL('../bulk-download-ui.js', import.meta.url), 'utf8');
-const css = fs.readFileSync(new URL('../xv-library.css', import.meta.url), 'utf8');
+const css = compactSource(readSource('xv-library.css'));
 const exporter = fs.readFileSync(new URL('../library-export-worker.js', import.meta.url), 'utf8');
 const dashboardMock = fs.readFileSync(new URL('./chrome-mock.js', import.meta.url), 'utf8');
 
@@ -25,7 +27,7 @@ assert.match(background, /recordsRead:\(planned\.cached\?0:plan\.scanned\)\+sele
 assert.match(background, /new LibraryRankPlanCache\(\{maxPlans:3,maxRanks:MAX_LIBRARY_RANKS\}\)/, 'rank plans should be kept in a bounded cache');
 assert.match(background, /GET_LIBRARY_QUERY_PROGRESS/, 'long non-index scans should expose cancellable progress to the dashboard');
 assert.match(background, /rankedLibraryPlanCache\.clear\(\)/, 'mutations should release stale rank tuples promptly');
-assert.match(background, /VER=15/);assert.match(background,/createObjectStore\('mediaAssociations'/,'schema adds an indexed shared-file association store without rewriting archive records');assert.match(background,/createIndex\('downloadId','downloadId'\)/,'download events resolve through a bounded browser-ID index');assert.match(background,/createIndex\('usableAssetKey','usableAssetKey'/,'cross-post Save Once resolves through a direct sparse asset index');assert.match(background,/emptyDownloadStateCounts\(\)/,'fresh and migrated archives initialize exact state counters');assert.match(background,/backfillDownloadAssetIndexPage\(database,\{limit:512\}\)/,'legacy asset keys and queue totals are backfilled through bounded resumable pages');
+assert.match(background, /VER=16/);assert.match(background,/createIndex\('conversationId','conversationId'\)/,'schema 16 indexes conversations so the Reader assembles threads without a full scan');assert.match(background,/createObjectStore\('mediaAssociations'/,'schema adds an indexed shared-file association store without rewriting archive records');assert.match(background,/createIndex\('downloadId','downloadId'\)/,'download events resolve through a bounded browser-ID index');assert.match(background,/createIndex\('usableAssetKey','usableAssetKey'/,'cross-post Save Once resolves through a direct sparse asset index');assert.match(background,/emptyDownloadStateCounts\(\)/,'fresh and migrated archives initialize exact state counters');assert.match(background,/backfillDownloadAssetIndexPage\(database,\{limit:512\}\)/,'legacy asset keys and queue totals are backfilled through bounded resumable pages');
 assert.match(background,/MAX_QUEUED_BUFFER=96/,'persisted queued rows feed a bounded worker buffer');assert.doesNotMatch(background.slice(background.indexOf('async function retryFailed'),background.indexOf('async function clearState')),/all\('downloads'\)/,'retry and target rebuilding must walk state-index pages');
 const enqueueCore = background.slice(background.indexOf('async function enqueueCore'), background.indexOf('let enqueueTail', background.indexOf('async function enqueueCore')));
 assert.doesNotMatch(enqueueCore, /all\('downloads'\)|getAll\(/, 'normal enqueue decisions must not clone download history');
@@ -47,7 +49,7 @@ assert.doesNotMatch(dashboard, /portableExport|Library page HTML/, 'the misleadi
 assert.match(background, /loadPlan:id=>readStoredLibraryPlan\(database,id\)/);
 assert.match(background, /savePlan:\(id,identity,plan\)=>writeStoredLibraryPlan\(database,id,identity,plan,3\)/);
 assert.match(background, /compiled\.length\?globalThis\.XVaultLibrarySearch\.projectPost[\s\S]*?:globalThis\.XVaultLibrarySearch\.projectRankPost/, 'unfiltered ranking should avoid transient full search projections');
-assert.match(storage, /'manifests', 'libraryPlans'\]/, 'Library reset should remove stale disposable query plans');
+assert.match(storage, /'manifests',\s*'libraryPlans',?\s*\]/, 'Library reset should remove stale disposable query plans');
 assert.match(background, /function announceMetadata\(ids\)\{if\(ids\?\.length\)\{remoteQueryPlans\.clear\(\);/, 'Remote metadata writes should immediately release revision-stale cached query plans');
 const remoteQuery = background.slice(background.indexOf('async function buildRemoteRankPlan'), background.indexOf('async function remoteSetMeta'));
 assert.match(remoteQuery, /sort==='new'\|\|sort==='old'.*buildRemoteCursorPlan/s, 'Remote chronological pages should use revision-bound IndexedDB cursors');
@@ -96,7 +98,7 @@ assert.match(graphSampler, /!\$\('#page-home'\).*classList\.contains\('show'\)/,
 assert.match(workspace, /librarySearchDebounce/);
 assert.match(workspace, /IntersectionObserver/);
 assert.match(workspace, /contentVisibility/);
-const selectionRenderer = workspace.match(/function renderSelection\(\) \{([\s\S]*?)\n  \}/)?.[1] || '';
+const selectionRenderer = workspaceText.match(/function renderSelection\(\) \{([\s\S]*?)\n  \}/)?.[1] || '';
 assert.match(selectionRenderer, /resultRows\(\)/, 'selection decoration should resolve only the current result page');
 assert.match(selectionRenderer, /matching\.slice\(0, exportPageSize\(\)\)/, 'selection decoration should stay bounded by the configured page size');
 assert.doesNotMatch(selectionRenderer, /new Map\(library\.map/, 'selection changes should not rematerialize an ID map for the whole archive');

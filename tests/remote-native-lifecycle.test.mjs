@@ -5,7 +5,7 @@ import {webcrypto} from 'node:crypto';
 
 // Exercise the worker's actual lifecycle with Chrome's local-disconnect semantics.
 const source=await fs.readFile(new URL('../background.js',import.meta.url),'utf8');
-const block=source.slice(source.indexOf('let remoteNativePort='),source.indexOf('function validRemoteId('));
+const block=source.slice(source.search(/let remoteNativePort\s*=/),source.indexOf('function validRemoteId('));
 function fixture(){
  const ports=[],timers=new Map();let sequence=0;
  const context=vm.createContext({crypto:webcrypto,console,getSettings:async()=>({remoteEnabled:false}),

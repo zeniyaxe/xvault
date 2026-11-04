@@ -1,9 +1,9 @@
 // Structural guards only. The behavioral proof of deduplication is tests/download-queue-browser.mjs, which drives the
 // real service worker and counts requests at a local server. These checks stop the single-authority wiring from eroding.
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import { compactSource, readSource } from './source-text.mjs';
 
-const source = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8');
+const source = compactSource(readSource('background.js'));
 assert.match(source, /async function enqueueCore\(/, 'one core enqueue path');
 assert.match(source, /function enqueue\(items,force=false,context=\{\}\)\{const run=enqueueTail\.then\(\(\)=>enqueueCore\(items,force,context\)\)/, 'enqueue serializes concurrent callers');
 assert.match(source, /decideEnqueue\(\{key,seenInRequest/, 'accept/skip is decided by the shared decision function');
