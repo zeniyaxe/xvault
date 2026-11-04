@@ -413,8 +413,12 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
     return card ? { id: card.dataset.id, card } : null;
   }
 
+  // `g` then `t` is the shell's Studio chord; only a bare `t` opens the reader.
+  let chordStarted = 0;
   document.addEventListener('keydown', event => {
+    if (event.key === 'g') chordStarted = Date.now();
     if (event.key !== 't' || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (Date.now() - chordStarted < 1100) return;
     if (event.target.closest('input,textarea,select,[contenteditable]') || dialog?.open) return;
     if (!document.querySelector('#lightbox')?.classList.contains('hidden')) return;
     const target = libraryTarget();
