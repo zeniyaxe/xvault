@@ -1,0 +1,65 @@
+/* Library search suggestions. Fixed so the toolbar never clips it. */
+.xv-assist {
+  position: fixed;
+  z-index: 60;
+  max-height: min(380px, 60vh);
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--raised);
+  box-shadow: var(--shadow-pop);
+}
+.xv-assist[hidden] {
+  display: none;
+}
+.xv-assist-head {
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.xv-assist-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 7px 10px;
+  border-radius: var(--r-s);
+  cursor: pointer;
+}
+.xv-assist-item b {
+  overflow: hidden;
+  font: 500 12.5px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.xv-assist-item small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.xv-assist-item:hover,
+.xv-assist-item[aria-selected='true'] {
+  background: var(--raised-hi);
+}
+.xv-assist-item[aria-selected='true'] b {
+  color: var(--accent);
+}
+.xv-assist-foot {
+  padding: 6px 10px 4px;
+  border-top: 1px solid var(--line-soft);
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.xv-assist-foot kbd {
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  font: 500 10.5px var(--font-mono);
+}
