@@ -264,6 +264,7 @@ export function createSyncScheduler(deps) {
     tick,
     status,
     schedule: async () => schedule(await getSettings()),
+    types: Object.keys(MESSAGES),
     handles: type => Object.hasOwn(MESSAGES, type),
     handle: message => MESSAGES[message.type](message),
     onAlarm: name => (name === SYNC_ALARM ? (tick().catch(() => {}), true) : false),
