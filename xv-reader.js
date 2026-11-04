@@ -79,12 +79,16 @@
     <button type="button" class="quiet" data-act="copy" title="Copy the thread as Markdown">Copy Markdown</button>
     <button type="button" class="quiet" data-act="download" title="Save the thread as a Markdown file">Save .md</button>
     <button type="button" class="quiet" data-act="download-html" title="Save the thread as an offline HTML page">Save .html</button>
+    <button type="button" class="quiet" data-act="later" aria-pressed="false" title="Keep this thread in Read later (l)">Read later</button>
+    <button type="button" class="quiet" data-act="read" aria-pressed="false" title="Mark the thread read (m)">Mark read</button>
+    <span class="xr-sep" aria-hidden="true"></span>
     <button type="button" class="quiet" data-act="library" title="Show this conversation in the Library">In Library</button>
     <button type="button" class="quiet" data-act="x" title="Open the focused post on X">Open on X</button>
     <button type="button" class="quiet xr-close" data-act="close" aria-label="Close reader" title="Close (Esc)">×</button>
   </div>
 </header>
-<div class="xr-scroll"><main class="xr-column" id="xvReaderBody" tabindex="-1"></main></div>`;
+<div class="xr-scroll"><main class="xr-column" id="xvReaderBody" tabindex="-1"></main></div>
+<div class="xr-mark-pop" role="toolbar" aria-label="Highlight selection" hidden><button type="button" data-act="highlight">Highlight</button><button type="button" data-act="highlight-note">Highlight + note</button></div>`;
     document.body.append(dialog);
     dialog.addEventListener('click', onClick);
     dialog.addEventListener('keydown', onKey);
@@ -97,6 +101,8 @@
       true
     );
     dialog.querySelector('.xr-scroll').addEventListener('scroll', progress, { passive: true });
+    dialog.addEventListener('pointerup', () => setTimeout(selectionPopover, 0));
+    dialog.addEventListener('keyup', event => event.shiftKey && selectionPopover());
     paintChrome();
     return dialog;
   }
@@ -107,6 +113,16 @@
     for (const button of dialog.querySelectorAll('.xr-mode [data-mode]'))
       button.setAttribute('aria-checked', String(button.dataset.mode === mode));
     dialog.querySelector('.xr-back').hidden = !stack.length;
+    const root = rootPost();
+    for (const [act, on, labels] of [
+      ['later', !!root?.readLater && !root?.readAt, ['Read later', 'In Read later']],
+      ['read', !!root?.readAt, ['Mark read', 'Read ✓']],
+    ]) {
+      const button = dialog.querySelector(`[data-act="${act}"]`);
+      button.setAttribute('aria-pressed', String(on));
+      button.textContent = labels[on ? 1 : 0];
+      button.disabled = !thread;
+    }
     const replies = (thread?.posts || []).filter(post => !post.spine).length;
     const modeGroup = dialog.querySelector('.xr-mode');
     modeGroup.hidden = !replies;
@@ -121,6 +137,249 @@
     const max = scroller.scrollHeight - scroller.clientHeight;
     dialog.style.setProperty('--xr-progress', max > 0 ? String(Math.min(1, scroller.scrollTop / max)) : '1');
     updatePosition();
+    rememberProgress(max > 0 ? scroller.scrollTop / max : 1);
+  }
+
+  // ---- XVault 20: reading state (read later, progress, highlights) ----
+  const rootPost = () =>
+    thread?.posts.find(post => post.id === thread.rootId) || thread?.posts.find(post => post.spine) || thread?.posts[0];
+  async function patchPost(post, patch) {
+    const result = await call({ type: 'UPDATE_TWEET_META', id: post.id, patch }).catch(error => ({
+      ok: false,
+      error: error?.message,
+    }));
+    if (!result?.ok) {
+      say(result?.error || 'The change could not be saved');
+      return false;
+    }
+    window.XVaultLibraryRecordUpdated?.([post.id]);
+    return true;
+  }
+  let progressTimer = 0,
+    finishedTicket = -1;
+  function rememberProgress(fraction) {
+    clearTimeout(progressTimer);
+    if (!thread || thread.posts.length < 2) return;
+    const ticket = token;
+    progressTimer = setTimeout(async () => {
+      if (ticket !== token || !dialog.open) return;
+      const root = rootPost(),
+        posts = [...dialog.querySelectorAll('.xr-post')],
+        edge = dialog.querySelector('.xr-scroll').getBoundingClientRect().top + 90;
+      let index = posts.findIndex(post => post.getBoundingClientRect().bottom > edge);
+      if (index < 0) index = posts.length - 1;
+      if (!root || (root.readProgress?.index === index && root.readProgress?.total === posts.length)) return;
+      if (!root.readProgress && index === 0 && fraction < 0.98) return; // nothing worth remembering yet
+      root.readProgress = { index, total: posts.length, postId: posts[index]?.dataset.id };
+      await patchPost(root, { readProgress: root.readProgress });
+      // Finishing a thread that was saved for later marks it read.
+      if (fraction >= 0.98 && root.readLater && !root.readAt && finishedTicket !== ticket) {
+        finishedTicket = ticket;
+        root.readAt = Date.now();
+        if (await patchPost(root, { readAt: root.readAt })) say('Finished · marked read');
+        paintChrome();
+      }
+    }, 1200);
+  }
+  async function toggleLater() {
+    const root = rootPost();
+    if (!root) return;
+    const on = !(root.readLater && !root.readAt);
+    const patch = on ? { readLater: Date.now(), readAt: null } : { readLater: null };
+    if (await patchPost(root, patch)) {
+      root.readLater = on ? patch.readLater : 0;
+      if (on) root.readAt = 0;
+      say(on ? 'Saved to Read later' : 'Removed from Read later');
+      paintChrome();
+    }
+  }
+  async function toggleRead() {
+    const root = rootPost();
+    if (!root) return;
+    const on = !root.readAt;
+    if (await patchPost(root, { readAt: on ? Date.now() : null })) {
+      root.readAt = on ? Date.now() : 0;
+      say(on ? 'Marked read' : 'Marked unread');
+      paintChrome();
+    }
+  }
+  function selectedHighlight() {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0),
+      container = range.commonAncestorContainer,
+      textRoot = (container.nodeType === 1 ? container : container.parentElement)?.closest('.xr-text');
+    if (!textRoot || !dialog.contains(textRoot)) return null;
+    const text = selection.toString().replace(/\s+/g, ' ').trim();
+    if (text.length < 2) return null;
+    const before = document.createRange();
+    before.selectNodeContents(textRoot);
+    before.setEnd(range.startContainer, range.startOffset);
+    return { article: textRoot.closest('.xr-post'), text: text.slice(0, 4000), start: before.toString().length, range };
+  }
+  function selectionPopover() {
+    const pop = dialog?.querySelector('.xr-mark-pop');
+    if (!pop) return;
+    const found = selectedHighlight();
+    if (!found) return void (pop.hidden = true);
+    const box = found.range.getBoundingClientRect();
+    pop.hidden = false;
+    pop.style.left = `${Math.max(8, Math.min(innerWidth - 220, box.left + box.width / 2 - 100))}px`;
+    pop.style.top = `${Math.max(8, box.top - 46)}px`;
+  }
+  async function addHighlight(withNote) {
+    const found = selectedHighlight(),
+      pop = dialog.querySelector('.xr-mark-pop');
+    pop.hidden = true;
+    if (!found?.article) return say('Select text in a post to highlight it');
+    const post = thread.posts.find(item => item.id === found.article.dataset.id);
+    if (!post) return;
+    let note = '';
+    if (withNote) {
+      note = prompt('Note for this highlight', '') ?? null;
+      if (note === null) return;
+    }
+    const highlight = {
+      id: `h${Date.now().toString(36)}`,
+      text: found.text,
+      start: found.start,
+      at: Date.now(),
+      ...(note ? { note } : {}),
+    };
+    const next = [...(post.highlights || []), highlight];
+    if (await patchPost(post, { highlights: next })) {
+      post.highlights = next;
+      getSelection()?.removeAllRanges();
+      say('Highlighted');
+      render({ keepScroll: true });
+    }
+  }
+  async function removeHighlight(element) {
+    const article = element.closest('.xr-post'),
+      post = thread.posts.find(item => item.id === article?.dataset.id);
+    if (!post) return;
+    const previous = post.highlights || [],
+      next = previous.filter(item => item.id !== element.dataset.highlight);
+    if (await patchPost(post, { highlights: next.length ? next : null })) {
+      post.highlights = next;
+      render({ keepScroll: true });
+      window.XVaultUndo?.push({
+        label: 'Highlight removed',
+        undo: async () => {
+          await call({ type: 'UPDATE_TWEET_META', id: post.id, patch: { highlights: previous } });
+          post.highlights = previous;
+          if (dialog.open && thread?.posts.includes(post)) render({ keepScroll: true });
+        },
+      });
+    }
+  }
+  // Wraps highlighted ranges (by character offset, falling back to text search) in <mark>, across links.
+  function paintHighlights(root) {
+    for (const article of root.querySelectorAll('.xr-post')) {
+      const post = thread.posts.find(item => item.id === article.dataset.id),
+        textRoot = article.querySelector('.xr-text');
+      if (!post?.highlights?.length || !textRoot) continue;
+      for (const highlight of post.highlights) {
+        const full = textRoot.textContent,
+          normalized = full.replace(/\s+/g, ' ');
+        let start =
+          Number.isInteger(highlight.start) &&
+          normalized.slice(highlight.start, highlight.start + highlight.text.length) === highlight.text
+            ? highlight.start
+            : normalized.indexOf(highlight.text);
+        if (start < 0) continue;
+        // Map offsets in the whitespace-collapsed string back to raw text offsets.
+        const map = [];
+        for (let index = 0, collapsed = 0; index < full.length; index++) {
+          if (/\s/.test(full[index]) && index > 0 && /\s/.test(full[index - 1])) continue;
+          map[collapsed++] = index;
+        }
+        const rawStart = map[start],
+          rawEnd = (map[start + highlight.text.length - 1] ?? full.length - 1) + 1;
+        const walker = document.createTreeWalker(textRoot, NodeFilter.SHOW_TEXT),
+          pieces = [];
+        let offset = 0,
+          node;
+        while ((node = walker.nextNode())) {
+          const length = node.nodeValue.length,
+            from = Math.max(rawStart, offset),
+            to = Math.min(rawEnd, offset + length);
+          if (from < to) pieces.push([node, from - offset, to - offset]);
+          offset += length;
+        }
+        for (const [textNode, from, to] of pieces) {
+          const range = document.createRange();
+          range.setStart(textNode, from);
+          range.setEnd(textNode, to);
+          const mark = document.createElement('mark');
+          mark.className = 'xr-hl';
+          mark.dataset.highlightId = highlight.id;
+          if (highlight.note) mark.title = highlight.note;
+          range.surroundContents(mark);
+        }
+      }
+    }
+  }
+  function highlightsMarkup(post) {
+    if (!post.highlights?.length) return '';
+    return `<aside class="xr-highlights" aria-label="Your highlights"><b>Highlights · ${number(post.highlights.length)}</b><ul>${post.highlights
+      .map(
+        item =>
+          `<li><q>${html(item.text)}</q>${item.note ? `<span>${html(item.note)}</span>` : ''}<button type="button" class="quiet" data-act="unhighlight" data-highlight="${html(item.id)}" aria-label="Remove highlight">Remove</button></li>`
+      )
+      .join('')}</ul></aside>`;
+  }
+  async function related() {
+    const slot = dialog.querySelector('#xvReaderRelated');
+    if (!slot || !thread) return;
+    const ticket = token,
+      result = await call({ type: 'SEMANTIC_SIMILAR', id: thread.focusId, limit: 8 }).catch(() => null);
+    const ids = (result?.results || []).map(hit => hit.id).filter(id => !thread.posts.some(post => post.id === id));
+    if (ticket !== token || !ids.length) return void (slot.hidden = true);
+    const records = await call({ type: 'GET_LIBRARY_RECORDS', ids: ids.slice(0, 6) }).catch(() => null);
+    if (ticket !== token || !records?.rows?.length) return void (slot.hidden = true);
+    slot.hidden = false;
+    slot.innerHTML = `<h3>Related in your vault</h3><div class="xr-related-list">${records.rows
+      .map(
+        post =>
+          `<button type="button" class="xr-related" data-act="post" data-post="${html(post.id)}"><b>@${html(post.author?.handle || 'unknown')}</b><span>${html(String(post.text || 'Media post').slice(0, 160))}</span></button>`
+      )
+      .join(
+        ''
+      )}</div><button type="button" class="quiet" data-act="similar-library">See all similar posts in Library</button>`;
+  }
+  async function suggestTags(element) {
+    const article = element.closest('.xr-post'),
+      post = thread?.posts.find(item => item.id === article?.dataset.id);
+    if (!post) return;
+    element.disabled = true;
+    element.textContent = 'Thinking…';
+    const result = await call({ type: 'SEMANTIC_SUGGEST_TAGS', id: post.id }).catch(error => ({
+      ok: false,
+      error: error?.message,
+    }));
+    const list = result?.suggestions || [];
+    const slot = document.createElement('div');
+    slot.className = 'xr-suggest';
+    slot.innerHTML = list.length
+      ? `<span>Suggested tags</span>${list.map(item => `<button type="button" class="chip" data-act="add-tag" data-tag="${html(item.tag)}" title="${Math.round(item.confidence * 100)}% from similar posts">#${html(item.tag)}</button>`).join('')}`
+      : `<span>${html(result?.ok === false ? result.error || 'Suggestions are unavailable' : 'No suggestions yet — tag a few similar posts first.')}</span>`;
+    element.replaceWith(slot);
+  }
+  async function addTag(element) {
+    const article = element.closest('.xr-post'),
+      post = thread?.posts.find(item => item.id === article?.dataset.id),
+      tag = element.dataset.tag;
+    if (!post || !tag) return;
+    const result = await call({ type: 'BULK_UPDATE_TWEET_META', ids: [post.id], patch: { addTags: [tag] } }).catch(
+      () => null
+    );
+    if (!result?.ok) return say('The tag could not be added');
+    post.tags = [...new Set([...(post.tags || []), tag])];
+    element.disabled = true;
+    element.textContent = `#${tag} ✓`;
+    window.XVaultLibraryRecordUpdated?.([post.id]);
+    window.XVaultUndo?.push({ label: `Tagged #${tag}`, entries: result.previous || [] });
   }
 
   function mediaMarkup(item, index) {
@@ -160,7 +419,15 @@ ${reply ? '' : `<span class="xr-index" aria-hidden="true">${spineIndex}</span>`}
 ${post.media.length ? `<div class="xr-gallery" data-count="${post.media.length}">${post.media.map(mediaMarkup).join('')}</div>` : ''}
 ${quoteMarkup(post.quoted, post.quotedPostId && !post.quoted ? post.quotedPostId : '')}
 ${post.note ? `<aside class="xr-note"><b>Your note</b><span class="xr-note-text">${html(post.note)}</span><button type="button" class="quiet xr-note-edit" data-act="note" aria-label="Edit your note on this post">Edit</button></aside>` : ''}
-<footer class="xr-meta"><time datetime="${html(post.createdAt || '')}">${html(when(post.createdAt))}</time>${metrics ? `<span>${metrics}</span>` : ''}${post.favorite ? '<span class="xr-fav">★ Favorite</span>' : ''}${post.note ? '' : '<button type="button" class="quiet xr-note-add" data-act="note" aria-label="Add a note to this post">Add note</button>'}<a href="${html(statusUrl(post))}" target="_blank" rel="noopener noreferrer">Open post ↗</a></footer>
+${highlightsMarkup(post)}
+<footer class="xr-meta"><time datetime="${html(post.createdAt || '')}">${html(when(post.createdAt))}</time>${metrics ? `<span>${metrics}</span>` : ''}${post.favorite ? '<span class="xr-fav">★ Favorite</span>' : ''}${
+      post.tags?.length
+        ? `<span class="xr-tags">${post.tags
+            .slice(0, 6)
+            .map(tag => `#${html(tag)}`)
+            .join(' ')}</span>`
+        : ''
+    }${post.note ? '' : '<button type="button" class="quiet xr-note-add" data-act="note" aria-label="Add a note to this post">Add note</button>'}${focus ? '<button type="button" class="quiet" data-act="suggest-tags" title="Suggest tags from similar posts in your vault">Suggest tags</button>' : ''}<a href="${html(statusUrl(post))}" target="_blank" rel="noopener noreferrer">Open post ↗</a></footer>
 </article>`;
   }
 
@@ -185,11 +452,15 @@ ${face(root?.author, 'xr-mast-avatar')}
 <div><h1>${html(root?.author.name || root?.author.handle || 'Unknown author')}${root?.author.verified ? ' <i class="xr-verified" title="Verified">✓</i>' : ''}</h1>
 <p>@${html(root?.author.handle || 'unknown')}${first ? ` · ${html(first)}` : ''} · ${minutes} min read</p></div>
 </header>
+${!keepScroll && rootPost()?.readProgress?.index > 0 && rootPost().readProgress.index < visible.length - 1 ? `<p class="xr-resume"><button type="button" class="quiet" data-act="resume" data-resume="${html(rootPost().readProgress.postId || '')}">Resume where you left off · post ${number(rootPost().readProgress.index + 1)} of ${number(rootPost().readProgress.total)}</button></p>` : ''}
 ${thread.missingParent ? `<p class="xr-gap">This conversation continues above a post that isn't archived. <button type="button" class="quiet" data-act="fetch-parent" title="Opens the post in a background x.com tab so XVault can capture it">Fetch it from X</button> <a href="https://x.com/i/status/${html(thread.missingParent)}" target="_blank" rel="noopener noreferrer">Read it on X ↗</a></p>` : ''}
 ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex : 0, spine.length)).join('')}
-<footer class="xr-end"><span>End of what's archived</span>${thread.posts.length > visible.length ? `<button type="button" class="quiet" data-mode-switch="all">Show ${number(thread.posts.length - visible.length)} more replies</button>` : ''}</footer>`;
+<footer class="xr-end"><span>End of what's archived</span>${thread.posts.length > visible.length ? `<button type="button" class="quiet" data-mode-switch="all">Show ${number(thread.posts.length - visible.length)} more replies</button>` : ''}</footer>
+<section class="xr-related-wrap" id="xvReaderRelated" hidden aria-label="Related posts"></section>`;
     paintChrome();
+    paintHighlights(body);
     watchGifs(body);
+    void related();
     if (!keepScroll) {
       const target = body.querySelector('.xr-post.is-focus');
       scroller.scrollTop = 0;
@@ -329,6 +600,27 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
       return window.XVaultOpenLibrarySearch?.(query);
     }
     if (name === 'note') return editNote(element.closest('.xr-post'));
+    if (name === 'later') return toggleLater();
+    if (name === 'read') return toggleRead();
+    if (name === 'highlight' || name === 'highlight-note') return addHighlight(name === 'highlight-note');
+    if (name === 'unhighlight') return removeHighlight(element);
+    if (name === 'suggest-tags') return suggestTags(element);
+    if (name === 'add-tag') return addTag(element);
+    if (name === 'similar-library') {
+      const id = thread.focusId;
+      close();
+      page('library');
+      return window.XVaultLibraryRunQuery
+        ? window.XVaultLibraryRunQuery(`similar:${id}`, 'relevance')
+        : window.XVaultOpenLibrarySearch?.(`similar:${id}`);
+    }
+    if (name === 'resume') {
+      const target = dialog.querySelector(`.xr-post[data-id="${CSS.escape(element.dataset.resume || '')}"]`);
+      element.closest('.xr-resume')?.remove();
+      target?.scrollIntoView({ block: 'start', behavior: window.XVaultMotion?.calm?.() ? 'auto' : 'smooth' });
+      target?.focus({ preventScroll: true });
+      return;
+    }
     if (name === 'fetch-parent') {
       const missing = thread.missingParent;
       element.disabled = true;
@@ -496,6 +788,9 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
       r: () => setMode(mode === 'all' ? 'spine' : 'all'),
       o: () => act('x'),
       n: () => editNote(document.activeElement?.closest?.('.xr-post') || dialog.querySelector('.xr-post.is-focus')),
+      l: () => toggleLater(),
+      m: () => toggleRead(),
+      h: () => addHighlight(false),
       f: () => jump('focus'),
       Home: () => jump('first'),
       End: () => jump('last'),
@@ -564,5 +859,16 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
   else mount();
 
-  window.XVaultReader = { open, close, isOpen: () => !!dialog?.open };
+  // Settings → Accessibility → Reader text size picks the nearest step; the in-Reader A−/A+ buttons still work.
+  function setSize(px) {
+    const wanted = Number(px);
+    if (!Number.isFinite(wanted)) return;
+    size = SIZES.reduce(
+      (best, value, index) => (Math.abs(value - wanted) < Math.abs(SIZES[best] - wanted) ? index : best),
+      0
+    );
+    store.set(SIZE_KEY, String(SIZES[size]));
+    paintChrome();
+  }
+  window.XVaultReader = { open, close, setSize, isOpen: () => !!dialog?.open };
 })();
