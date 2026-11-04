@@ -6,6 +6,7 @@ import {
   expectedKind,
   matchRecoveryDownload,
 } from './reliability.mjs';
+import { createInsightsAccumulator, orderThread, compactPost, previewUrl, mediaKind } from './vault-insights.mjs';
 import {
   readLibraryPage,
   readLibraryRecords,
@@ -220,7 +221,7 @@ import './link-utils.js';
 import './bulk-download-model.js';
 import './library-search-core.js';
 const DB = 'xvault-db',
-  VER = 15,
+  VER = 16,
   STORES = [
     'tweets',
     'users',
@@ -681,6 +682,9 @@ const db = () =>
         s.createIndex('archivedAt', 'archivedAt');
         s.createIndex('handle', 'author.handle');
       }
+      // Schema 16: conversation lookups for the thread reader. Building an index never rewrites records.
+      const tweetRows = r.transaction.objectStore('tweets');
+      if (!tweetRows.indexNames.contains('conversationId')) tweetRows.createIndex('conversationId', 'conversationId');
       if (!d.objectStoreNames.contains('users')) d.createObjectStore('users', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('captures')) d.createObjectStore('captures', { keyPath: 'key' });
       if (!d.objectStoreNames.contains('jobs')) d.createObjectStore('jobs', { keyPath: 'id' });
@@ -707,6 +711,8 @@ const db = () =>
       const checkpoints = r.transaction.objectStore('checkpoints'),
         assetIndexState = checkpoints.get(DOWNLOAD_ASSET_INDEX_CHECKPOINT);
       assetIndexState.onsuccess = () => {
+        // Schema 15 introduced transactional counters; later upgrades keep the finished backfill.
+        if (event.oldVersion >= 15) return;
         const fresh = event.oldVersion === 0;
         checkpoints.put({
           ...assetIndexState.result,
@@ -1733,6 +1739,207 @@ async function explorerData() {
       .slice(0, 500),
     revisionCount: revisions.length,
   };
+}
+// ── Vault Atlas, thread reader and Duplicate Lab: read-only views over the archive ──
+let vaultInsightsCache = null,
+  vaultInsightsPending = null;
+const readStoreRow = (database, storeName, key) =>
+  new Promise((ok, no) => {
+    const request = database.transaction(storeName, 'readonly').objectStore(storeName).get(key);
+    request.onsuccess = () => ok(request.result || null);
+    request.onerror = () => no(request.error || new Error(`${storeName} read failed`));
+  });
+const readIndexRows = (database, storeName, indexName, value, limit = 400) =>
+  new Promise((ok, no) => {
+    const objectStore = database.transaction(storeName, 'readonly').objectStore(storeName);
+    if (!objectStore.indexNames.contains(indexName)) return ok([]);
+    const request = objectStore.index(indexName).getAll(IDBKeyRange.only(value), limit);
+    request.onsuccess = () => ok(request.result || []);
+    request.onerror = () => no(request.error || new Error(`${indexName} lookup failed`));
+  });
+async function vaultInsights(force = false) {
+  if (vaultInsightsPending) return vaultInsightsPending;
+  vaultInsightsPending = (async () => {
+    const database = await db();
+    try {
+      const [revision, total] = await Promise.all([
+        readLibraryRevision(database).catch(() => 0),
+        new Promise(ok => {
+          const request = database.transaction('tweets', 'readonly').objectStore('tweets').count();
+          request.onsuccess = () => ok(request.result);
+          request.onerror = () => ok(-1);
+        }),
+      ]);
+      const key = `${revision}:${total}`;
+      if (!force && vaultInsightsCache?.key === key && Date.now() - vaultInsightsCache.at < 15 * 60000)
+        return { ...vaultInsightsCache.data, cached: true };
+      const started = performance.now(),
+        accumulator = createInsightsAccumulator({ now: Date.now() });
+      let afterKey = null;
+      for (let guard = 0; guard < 100000; guard++) {
+        const page = await readLibraryPage(database, afterKey, 1000);
+        for (const row of page.rows) accumulator.add(row);
+        if (page.done || !page.rows.length) break;
+        afterKey = page.nextKey;
+      }
+      const [stored, downloads] = await Promise.all([
+        navigator.storage?.estimate?.().catch(() => null),
+        queueStats().catch(() => null),
+      ]);
+      const data = accumulator.finish({
+        revision,
+        storage: stored ? { usage: stored.usage || 0, quota: stored.quota || 0 } : null,
+        downloads,
+        computeMs: Math.round(performance.now() - started),
+      });
+      vaultInsightsCache = { key, at: Date.now(), data };
+      return data;
+    } finally {
+      database.close();
+    }
+  })().finally(() => {
+    vaultInsightsPending = null;
+  });
+  return vaultInsightsPending;
+}
+async function threadFor(id) {
+  if (!/^\d{1,32}$/.test(String(id || ''))) throw Error('Thread lookup requires a post ID');
+  const database = await db();
+  try {
+    const focus = await readStoreRow(database, 'tweets', String(id));
+    if (!focus) return { ok: false, error: 'This post is not in the archive.' };
+    const ancestors = [],
+      seen = new Set([String(focus.id)]);
+    let cursor = focus;
+    while (cursor?.replyToId && ancestors.length < 80 && !seen.has(String(cursor.replyToId))) {
+      seen.add(String(cursor.replyToId));
+      const parent = await readStoreRow(database, 'tweets', String(cursor.replyToId));
+      if (!parent) break;
+      ancestors.unshift(parent);
+      cursor = parent;
+    }
+    const conversationId = String(ancestors[0]?.conversationId || focus.conversationId || '');
+    const members = conversationId
+      ? await readIndexRows(database, 'tweets', 'conversationId', conversationId, 400)
+      : [];
+    if (conversationId && !members.some(post => String(post.id) === conversationId)) {
+      const root = await readStoreRow(database, 'tweets', conversationId);
+      if (root) members.push(root);
+    }
+    const quotedIds = [
+      ...new Set(
+        [focus, ...ancestors, ...members]
+          .map(post => post?.quotedPostId)
+          .filter(Boolean)
+          .map(String)
+      ),
+    ].slice(0, 100);
+    const quoted = quotedIds.length ? await readLibraryRecords(database, quotedIds) : [];
+    return { ok: true, focusId: String(focus.id), conversationId, ...orderThread(focus, ancestors, members, quoted) };
+  } finally {
+    database.close();
+  }
+}
+async function authorDetail(handle, raw = '') {
+  const value = String(handle || '').replace(/^@/, ''),
+    original = String(raw || value).replace(/^@/, '');
+  if (!/^[a-z0-9_]{1,30}$/i.test(value) || !/^[a-z0-9_]{1,30}$/i.test(original)) throw Error('Invalid handle');
+  const database = await db();
+  try {
+    let posts = await readIndexRows(database, 'tweets', 'handle', original, 5000);
+    if (!posts.length && original !== value) posts = await readIndexRows(database, 'tweets', 'handle', value, 5000);
+    const months = {},
+      media = { photo: 0, video: 0, gif: 0, other: 0 },
+      hashtags = new Map();
+    let firstPosted = 0,
+      lastPosted = 0,
+      likes = 0,
+      profile = null,
+      profileAt = -1;
+    for (const post of posts) {
+      const posted = Date.parse(post.createdAt || '') || 0;
+      if (posted) {
+        const month = new Date(posted).toISOString().slice(0, 7);
+        months[month] = (months[month] || 0) + 1;
+        if (!firstPosted || posted < firstPosted) firstPosted = posted;
+        if (posted > lastPosted) lastPosted = posted;
+      }
+      for (const item of post.media || []) media[mediaKind(item)]++;
+      for (const tag of post.hashtags || []) hashtags.set(tag, (hashtags.get(tag) || 0) + 1);
+      likes += Number(post.metrics?.likes || 0);
+      if (Number(post.archivedAt || 0) > profileAt) {
+        profileAt = Number(post.archivedAt || 0);
+        profile = post.author || null;
+      }
+    }
+    const user = profile?.id ? await readStoreRow(database, 'users', String(profile.id)).catch(() => null) : null;
+    const merged = { ...(profile || {}), ...(user || {}) };
+    const byArchived = [...posts].sort((a, b) => Number(b.archivedAt || 0) - Number(a.archivedAt || 0));
+    const byLikes = posts
+      .filter(post => !post.retweetedPostId && !/^RT @/.test(String(post.text || '')))
+      .sort((a, b) => Number(b.metrics?.likes || 0) - Number(a.metrics?.likes || 0));
+    return {
+      ok: true,
+      handle: value.toLowerCase(),
+      profile: {
+        handle: String(merged.handle || original),
+        name: String(merged.name || ''),
+        avatar: String(merged.avatar || ''),
+        banner: String(merged.banner || ''),
+        bio: String(merged.bio || '').slice(0, 600),
+        followers: merged.followers ?? null,
+        following: merged.following ?? null,
+        posts: merged.posts ?? null,
+        verified: !!merged.verified,
+      },
+      total: posts.length,
+      truncated: posts.length >= 5000,
+      months,
+      media,
+      likes,
+      firstPosted: firstPosted || null,
+      lastPosted: lastPosted || null,
+      hashtags: [...hashtags.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 12)
+        .map(([key, count]) => ({ key, count })),
+      recent: byArchived.slice(0, 12).map(post => compactPost(post)),
+      topLiked: byLikes.slice(0, 6).map(post => compactPost(post)),
+    };
+  } finally {
+    database.close();
+  }
+}
+async function mediaFingerprintPage(afterKey = null, limit = 400) {
+  if (afterKey != null && (typeof afterKey !== 'string' || afterKey.length > 128)) throw Error('Invalid media cursor');
+  const database = await db();
+  try {
+    const page = await readLibraryPage(database, afterKey, Math.min(1000, Math.max(50, Number(limit) || 400)));
+    const items = [];
+    for (const post of page.rows) {
+      if (post.retweetedPostId || /^RT @/.test(String(post.text || ''))) continue;
+      (post.media || []).forEach((item, index) => {
+        const thumb = previewUrl(item?.preview || item?.url || '', 'thumb');
+        if (!thumb) return;
+        items.push({
+          key: `${post.id}:${item.id || index}`,
+          postId: String(post.id),
+          mediaId: String(item.id || ''),
+          type: mediaKind(item),
+          thumb,
+          fallback: previewUrl(item?.url || '', 'small'),
+          handle: String(post.author?.handle || ''),
+          createdAt: post.createdAt || null,
+          archivedAt: Number(post.archivedAt || 0),
+          width: Number(item.width) || null,
+          height: Number(item.height) || null,
+        });
+      });
+    }
+    return { ok: true, items, nextKey: page.nextKey, done: page.done, scanned: page.rows.length };
+  } finally {
+    database.close();
+  }
 }
 async function openDashboard(page = '') {
   const url = chrome.runtime.getURL(`dashboard.html${page ? `#${encodeURIComponent(page)}` : ''}`),
@@ -3621,6 +3828,10 @@ chrome.runtime.onMessage.addListener((m, s, reply) => {
       return { ok: true, rows: rows.slice(0, m.limit || 40) };
     }
     if (m.type === 'GET_EXPLORER_DATA') return { ok: true, data: await explorerData() };
+    if (m.type === 'GET_VAULT_INSIGHTS') return { ok: true, insights: await vaultInsights(!!m.force) };
+    if (m.type === 'GET_THREAD') return await threadFor(m.id);
+    if (m.type === 'GET_AUTHOR_DETAIL') return await authorDetail(m.handle, m.raw);
+    if (m.type === 'GET_MEDIA_FINGERPRINT_PAGE') return await mediaFingerprintPage(m.afterKey ?? null, m.limit);
     if (m.type === 'GET_ARCHIVE_RUNS') {
       const rows = await all('archiveRuns');
       rows.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
