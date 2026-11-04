@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { compactSource, readSource, topLevelDeclaration } from './source-text.mjs';
+import { sanitizeAutoTagRules, sanitizeBoards } from '../sw/organize.mjs';
 const source = readSource('background.js');
 const defaults = source.match(/const defaults\s*=\s*\{[\s\S]*?\n\};/)[0];
 const bulk = topLevelDeclaration(source, 'const bulkSettingsDefaults');
@@ -29,7 +30,8 @@ const chrome = {
     },
   },
 };
-const context = vm.createContext({ chrome });
+// normalizeSettings uses the board/rule sanitisers imported from sw/organize.mjs (XVault 20).
+const context = vm.createContext({ chrome, sanitizeBoards, sanitizeAutoTagRules });
 vm.runInContext(fs.readFileSync(new URL('../workspace-model.js', import.meta.url), 'utf8'), context);
 vm.runInContext(`${defaults}\n${bulk}\n${functions}\n${wrappers}`, context);
 data = {

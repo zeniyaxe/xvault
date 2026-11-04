@@ -50,7 +50,21 @@
 
   const DAY = 86400000;
   const RELATIVE_UNITS = { h: 3600000, d: DAY, w: 7 * DAY, m: 30 * DAY, y: 365 * DAY };
-  const IS_VALUES = ['reply', 'quote', 'repost', 'original', 'thread', 'favorite', 'sensitive', 'media', 'text'];
+  const IS_VALUES = [
+    'reply',
+    'quote',
+    'repost',
+    'original',
+    'thread',
+    'favorite',
+    'sensitive',
+    'media',
+    'text',
+    'later',
+    'read',
+    'unread',
+    'highlighted',
+  ];
 
   // Day filters follow the calendar setting (XVault 19): 'utc' (XVault 18 behaviour) or 'local'.
   let calendarZone = 'utc';
@@ -171,9 +185,12 @@
       if (key === 'has' && (value === 'tag' || value === 'tags')) return { kind: 'untagged', value: false };
       if (key === 'has' && (value === 'download' || value === 'file')) return { kind: 'downloaded', value: true };
       if (key === 'has' && (value === 'ocr' || value === 'text-in-image')) return { kind: 'ocr' };
+      if (key === 'has' && (value === 'highlight' || value === 'highlights'))
+        return { kind: 'is', value: 'highlighted' };
+      if (key === 'has' && (value === 'board' || value === 'boards')) return { kind: 'boardAny' };
       return {
         kind: 'never',
-        issue: `${key}: use video, gif, image, media${key === 'has' ? ', note, tag, download or ocr' : ''}`,
+        issue: `${key}: use video, gif, image, media${key === 'has' ? ', note, tag, download, ocr, highlight or board' : ''}`,
       };
     }
     if (key === 'source') return { kind: 'source', value };
@@ -188,6 +205,16 @@
     if (key === 'id') return { kind: 'id', value };
     if (key === 'annotation') return { kind: 'annotationText', value };
     if (key === 'ocr' || key === 'image-text') return { kind: 'ocrText', value };
+    if (key === 'highlight' || key === 'highlights') return { kind: 'highlightText', value };
+    if (key === 'board') return { kind: 'board', value };
+    if (key === 'later' || key === 'read-later')
+      return value === 'true' || value === 'false'
+        ? { kind: 'is', value: value === 'true' ? 'later' : 'not-later' }
+        : { kind: 'never', issue: `${key}: use true or false` };
+    // Meaning search (XVault 20): the worker scores posts with the local semantic index and passes the
+    // score in as options.semanticScores; posts without a score did not match.
+    if (key === 'about' || key === 'meaning' || key === 'like') return { kind: 'semantic', value };
+    if (key === 'similar' || key === 'related') return { kind: 'semantic', value, similarTo: value };
     if (key === 'media-note' || key === 'medianote') return { kind: 'mediaNoteText', value };
     if (key === 'note' && value !== 'true' && value !== 'false') return { kind: 'noteText', value };
     if (key === 'downloaded' || key === 'missing' || key === 'note') {
@@ -204,6 +231,20 @@
   function matchesCompiledToken(row, rule) {
     const result = rule.kind === 'any' ? rule.rules.some(sub => matchRule(row, sub)) : matchRule(row, rule);
     return rule.negate ? !result : result;
+  }
+
+  // Meaning rules are scored by the worker; each rule gets its own key so AND/OR/NOT stay exact.
+  function semanticKey(rule) {
+    return `${rule.similarTo ? 'similar' : 'about'}:${rule.value}`;
+  }
+  function semanticRules(compiled) {
+    const found = [];
+    const visit = rule => {
+      if (rule.kind === 'semantic') found.push(rule);
+      else if (rule.kind === 'any') rule.rules.forEach(visit);
+    };
+    (compiled || []).forEach(visit);
+    return found;
   }
 
   // True when any compiled rule (including alternatives) has one of the given kinds.
@@ -231,6 +272,11 @@
     if (value === 'sensitive') return !!row.sensitive;
     if (value === 'media') return row.mediaCount > 0;
     if (value === 'text') return !row.mediaCount;
+    if (value === 'later') return !!row.later;
+    if (value === 'not-later') return !row.later;
+    if (value === 'read') return !!row.readAt;
+    if (value === 'unread') return !row.readAt;
+    if (value === 'highlighted') return row.highlightCount > 0;
     return false;
   }
 
@@ -241,6 +287,11 @@
     }
     if (rule.kind === 'language') return String(row.language || '') === rule.value;
     if (rule.kind === 'is') return matchIs(row, rule.value);
+    if (rule.kind === 'highlightText') return String(row.highlightText || '').includes(rule.value);
+    if (rule.kind === 'boardAny') return (row.boards || []).length > 0;
+    if (rule.kind === 'board')
+      return (row.boards || []).includes(rule.value) || (row.boardNames || []).includes(rule.value);
+    if (rule.kind === 'semantic') return Number.isFinite(row.semanticScores?.[semanticKey(rule)]);
     if (rule.kind === 'hashtag')
       return (row.hashtags || []).includes(rule.value) || String(row.text || '').includes(`#${rule.value}`);
     if (rule.kind === 'mention')
@@ -327,6 +378,10 @@
     else if (sort === 'media') result = b.mediaCount - a.mediaCount;
     else if (sort === 'author') result = a.handle.localeCompare(b.handle);
     else if (sort === 'random') result = Number(a.randomOrder || 0) - Number(b.randomOrder || 0);
+    else if (sort === 'relevance')
+      result =
+        Number(b.semanticScore || 0) - Number(a.semanticScore || 0) ||
+        sortableArchiveTime(b.archivedAt, false) - sortableArchiveTime(a.archivedAt, false);
     else result = sortableArchiveTime(b.archivedAt, false) - sortableArchiveTime(a.archivedAt, false);
     return result || a.index - b.index;
   }
@@ -424,6 +479,23 @@
       ocrText: String(options.ocrText || '')
         .toLowerCase()
         .replace(/\s+/g, ' '),
+      later: !!meta.readLater,
+      readAt: Number(meta.readAt) || 0,
+      highlightCount: Array.isArray(meta.highlights) ? meta.highlights.length : 0,
+      highlightText: Array.isArray(meta.highlights)
+        ? meta.highlights
+            .map(entry => `${entry?.text || ''} ${entry?.note || ''}`)
+            .join(' ')
+            .toLowerCase()
+        : '',
+      boards: Array.isArray(meta.boards) ? meta.boards.map(String) : [],
+      boardNames: Array.isArray(meta.boards)
+        ? meta.boards.map(id => String(options.boardNames?.[id] || '').toLowerCase()).filter(Boolean)
+        : [],
+      semanticScores: options.semanticScores || null,
+      semanticScore: options.semanticScores
+        ? Math.max(0, ...Object.values(options.semanticScores).filter(Number.isFinite))
+        : 0,
       archivedAt: Number(post.archivedAt || 0),
       postedAt: new Date(post.createdAt || 0).getTime(),
       language: String(post.language || '').toLowerCase(),
@@ -493,6 +565,8 @@
     matchesQuery,
     matchesCompiledQuery,
     compareRows,
+    semanticKey,
+    semanticRules,
     searchRecords,
     linkDomains,
   });

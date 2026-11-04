@@ -184,6 +184,8 @@
       animations: 'type:gif',
       local: 'downloaded:true',
       missing: 'missing:true',
+      later: 'is:later is:unread',
+      highlights: 'has:highlight',
     };
     return Object.hasOwn(queries, id) ? queries[id] : null;
   }
