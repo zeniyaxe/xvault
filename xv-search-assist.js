@@ -411,9 +411,9 @@
       })
       .join('');
     const helpRow = help
-      ? `<div class="xv-assist-help" role="note"><b>${esc(help.key)}</b> ${esc(help.negate ? `excludes ${help.hint}` : help.hint)}${help.example ? ` <span>e.g. <code>${esc(help.example)}</code></span>` : ''}</div>`
+      ? `<div class="xv-assist-help" role="note"><b>${esc(help.key)}</b> ${esc(help.negate ? `excludes ${help.hint}` : help.hint)}${help.example ? ` <span>e.g. <code>${esc(help.example)}</code></span>` : ''}${help.negate ? '' : ' <span>· put <code>-</code> in front to exclude</span>'}</div>`
       : '';
-    popup.innerHTML = `${helpRow}${rows}<div class="xv-assist-foot"><kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>Tab</kbd> or <kbd>Enter</kbd> insert · <kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>Space</kbd> suggest · <kbd>-</kbd> before a filter excludes</div>`;
+    popup.innerHTML = `${helpRow}${rows}<div class="xv-assist-foot"><kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>Tab</kbd> or <kbd>Enter</kbd> insert · <kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>Space</kbd> suggest</div>`;
     place();
     popup.hidden = false;
     input.setAttribute('aria-expanded', 'true');
@@ -495,6 +495,7 @@
     }
     if (!open()) {
       if (event.key === 'ArrowDown' && !input.value.trim()) {
+        help = null;
         const list = startItems();
         if (!list.length) return;
         event.preventDefault();
@@ -552,6 +553,9 @@
     input.addEventListener('pointerdown', () => {
       if (!input.value.trim())
         setTimeout(() => {
+          // Typing may have started before this runs; only show the start list for a still-empty box.
+          if (input.value.trim() || document.activeElement !== input) return;
+          help = null;
           const list = startItems();
           if (list.length) show(list);
         });
