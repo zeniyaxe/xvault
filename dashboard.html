@@ -41,6 +41,7 @@
     <script defer src="xv-search-assist.js"></script>
     <script defer src="xv-background-jobs.js"></script>
     <script defer src="xv-library3.js"></script>
+    <script defer src="xv-shortcuts.js"></script>
     <script defer src="xv-vault.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script>
@@ -725,6 +726,34 @@
                         ><input type="range" min="0.6" max="1.8" step="0.05" data-setting="dashboardScale"
                       /></label>
                     </div>
+                  </section>
+                  <section class="settinggroup" id="g-accessibility">
+                    <h3>Accessibility</h3>
+                    <p class="settingHint">
+                      Stronger contrast, larger reading text and always-visible focus rings. Keyboard shortcuts can be
+                      remapped below; press <kbd>?</kbd> anywhere for the full list.
+                    </p>
+                    <div class="formgrid two">
+                      <label class="check"
+                        ><input type="checkbox" data-setting="uiHighContrast" /><span>High contrast</span></label
+                      >
+                      <label class="field"
+                        ><span>Focus rings</span
+                        ><select data-setting="uiFocusRings">
+                          <option value="auto">When using the keyboard</option>
+                          <option value="always">Always</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Reading text size</span
+                        ><input type="range" min="0.85" max="1.5" step="0.05" data-setting="uiFontScale"
+                      /></label>
+                      <label class="field"
+                        ><span>Reader text size (px)</span
+                        ><input type="number" min="13" max="28" step="1" data-setting="readerFontSize"
+                      /></label>
+                    </div>
+                    <div id="xvShortcutEditor" class="xv-shortcut-editor"></div>
                   </section>
                   <section class="settinggroup" id="g-layout-type">
                     <h3>Layout and type</h3>
