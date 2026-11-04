@@ -419,6 +419,128 @@ if (dialog && fileInput && typeof chrome !== 'undefined' && chrome.runtime?.send
     }
   }
 
+  // Thread-grouped export. Pass 1 streams lightweight keys to group conversations; pass 2 reads each
+  // thread's records in bounded batches so memory stays proportional to IDs, not post bodies.
+  async function exportThreads(format) {
+    const markdown = format === 'markdown';
+    let parent = null,
+      writer = null;
+    const day = new Date().toISOString().slice(0, 10);
+    try {
+      if (markdown) {
+        if (typeof window.showDirectoryPicker !== 'function') {
+          status.textContent = 'Markdown folder export needs a Chromium version with folder access.';
+          return;
+        }
+        parent = await window.showDirectoryPicker({ id: 'xvault-markdown', mode: 'readwrite' });
+      } else
+        writer = await makeWriter(`xvault-threads-${day}.html`, {
+          description: 'XVault threads HTML',
+          mime: 'text/html',
+          extension: '.html',
+        });
+    } catch (error) {
+      if (error?.name !== 'AbortError') status.textContent = error?.message || String(error);
+      return;
+    }
+    const controller = new AbortController();
+    openDialog(
+      markdown ? 'Export threads as Markdown' : 'Export threads as HTML',
+      'Grouping every archived post into conversations, then writing each thread in chronological order.'
+    );
+    startOperation(controller);
+    operation = 'threads';
+    const writeText = async (dir, name, text) => {
+      const handle = await dir.getFileHandle(name, { create: true });
+      const stream = await handle.createWritable();
+      await stream.write(text);
+      await stream.close();
+    };
+    try {
+      const keys = [];
+      await streamArchivePosts(controller, 'thread', post => keys.push(exporters.threadKeyRow(post)));
+      const groups = exporters.threadGroups(keys);
+      keys.length = 0;
+      let root = null,
+        folder = null;
+      if (markdown) {
+        root = await parent.getDirectoryHandle('XVault', { create: true });
+        folder = await root.getDirectoryHandle('threads', { create: true });
+      } else await writer.write(exporters.htmlThreadHead('XVault threads'));
+      const entries = [];
+      let written = 0,
+        batch = [];
+      const flush = async () => {
+        if (!batch.length) return;
+        const ids = [...new Set(batch.flatMap(group => group.ids))];
+        const rows = [];
+        for (let index = 0; index < ids.length; index += 900) {
+          const page = await request('GET_LIBRARY_RECORDS', { ids: ids.slice(index, index + 900) });
+          rows.push(...(page.rows || []).filter(Boolean));
+        }
+        const byId = new Map(rows.map(row => [String(row.id), row]));
+        const quotedIds = [...new Set(rows.map(row => row.quotedPostId).filter(id => id && !byId.has(String(id))))];
+        const quoted = new Map();
+        for (let index = 0; index < quotedIds.length; index += 900) {
+          const page = await request('GET_LIBRARY_RECORDS', { ids: quotedIds.slice(index, index + 900).map(String) });
+          for (const row of page.rows || []) if (row) quoted.set(String(row.id), row);
+        }
+        for (const group of batch) {
+          if (controller.signal.aborted)
+            throw controller.signal.reason || new DOMException('Export stopped', 'AbortError');
+          const posts = group.ids.map(id => byId.get(id)).filter(Boolean);
+          if (!posts.length) continue;
+          const quotes = posts
+            .map(
+              post =>
+                post.quotedPostId && (byId.get(String(post.quotedPostId)) || quoted.get(String(post.quotedPostId)))
+            )
+            .filter(Boolean);
+          const thread = exporters.buildThread(posts, quotes);
+          if (markdown) {
+            const file = exporters.threadFileName(thread);
+            await writeText(folder, file, exporters.threadMarkdownNote(thread));
+            entries.push({
+              file: `threads/${file}`,
+              handle: thread.rootHandle,
+              text: thread.posts[0]?.text,
+              posts: thread.posts.length,
+              start: thread.start,
+            });
+          } else await writer.write(exporters.htmlThread(thread));
+          written++;
+        }
+        batch = [];
+        setProgress(
+          `Wrote ${written.toLocaleString()} of ${groups.length.toLocaleString()} threads`,
+          written / groups.length
+        );
+      };
+      for (const group of groups) {
+        batch.push(group);
+        if (batch.reduce((sum, item) => sum + item.ids.length, 0) >= 400) await flush();
+      }
+      await flush();
+      if (markdown) {
+        await writeText(root, 'XVault Threads.md', exporters.threadMarkdownIndex(entries.reverse()));
+        status.textContent = `Threads saved · ${written.toLocaleString()} conversations in ${parent.name}/XVault/threads.`;
+      } else {
+        await writer.write(exporters.htmlThreadFoot());
+        await writer.close();
+        status.textContent = `Threads HTML saved · ${written.toLocaleString()} conversations.`;
+      }
+      setProgress(`Saved ${written.toLocaleString()} threads`, 1);
+    } catch (error) {
+      try {
+        await writer?.abort(error);
+      } catch {}
+      showError(error);
+    } finally {
+      operation = null;
+      finishOperation(controller);
+    }
+  }
+
   async function previewRecoveryFile(file) {
     if (!file) return;
     activeFile = file;
@@ -831,6 +953,8 @@ if (dialog && fileInput && typeof chrome !== 'undefined' && chrome.runtime?.send
   $('#csv')?.addEventListener('click', exportArchiveCsv);
   $('#exportMarkdown')?.addEventListener('click', exportArchiveMarkdown);
   $('#exportHtml')?.addEventListener('click', exportArchiveHtml);
+  $('#exportThreadsMarkdown')?.addEventListener('click', () => exportThreads('markdown'));
+  $('#exportThreadsHtml')?.addEventListener('click', () => exportThreads('html'));
   window.XVaultCreateRecoveryFile = exportRecoveryFile;
   $('#recoveryImport')?.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
