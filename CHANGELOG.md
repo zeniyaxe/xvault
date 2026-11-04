@@ -12,8 +12,9 @@
 - Capture now records quote, repost and reply relationships and expanded links, hashtags and mentions, validated at the content boundary. Older posts gain these fields on recapture; their archived text is never rewritten.
 - Motion system 2.0: spring easing, interruptible animations, FLIP, count-up, a travelling nav mark and same-document view transitions. Off/Reduced motion, the system setting and Safe Mode still disable movement.
 - Worker: IndexedDB schema 16 (`conversationId` index) and new `GET_VAULT_INSIGHTS`, `GET_THREAD`, `GET_AUTHOR_DETAIL` and `GET_MEDIA_FINGERPRINT_PAGE` messages.
-- Tests: six structural tests that broke when the source was Prettier-formatted now read formatting-agnostic source views; added an insights unit test. `npm test` passes 75/75 locally.
-- Smoke-tested by loading the unpacked extension in Chromium with a synthetic 47-post archive and a mocked X image CDN. Live X capture, real CDN thumbnails and large real archives were not exercised.
+- Tooling: six structural tests that broke when the source was Prettier-formatted now read formatting-agnostic source views; added an insights unit test; browser-driven test harnesses and `tools/` lint without false `no-undef` errors; tests and tools are Prettier-formatted. `npm run verify` now exits 0 locally (75/75 tests).
+- Fixed Atlas at phone widths: the header and segmented controls wrap or scroll, the calendar year scrolls sideways with pinned weekday labels, and duplicate groups stack.
+- Smoke-tested by loading the unpacked extension in Chromium with a synthetic 47-post archive and a mocked X image CDN, at desktop, 820px and 390px widths; the repo's e2e scripts also pass. Live X capture, real CDN thumbnails and large real archives were not exercised.
 
 ## Remote connection fixes - 2026-10-24
 

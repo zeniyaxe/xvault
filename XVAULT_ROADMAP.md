@@ -16,6 +16,7 @@ Branch: `xvault-18-atlas` (from `main` @ 424b2fb, "Publish current XVault v17.0.
 | Reader | `xv-reader.js`/`.css`: `window.XVaultReader.open(id)`; spine vs. replies, media, quoted cards with back stack, Markdown copy/save, keyboard map; entry points in the drawer, `t`, Quick Look and Atlas. |
 | Motion | `xv-motion.js` 2.0 (spring easing via CSS `linear()`, interruptible `play`, `flip`, `stagger`, `countUp`, `transition`) + `xv-motion.css`. Preference gates unchanged. |
 | Tests | `tests/source-text.mjs` gives structural tests compact/collapsed source views (the source was Prettier-formatted after those tests were written); `tests/vault-insights.test.mjs`. `npm test` 75/75. |
+| Tooling | ESLint models page globals for browser-driven harnesses (`tests/*-browser.mjs`, `*-ui.mjs`, `library-profile.mjs`) and Node globals for `tools/`; tests and tools formatted once with Prettier. `npm run verify` exits 0. |
 
 ### Decisions (v18)
 
@@ -30,13 +31,13 @@ Branch: `xvault-18-atlas` (from `main` @ 424b2fb, "Publish current XVault v17.0.
 
 ### Verification log (v18)
 
-- `npm test` 75/75; `node scripts/check-extension.mjs` OK; no new ESLint findings (`dashboard.js` keeps its two
-  pre-existing unused-variable warnings; pre-existing errors in untouched files, mostly `tests/*-browser.mjs` and
-  `tools/`, are unchanged); Prettier clean on changed files.
+- `npm run verify` exits 0: integrity OK, ESLint 0 errors (10 pre-existing warnings), 75/75 tests,
+  Prettier clean. `python -m unittest discover -s tests/python` 8/8. `npm run e2e` scripts pass against Chromium 153
+  (`CHROMIUM_PATH`): dashboard at four viewports with no console errors, seeded Library filters and exports 9/9.
 - Local Playwright smoke (not committed): unpacked extension in Chromium 153, 47 synthetic posts through the real
   message API, X image CDN mocked. Atlas overview/growth/calendar keys/people/author sheet, shared-media and
   look-alike groups, Reader spine/replies/Escape and Markdown module load, suggestions, `thread:` filter, `t` and `g t`; no page
-  errors.
+  errors. Atlas views and the Reader re-checked at 820px and 390px for horizontal overflow.
 - **Not verified:** live X capture of the new fields, real `pbs.twimg.com` thumbnails (CORS/rate limits) for the
   look-alike scan, archives beyond synthetic size, screen readers.
 
