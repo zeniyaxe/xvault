@@ -9,6 +9,7 @@ import {
 import { createInsightsAccumulator, orderThread, compactPost, previewUrl, mediaKind } from './vault-insights.mjs';
 import { createDerivedService } from './sw/derived-service.mjs';
 import { createSyncScheduler } from './sw/sync-scheduler.mjs';
+import { createMissingPostFetcher } from './sw/missing-posts.mjs';
 import {
   readLibraryPage,
   readLibraryRecords,
@@ -3214,11 +3215,19 @@ const syncScheduler = createSyncScheduler({
   },
 });
 syncScheduler.schedule().catch(() => {});
+const missingPosts = createMissingPostFetcher({
+  activeXTab,
+  hasPost: async id => !!(await store('tweets', 'readonly', os => req(os.get(String(id)))).catch(() => null)),
+});
 
 chrome.runtime.onMessage.addListener((m, s, reply) => {
   (async () => {
     const messageCapability = authorizeMessage(m, s, chrome.runtime.id);
     await privateStorageReady;
+    if (m.type === 'FETCH_MISSING_POST') {
+      if (messageCapability === 'content') throw Error('Missing posts are fetched from XVault pages');
+      return await missingPosts.fetchPost(m.id);
+    }
     if (syncScheduler.handles(m.type)) {
       if (messageCapability === 'content') throw Error('Scheduled sync is managed from XVault pages');
       return await syncScheduler.handle(m);

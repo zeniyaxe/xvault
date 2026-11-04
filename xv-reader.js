@@ -28,7 +28,8 @@
     token = 0,
     returnTarget = null,
     gifWatch = null,
-    markdownModule = null;
+    markdownModule = null,
+    exportModule = null;
 
   const html = value => (typeof esc === 'function' ? esc(value) : String(value ?? ''));
   const number = value => (typeof fmt === 'function' ? fmt(value) : String(value ?? ''));
@@ -66,7 +67,7 @@
     dialog.innerHTML = `<div class="xr-progress" aria-hidden="true"><i></i></div>
 <header class="xr-bar">
   <button type="button" class="quiet xr-back" data-act="back" hidden>← Back</button>
-  <div class="xr-heading"><small id="xvReaderKicker">Reader</small><h2 id="xvReaderTitle">Loading…</h2></div>
+  <div class="xr-heading"><small id="xvReaderKicker">Reader</small><h2 id="xvReaderTitle">Loading…</h2><span class="xr-position" id="xvReaderPosition" aria-live="polite"></span></div>
   <div class="seg xr-mode" role="radiogroup" aria-label="Posts shown">
     <button type="button" role="radio" data-mode="spine">Thread</button>
     <button type="button" role="radio" data-mode="all">With replies</button>
@@ -77,6 +78,7 @@
     <span class="xr-sep" aria-hidden="true"></span>
     <button type="button" class="quiet" data-act="copy" title="Copy the thread as Markdown">Copy Markdown</button>
     <button type="button" class="quiet" data-act="download" title="Save the thread as a Markdown file">Save .md</button>
+    <button type="button" class="quiet" data-act="download-html" title="Save the thread as an offline HTML page">Save .html</button>
     <button type="button" class="quiet" data-act="library" title="Show this conversation in the Library">In Library</button>
     <button type="button" class="quiet" data-act="x" title="Open the focused post on X">Open on X</button>
     <button type="button" class="quiet xr-close" data-act="close" aria-label="Close reader" title="Close (Esc)">×</button>
@@ -118,6 +120,7 @@
     if (!scroller) return;
     const max = scroller.scrollHeight - scroller.clientHeight;
     dialog.style.setProperty('--xr-progress', max > 0 ? String(Math.min(1, scroller.scrollTop / max)) : '1');
+    updatePosition();
   }
 
   function mediaMarkup(item, index) {
@@ -156,8 +159,8 @@ ${reply ? '' : `<span class="xr-index" aria-hidden="true">${spineIndex}</span>`}
 <div class="xr-text" dir="auto"${post.language ? ` lang="${html(post.language)}"` : ''}>${linkify(post.text)}</div>
 ${post.media.length ? `<div class="xr-gallery" data-count="${post.media.length}">${post.media.map(mediaMarkup).join('')}</div>` : ''}
 ${quoteMarkup(post.quoted, post.quotedPostId && !post.quoted ? post.quotedPostId : '')}
-${post.note ? `<aside class="xr-note"><b>Your note</b>${html(post.note)}</aside>` : ''}
-<footer class="xr-meta"><time datetime="${html(post.createdAt || '')}">${html(when(post.createdAt))}</time>${metrics ? `<span>${metrics}</span>` : ''}${post.favorite ? '<span class="xr-fav">★ Favorite</span>' : ''}<a href="${html(statusUrl(post))}" target="_blank" rel="noopener noreferrer">Open post ↗</a></footer>
+${post.note ? `<aside class="xr-note"><b>Your note</b><span class="xr-note-text">${html(post.note)}</span><button type="button" class="quiet xr-note-edit" data-act="note" aria-label="Edit your note on this post">Edit</button></aside>` : ''}
+<footer class="xr-meta"><time datetime="${html(post.createdAt || '')}">${html(when(post.createdAt))}</time>${metrics ? `<span>${metrics}</span>` : ''}${post.favorite ? '<span class="xr-fav">★ Favorite</span>' : ''}${post.note ? '' : '<button type="button" class="quiet xr-note-add" data-act="note" aria-label="Add a note to this post">Add note</button>'}<a href="${html(statusUrl(post))}" target="_blank" rel="noopener noreferrer">Open post ↗</a></footer>
 </article>`;
   }
 
@@ -182,7 +185,7 @@ ${face(root?.author, 'xr-mast-avatar')}
 <div><h1>${html(root?.author.name || root?.author.handle || 'Unknown author')}${root?.author.verified ? ' <i class="xr-verified" title="Verified">✓</i>' : ''}</h1>
 <p>@${html(root?.author.handle || 'unknown')}${first ? ` · ${html(first)}` : ''} · ${minutes} min read</p></div>
 </header>
-${thread.missingParent ? `<p class="xr-gap">This conversation continues above a post that isn't archived. <a href="https://x.com/i/status/${html(thread.missingParent)}" target="_blank" rel="noopener noreferrer">Read it on X ↗</a></p>` : ''}
+${thread.missingParent ? `<p class="xr-gap">This conversation continues above a post that isn't archived. <button type="button" class="quiet" data-act="fetch-parent" title="Opens the post in a background x.com tab so XVault can capture it">Fetch it from X</button> <a href="https://x.com/i/status/${html(thread.missingParent)}" target="_blank" rel="noopener noreferrer">Read it on X ↗</a></p>` : ''}
 ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex : 0, spine.length)).join('')}
 <footer class="xr-end"><span>End of what's archived</span>${thread.posts.length > visible.length ? `<button type="button" class="quiet" data-mode-switch="all">Show ${number(thread.posts.length - visible.length)} more replies</button>` : ''}</footer>`;
     paintChrome();
@@ -325,6 +328,41 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
       close();
       return window.XVaultOpenLibrarySearch?.(query);
     }
+    if (name === 'note') return editNote(element.closest('.xr-post'));
+    if (name === 'fetch-parent') {
+      const missing = thread.missingParent;
+      element.disabled = true;
+      element.textContent = 'Fetching…';
+      const result = await call({ type: 'FETCH_MISSING_POST', id: missing }).catch(error => ({
+        ok: false,
+        error: error?.message,
+      }));
+      if (result?.found) {
+        say('Parent post archived');
+        return load(thread.focusId);
+      }
+      element.disabled = false;
+      element.textContent = 'Fetch it from X';
+      return say(result?.error || 'The post could not be fetched');
+    }
+    if (name === 'download-html') {
+      exportModule ||= await import('./library-exporters.mjs');
+      const posts = mode === 'all' ? thread.posts : thread.posts.filter(post => post.spine);
+      const view = { ...thread, posts: posts.length ? posts : thread.posts };
+      view.participants = [...new Set(view.posts.map(post => post.author.handle))];
+      view.start = Date.parse(view.posts[0]?.createdAt || '') || 0;
+      const text =
+        exportModule.htmlThreadHead(`Thread by @${thread.rootHandle || 'unknown'}`) +
+        exportModule.htmlThread(view) +
+        exportModule.htmlThreadFoot();
+      const url = URL.createObjectURL(new Blob([text], { type: 'text/html' })),
+        link = document.createElement('a');
+      link.href = url;
+      link.download = `xvault-thread-${thread.rootHandle || 'post'}-${thread.rootId}.html`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      return say('HTML saved');
+    }
     if (name === 'copy' || name === 'download') {
       const text = await markdown();
       if (!text) return say('Nothing to export');
@@ -344,6 +382,75 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
       setTimeout(() => URL.revokeObjectURL(url), 10000);
       say('Markdown saved');
     }
+  }
+
+  // Inline note editor. Saves through UPDATE_TWEET_META with the original note as a conflict guard,
+  // so an edit made elsewhere (Library inspector, phone) is never silently overwritten.
+  function editNote(article) {
+    if (!article || article.querySelector('.xr-note-form')) return;
+    const post = thread?.posts.find(item => item.id === article.dataset.id);
+    if (!post) return;
+    const original = post.note || '';
+    const form = document.createElement('form');
+    form.className = 'xr-note-form';
+    form.innerHTML = `<label class="xr-note-label" for="xrNote${html(post.id)}">Your note</label><textarea id="xrNote${html(post.id)}" rows="3" maxlength="4000"></textarea><div class="xr-note-actions"><button type="submit" class="primary">Save note</button><button type="button" class="quiet" data-note-cancel>Cancel</button><small>Ctrl+Enter saves · Esc cancels</small></div>`;
+    const area = form.querySelector('textarea');
+    area.value = original;
+    const existing = article.querySelector('.xr-note');
+    (existing || article.querySelector('.xr-meta')).before(form);
+    if (existing) existing.hidden = true;
+    area.focus();
+    const finish = () => {
+      form.remove();
+      if (existing) existing.hidden = false;
+      article.focus({ preventScroll: true });
+    };
+    form.querySelector('[data-note-cancel]').onclick = finish;
+    area.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        finish();
+      } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const value = area.value.trim();
+      const result = await call({
+        type: 'UPDATE_TWEET_META',
+        id: post.id,
+        patch: { note: value },
+        expectedNote: original,
+      }).catch(error => ({ ok: false, error: error?.message }));
+      if (!result?.ok) return say(result?.error || 'The note could not be saved');
+      post.note = value;
+      say(value ? 'Note saved' : 'Note removed');
+      render({ keepScroll: true });
+      dialog.querySelector(`.xr-post[data-id="${CSS.escape(post.id)}"]`)?.focus({ preventScroll: true });
+    };
+  }
+
+  function updatePosition() {
+    const label = dialog?.querySelector('#xvReaderPosition');
+    if (!label) return;
+    const posts = [...dialog.querySelectorAll('.xr-post')];
+    if (posts.length < 2) return (label.textContent = '');
+    const edge = dialog.querySelector('.xr-scroll').getBoundingClientRect().top + 90;
+    let index = posts.findIndex(post => post.getBoundingClientRect().bottom > edge);
+    if (index < 0) index = posts.length - 1;
+    label.textContent = `${index + 1} / ${posts.length}`;
+  }
+
+  function jump(where) {
+    const posts = [...dialog.querySelectorAll('.xr-post')];
+    const target =
+      where === 'first' ? posts[0] : where === 'last' ? posts.at(-1) : dialog.querySelector('.xr-post.is-focus');
+    if (!target) return;
+    target.scrollIntoView({ block: 'start', behavior: window.XVaultMotion?.calm?.() ? 'auto' : 'smooth' });
+    target.focus({ preventScroll: true });
   }
 
   function setMode(next) {
@@ -388,6 +495,12 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
       '-': () => act('smaller'),
       r: () => setMode(mode === 'all' ? 'spine' : 'all'),
       o: () => act('x'),
+      n: () => editNote(document.activeElement?.closest?.('.xr-post') || dialog.querySelector('.xr-post.is-focus')),
+      f: () => jump('focus'),
+      Home: () => jump('first'),
+      End: () => jump('last'),
+      g: () => jump('first'),
+      G: () => jump('last'),
       Backspace: () => stack.length && act('back'),
     }[key];
     if (!handled || (event.target.closest('video') && key !== 'j' && key !== 'k')) return;
