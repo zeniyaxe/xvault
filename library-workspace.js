@@ -75,20 +75,83 @@
   let compactStart = -1;
   let compactEnd = -1;
 
+  // Table (XVault 20) shares the windowed renderer with List; rows are shorter and carry columns.
+  let compactMode = 'compact';
+  const rowHeight = () => (compactMode === 'table' ? 44 : 76);
+  const TABLE_COLUMNS = [
+    ['author', 'Author', 'author'],
+    ['text', 'Post', ''],
+    ['type', 'Media', 'media'],
+    ['posted', 'Posted', ''],
+    ['archived', 'Archived', 'new'],
+    ['likes', 'Likes', 'likes'],
+    ['views', 'Views', 'views'],
+    ['tags', 'Tags', ''],
+    ['state', 'State', ''],
+  ];
+  function tableHead() {
+    const sort = $('#sort')?.value || 'new';
+    return `<div class="xv-table-head" role="presentation">${TABLE_COLUMNS.map(([key, label, sortKey]) => {
+      const active = sortKey && (sort === sortKey || (sortKey === 'new' && sort === 'old'));
+      return sortKey
+        ? `<button type="button" class="xv-th" data-col="${key}" data-table-sort="${sortKey}" aria-pressed="${active ? 'true' : 'false'}" title="Sort by ${label.toLowerCase()}">${label}${active ? (sort === 'old' ? ' ↑' : ' ↓') : ''}</button>`
+        : `<span class="xv-th" data-col="${key}">${label}</span>`;
+    }).join('')}</div>`;
+  }
+  function tableRow(post, index) {
+    const media = post.media || [],
+      first = media[0];
+    let preview = first?.preview || (first?.type === 'photo' ? first.url : '');
+    try {
+      const url = new URL(preview);
+      if (url.hostname === 'pbs.twimg.com') {
+        url.searchParams.set('name', 'thumb');
+        preview = url.href;
+      }
+    } catch {}
+    const meta = post.userMeta || {},
+      type = !media.length
+        ? 'Text'
+        : media.some(item => item.type === 'video')
+          ? 'Video'
+          : media.some(item => item.type === 'animated_gif')
+            ? 'GIF'
+            : 'Image',
+      day = value =>
+        Number.isFinite(new Date(value || 0).getTime()) && value ? new Date(value).toLocaleDateString() : '—',
+      state = [
+        meta.favorite ? '★' : '',
+        meta.readLater && !meta.readAt ? 'Later' : '',
+        meta.highlights?.length ? `${meta.highlights.length} hl` : '',
+        model.isDownloaded(post, libraryDownloads) ? 'On disk' : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+    return `<article class="tweet xv-record-row xv-table-row ${meta.favorite ? 'favorite' : ''}" data-id="${esc(post.id)}" data-row-index="${index}" aria-label="Post ${esc(post.id)} by @${esc(post.author?.handle || 'unknown')}" tabindex="0"><span class="xv-td xv-td-thumb" draggable="true">${preview ? `<img src="${esc(preview)}" alt="" loading="lazy" decoding="async">` : ''}</span><span class="xv-td" data-col="author"><b>@${esc(post.author?.handle || 'unknown')}</b></span><span class="xv-td" data-col="text" title="${esc(String(post.text || '').slice(0, 300))}">${esc(String(post.text || 'Media post').slice(0, 220))}</span><span class="xv-td" data-col="type">${esc(type)}${media.length > 1 ? ` ×${media.length}` : ''}</span><span class="xv-td" data-col="posted">${esc(day(post.createdAt))}</span><span class="xv-td" data-col="archived">${esc(day(post.archivedAt))}</span><span class="xv-td num" data-col="likes">${fmt(post.metrics?.likes || 0)}</span><span class="xv-td num" data-col="views">${fmt(post.metrics?.views || 0)}</span><span class="xv-td" data-col="tags">${esc((meta.tags || []).map(tag => `#${tag}`).join(' '))}</span><span class="xv-td" data-col="state">${esc(state)}</span><span class="xv-td xv-td-actions"><button type="button" data-record-preview="${index}" title="Quick Look (Space)" aria-label="Quick Look at post ${esc(post.id)}"><span class="lbl">Preview</span></button></span></article>`;
+  }
+
   function paintCompact(force = false, focusIndex = null) {
     const list = $('#list');
     if (!list?.classList.contains('xv-virtual-list')) return;
-    const viewportWindow = model.virtualWindow(compactRows.length, list.scrollTop, list.clientHeight || 600);
+    const head = compactMode === 'table' ? 36 : 0;
+    const viewportWindow = model.virtualWindow(
+      compactRows.length,
+      Math.max(0, list.scrollTop - head),
+      list.clientHeight || 600,
+      rowHeight()
+    );
     if (!force && viewportWindow.start === compactStart && viewportWindow.end === compactEnd) return;
     compactStart = viewportWindow.start;
     compactEnd = viewportWindow.end;
     const focusedId = document.activeElement?.closest('#list .tweet')?.dataset.id;
     list.innerHTML =
+      (compactMode === 'table' ? tableHead() : '') +
       `<div class="xv-virtual-spacer" aria-hidden="true" style="height:${viewportWindow.before}px"></div>` +
       compactRows
         .slice(viewportWindow.start, viewportWindow.end)
         .map((post, offset) => {
           const index = viewportWindow.start + offset;
+          if (compactMode === 'table') return tableRow(post, index);
           const media = post.media || [];
           const first = media[0];
           let preview = first?.preview || (first?.type === 'photo' ? first.url : '');
@@ -109,7 +172,7 @@
           const rawText = String(post.text || 'Media post');
           const textPreview = rawText.length > 500 ? `${rawText.slice(0, 500)}…` : rawText;
           const date = Number(post.archivedAt) ? new Date(post.archivedAt).toLocaleDateString() : 'Unknown date';
-          return `<article class="tweet xv-record-row ${post.userMeta?.favorite ? 'favorite' : ''}" data-id="${esc(post.id)}" data-row-index="${index}" aria-label="Post ${esc(post.id)} by @${esc(post.author?.handle || 'unknown')}" tabindex="0"><div class="xv-record-thumb">${preview ? `<img src="${esc(preview)}" alt="" loading="lazy" decoding="async">` : `<span>${type}</span>`}</div><div class="xv-record-copy"><b>@${esc(post.author?.handle || 'unknown')}</b><p title="Full text is available in Inspector">${esc(textPreview)}</p><small>${esc(compactTagSummary(post))}</small></div><div class="xv-record-facts"><b>${esc(type)}${media.length > 1 ? ' · ' + media.length : ''}</b><time>${esc(date)}</time><span>${model.isDownloaded(post, libraryDownloads) ? 'Local copy' : media.length ? 'Source media' : 'Archived text'}</span></div><div class="xv-record-actions"><button type="button" data-record-preview="${index}" title="Quick Look (Space)" aria-label="Quick Look at post ${esc(post.id)}"><span class="lbl">Preview</span></button><button type="button" data-details="${esc(post.id)}" title="Inspector"><span class="lbl">Details</span></button></div></article>`;
+          return `<article class="tweet xv-record-row ${post.userMeta?.favorite ? 'favorite' : ''}" data-id="${esc(post.id)}" data-row-index="${index}" aria-label="Post ${esc(post.id)} by @${esc(post.author?.handle || 'unknown')}" tabindex="0"><div class="xv-record-thumb" draggable="true">${preview ? `<img src="${esc(preview)}" alt="" loading="lazy" decoding="async">` : `<span>${type}</span>`}</div><div class="xv-record-copy"><b>@${esc(post.author?.handle || 'unknown')}</b><p title="Full text is available in Inspector">${esc(textPreview)}</p><small>${esc(compactTagSummary(post))}</small></div><div class="xv-record-facts"><b>${esc(type)}${media.length > 1 ? ' · ' + media.length : ''}</b><time>${esc(date)}</time><span>${model.isDownloaded(post, libraryDownloads) ? 'Local copy' : media.length ? 'Source media' : 'Archived text'}</span></div><div class="xv-record-actions"><button type="button" data-record-preview="${index}" title="Quick Look (Space)" aria-label="Quick Look at post ${esc(post.id)}"><span class="lbl">Preview</span></button><button type="button" data-details="${esc(post.id)}" title="Inspector"><span class="lbl">Details</span></button></div></article>`;
         })
         .join('') +
       `<div class="xv-virtual-spacer" aria-hidden="true" style="height:${viewportWindow.after}px"></div>`;
@@ -120,18 +183,27 @@
     list.querySelectorAll('[data-record-preview]').forEach(button => {
       button.onclick = () => openQuickLook(compactRows, Number(button.dataset.recordPreview));
     });
+    list.querySelectorAll('[data-table-sort]').forEach(button => {
+      button.onclick = () => {
+        const sort = $('#sort'),
+          wanted = button.dataset.tableSort;
+        sort.value = wanted === 'new' && sort.value === 'new' ? 'old' : wanted;
+        sort.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+    });
     if (focusIndex != null) list.querySelector(`[data-row-index="${focusIndex}"]`)?.focus({ preventScroll: true });
     else if (focusedId)
       list.querySelector(`.tweet[data-id="${CSS.escape(focusedId)}"]`)?.focus({ preventScroll: true });
   }
 
-  function renderCompact(rows) {
+  function renderCompact(rows, mode = 'compact') {
     const list = $('#list');
-    const key = `${currentSearchKey()}|${pageIndex}`;
+    const key = `${currentSearchKey()}|${pageIndex}|${mode}`;
     const reset = !list.classList.contains('xv-virtual-list') || key !== compactKey;
     compactRows = rows;
     compactKey = key;
-    list.dataset.view = 'compact';
+    compactMode = mode;
+    list.dataset.view = mode;
     list.classList.add('xv-virtual-list');
     if (reset) list.scrollTop = 0;
     list.onscroll = () => {
@@ -635,7 +707,9 @@
       tags = new Map();
     let inbox = 0,
       favorites = 0,
-      untagged = 0;
+      untagged = 0,
+      later = 0,
+      highlights = 0;
     for (const post of library) {
       const handle = String(post.author?.handle || '').replace(/^@/, '');
       if (handle) authors.set(handle, (authors.get(handle) || 0) + 1);
@@ -646,8 +720,10 @@
       if (!postTags.length) untagged++;
       if (post.userMeta?.favorite) favorites++;
       if (model.isInbox(post, settings.inboxSince)) inbox++;
+      if (post.userMeta?.readLater && !post.userMeta?.readAt) later++;
+      if (post.userMeta?.highlights?.length) highlights++;
     }
-    const counts = { all: libraryTotalRecords, inbox, favorites, untagged };
+    const counts = { all: libraryTotalRecords, inbox, favorites, untagged, later, highlights };
     for (const [id, count] of Object.entries(counts)) {
       const target = root.querySelector(`[data-destination="${id}"] .count`);
       if (target) target.textContent = count == null ? '—' : count ? fmt(count) : '';
@@ -658,7 +734,7 @@
             ? count == null
               ? 'Archive total is not calculated to keep Library paging fast.'
               : `${fmt(count)} posts in the archive.`
-            : `${fmt(count || 0)} ${id === 'inbox' ? 'new' : id === 'favorites' ? 'favorite' : 'untagged'} posts on the loaded page.`;
+            : `${fmt(count || 0)} ${{ inbox: 'new', favorites: 'favorite', later: 'read-later', highlights: 'highlighted' }[id] || 'untagged'} posts on the loaded page.`;
     }
     const draw = (id, entries, key, limit, label) => {
       const target = $(id);
@@ -997,8 +1073,8 @@
     const remember = settings.rememberLibraryQuery;
     settings.rememberLibraryQuery = false;
     try {
-      if (settings.libraryView === 'compact' && rows.length) {
-        renderCompact(rows);
+      if (['compact', 'table'].includes(settings.libraryView) && rows.length) {
+        renderCompact(rows, settings.libraryView);
         $('#libMediaCount').textContent = fmt(rows.reduce((count, post) => count + (post.media?.length || 0), 0));
         $('#libLocalCount').textContent = fmt(
           rows.reduce(
@@ -1775,13 +1851,14 @@
     renderSelection();
   }
 
-  async function bulkMeta(patch, label) {
+  async function bulkMeta(patch, label, targetIds = null) {
     if (mutationBusy) return;
-    const ids = [...selected];
+    const ids = targetIds ? [...targetIds].map(String) : [...selected];
     if (!ids.length) return;
     mutationBusy = true;
     let updated = 0;
-    const changedIds = new Set();
+    const changedIds = new Set(),
+      previous = [];
     const byId = new Map(library.map(row => [String(row.id), row]));
     try {
       for (let start = 0; start < ids.length; start += 200) {
@@ -1797,9 +1874,15 @@
           }
         }
         updated += result.updated || 0;
+        previous.push(...(result.previous || []));
         await new Promise(resolve => setTimeout(resolve, 0));
       }
-      toast(`${label} · ${fmt(updated)} posts`);
+      if (window.XVaultUndo && previous.length)
+        window.XVaultUndo.push({
+          label: `${label} · ${fmt(updated)} post${updated === 1 ? '' : 's'}`,
+          entries: previous,
+        });
+      else toast(`${label} · ${fmt(updated)} posts`);
     } catch (error) {
       toast(`${label} stopped after ${fmt(updated)} posts: ${error.message}. Retry the remaining selection.`);
     } finally {
@@ -1810,6 +1893,28 @@
       updateSelectionBar();
     }
   }
+
+  window.XVaultLibraryBulkMeta = bulkMeta;
+  window.XVaultLibraryTrash = ids => trashPosts([...ids].map(String), { ask: true });
+  window.XVaultLibraryResultRows = () => resultRows();
+  window.XVaultLibrarySetSelection = ids => {
+    const next = model.replaceSelection([...ids].slice(0, 5000));
+    selected.clear();
+    for (const id of next) selected.add(id);
+    selectionAnchor = [...next][0] || '';
+    renderSelection();
+    return selected.size;
+  };
+  window.XVaultLibraryRunQuery = (query, sort = null) => {
+    if (sort && $('#sort') && $('#sort').value !== sort) {
+      $('#sort').value = sort;
+      settings.librarySort = sort;
+    }
+    $('#search').value = query;
+    pageIndex = 0;
+    renderLib();
+    syncChrome(query);
+  };
 
   function trashSelected() {
     return trashPosts([...selected], { ask: true });
@@ -3313,7 +3418,7 @@
     facets.setAttribute('aria-label', 'Library locations');
     const destination = (id, label, icon) =>
       `<button type="button" class="facet-item" data-destination="${id}"><span class="facet-icon" data-facet-icon="${icon}"></span><span>${label}</span><em class="count"></em></button>`;
-    facets.innerHTML = `<h2 class="xv-sr-only">Library locations</h2><nav aria-label="Collections">${destination('all', 'All posts', 'library')}${destination('inbox', 'Inbox', 'inbox')}${destination('favorites', 'Favorites', 'favorite')}${destination('untagged', 'Untagged', 'tag')}${destination('local', 'On disk', 'disk')}${destination('missing', 'Missing media', 'missing')}</nav>
+    facets.innerHTML = `<h2 class="xv-sr-only">Library locations</h2><nav aria-label="Collections">${destination('all', 'All posts', 'library')}${destination('inbox', 'Inbox', 'inbox')}${destination('favorites', 'Favorites', 'favorite')}${destination('untagged', 'Untagged', 'tag')}${destination('later', 'Read later', 'saved')}${destination('highlights', 'Highlights', 'note')}${destination('local', 'On disk', 'disk')}${destination('missing', 'Missing media', 'missing')}</nav>
 <section class="facet" aria-labelledby="facetSourcesTitle"><h3 id="facetSourcesTitle">Sources</h3><div><button type="button" class="facet-item" data-token="source:bookmarks"><span class="facet-icon" data-facet-icon="saved"></span><span>Bookmarks</span></button><button type="button" class="facet-item" data-token="source:likes"><span class="facet-icon" data-facet-icon="heart"></span><span>Likes</span></button><button type="button" class="facet-item" data-token="source:profile"><span class="facet-icon" data-facet-icon="person"></span><span>Profiles</span></button></div></section>
 <section class="facet" aria-labelledby="facetAuthorsTitle"><h3 id="facetAuthorsTitle">Authors</h3><div id="facetAuthors"></div></section>
 <section class="facet" aria-labelledby="facetTagsTitle"><h3 id="facetTagsTitle">Tags</h3><div id="facetTags"></div></section>
@@ -3637,9 +3742,11 @@
                   Math.min(compactRows.length - 1, current + (event.key === 'j' || event.key === 'ArrowDown' ? 1 : -1))
                 );
         const list = $('#list'),
-          top = next * 76;
-        if (top < list.scrollTop) list.scrollTop = top;
-        else if (top + 76 > list.scrollTop + list.clientHeight) list.scrollTop = top + 76 - list.clientHeight;
+          height = rowHeight(),
+          top = next * height + (compactMode === 'table' ? 36 : 0);
+        if (top < list.scrollTop + (compactMode === 'table' ? 36 : 0))
+          list.scrollTop = top - (compactMode === 'table' ? 36 : 0);
+        else if (top + height > list.scrollTop + list.clientHeight) list.scrollTop = top + height - list.clientHeight;
         paintCompact(true, next);
       } else if (event.key === 'j' || event.key === 'k' || event.key.startsWith('Arrow')) {
         event.preventDefault();

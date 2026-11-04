@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="xv-atlas.css" />
     <link rel="stylesheet" href="xv-reader.css" />
     <link rel="stylesheet" href="xv-search-assist.css" />
+    <link rel="stylesheet" href="xv-library3.css" />
     <script defer src="link-utils.js"></script>
     <script defer src="link-export.js"></script>
     <script defer src="media-asset.js"></script>
@@ -39,6 +40,7 @@
     <script defer src="search-ranking.js"></script>
     <script defer src="xv-search-assist.js"></script>
     <script defer src="xv-background-jobs.js"></script>
+    <script defer src="xv-library3.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script>
   </head>
@@ -340,6 +342,9 @@
                   <button type="button" role="radio" data-layout="compact" title="List: one row per post">
                     <span class="sr">List</span>
                   </button>
+                  <button type="button" role="radio" data-layout="table" title="Table: sortable columns">
+                    <span class="sr">Table</span>
+                  </button>
                 </div>
                 <label class="tile-size" title="Tile size"
                   ><span class="sr">Tile size</span
@@ -355,6 +360,7 @@
                   <option value="replies">Most replied</option>
                   <option value="media">Most media</option>
                   <option value="author">Author A–Z</option>
+                  <option value="relevance">Best match (about:/similar:)</option>
                 </select>
                 <select id="libraryView" class="sr" tabindex="-1" aria-hidden="true">
                   <option value="timeline">Timeline</option>
@@ -362,6 +368,7 @@
                   <option value="gallery">Grid</option>
                   <option value="masonry">Wall</option>
                   <option value="compact">List</option>
+                  <option value="table">Table</option>
                 </select>
                 <details class="menu" id="libraryTools">
                   <summary aria-label="Library actions" title="Library actions">

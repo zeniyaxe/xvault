@@ -47,6 +47,14 @@
     layoutTimeline:
       '<path d="M7 3v18"/><circle cx="7" cy="7" r="2"/><circle cx="7" cy="14" r="2"/><path d="M10 7h10M10 14h7"/>',
     layoutCompact: '<path d="M4 5h16M4 9h16M4 13h16M4 17h16"/><path d="M4 21h10"/>',
+    layoutTable: '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path d="M3.5 9.5h17M3.5 14.5h17M9 4.5v15"/>',
+    board:
+      '<rect x="3.5" y="4.5" width="7" height="15" rx="1.5"/><rect x="13.5" y="4.5" width="7" height="9" rx="1.5"/><path d="M13.5 17h7"/>',
+    imageSearch:
+      '<rect x="3.5" y="5.5" width="13" height="11" rx="1.5"/><path d="m4 15 4-4 3 3 2-2 3 3"/><circle cx="17.5" cy="17.5" r="3"/><path d="m19.7 19.7 1.8 1.8"/>',
+    sparkle: '<path d="M12 3v5M12 16v5M3 12h5M16 12h5"/><path d="m7 7 2 2M15 15l2 2M17 7l-2 2M9 15l-2 2"/>',
+    highlight: '<path d="m14 4 6 6-9 9H5v-6z"/><path d="M4 21h16"/>',
+    later: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
     layoutCards:
       '<rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/>',
     density: '<path d="M4 6h16M4 12h16M4 18h16"/><path d="M7 4v4M12 10v4M17 16v4"/>',
@@ -131,6 +139,8 @@
     ['[data-layout="gallery"]', 'layoutGrid'],
     ['[data-layout="masonry"]', 'layoutMasonry'],
     ['[data-layout="compact"]', 'layoutCompact'],
+    ['[data-layout="table"]', 'layoutTable'],
+    ['#xvImageSearch', 'imageSearch'],
     ['#libraryTools > summary', 'more'],
     ['#libraryReview', 'inbox'],
     ['[data-player="pip"]', 'pip'],
