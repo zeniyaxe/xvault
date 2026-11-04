@@ -57,6 +57,9 @@
   function setCalendarTimeZone(zone) {
     calendarZone = zone === 'local' ? 'local' : 'utc';
   }
+  function getCalendarTimeZone() {
+    return calendarZone;
+  }
   function dayStamp(value) {
     const stamp = /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
     if (!Number.isFinite(stamp) || new Date(stamp).toISOString().slice(0, 10) !== value) return NaN;
@@ -477,6 +480,7 @@
 
   return Object.freeze({
     setCalendarTimeZone,
+    getCalendarTimeZone,
     tokenizeQuery,
     parseNum,
     compileQuery,
