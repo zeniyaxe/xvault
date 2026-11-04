@@ -95,6 +95,104 @@
     });
     refresh();
   }
+  /* ───────── Scheduled sync ───────── */
+  let sync = null,
+    syncTimer = 0;
+  const when = stamp =>
+    stamp ? new Date(stamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+  function syncText(status) {
+    if (!status) return 'Checking…';
+    if (status.current)
+      return `Syncing ${status.current.scope} in a background tab (${status.current.phase || 'running'}) since ${when(status.current.startedAt)}`;
+    if (!status.enabled) return 'Scheduled sync is off. “Sync now” still works whenever an X tab is open.';
+    if (status.paused) return 'Paused — no scheduled runs until you resume.';
+    const parts = ['bookmarks', 'likes'].map(scope => {
+      const last = status.lastResult?.[scope],
+        next = status.next?.[scope];
+      if (!next && !last) return '';
+      const lastText = last
+        ? last.ok
+          ? `last ${when(last.at)} (+${number(last.added)})`
+          : `last attempt failed: ${last.error}`
+        : 'not run yet';
+      return `${scope[0].toUpperCase()}${scope.slice(1)}: ${lastText}${next ? ` · next ${when(next)}` : ''}`;
+    });
+    if (status.waitingForTab) parts.push('Waiting for an open x.com tab');
+    return parts.filter(Boolean).join(' · ') || 'Choose how often to sync Bookmarks or Likes.';
+  }
+  function paintSync() {
+    const panel = document.getElementById('xvSyncPanel');
+    if (!panel) return;
+    panel.querySelector('[data-sync-status]').textContent = syncText(sync);
+    const pause = panel.querySelector('[data-sync="pause"]');
+    pause.textContent = sync?.paused ? 'Resume schedule' : 'Pause schedule';
+    pause.setAttribute('aria-pressed', String(!!sync?.paused));
+    pause.hidden = !sync?.enabled;
+    panel.querySelector('[data-sync="stop"]').hidden = !sync?.current;
+    panel
+      .querySelectorAll('[data-sync="bookmarks"],[data-sync="likes"]')
+      .forEach(button => (button.disabled = !!sync?.current));
+  }
+  async function refreshSync() {
+    clearTimeout(syncTimer);
+    const result = await call({ type: 'SYNC_STATUS' }).catch(() => null);
+    if (result?.ok) sync = result;
+    paintSync();
+    paintViews();
+    if (document.getElementById('xvSyncPanel')?.isConnected)
+      syncTimer = setTimeout(refreshSync, sync?.current ? 4000 : 30000);
+  }
+  function paintViews() {
+    const box = document.getElementById('xvSyncViews');
+    if (!box) return;
+    const views = window.settings?.savedViews || (typeof settings !== 'undefined' ? settings.savedViews : []) || [],
+      watched = new Set(((typeof settings !== 'undefined' && settings.syncNotifyViews) || []).map(String));
+    box.querySelectorAll('label').forEach(label => label.remove());
+    box.querySelector('.settingHint').hidden = views.length > 0;
+    for (const view of views) {
+      if (!view?.id) continue;
+      const label = document.createElement('label'),
+        input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = String(view.id);
+      input.checked = watched.has(String(view.id));
+      input.dataset.syncView = '1';
+      label.append(input, ` ${view.name || 'Untitled'} `);
+      const hint = document.createElement('small');
+      hint.textContent = view.query || '';
+      label.append(hint);
+      box.append(label);
+    }
+  }
+  async function syncAction(kind) {
+    let result;
+    if (kind === 'bookmarks' || kind === 'likes') {
+      toast(`Opening ${kind} in a background tab…`);
+      result = await call({ type: 'SYNC_RUN_NOW', scope: kind });
+    } else if (kind === 'pause') result = await call({ type: sync?.paused ? 'SYNC_RESUME' : 'SYNC_PAUSE' });
+    else if (kind === 'stop') result = await call({ type: 'SYNC_STOP' });
+    if (result && result.ok === false) toast(result.error || 'Sync could not start');
+    await refreshSync();
+  }
+  function mountSync() {
+    const panel = document.getElementById('xvSyncPanel');
+    if (!panel || panel.dataset.ready) return;
+    panel.dataset.ready = '1';
+    panel.addEventListener('click', event => {
+      const button = event.target.closest('[data-sync]');
+      if (button) syncAction(button.dataset.sync);
+    });
+    document.getElementById('xvSyncViews')?.addEventListener('change', async event => {
+      if (!event.target.matches('[data-sync-view]')) return;
+      const ids = [...document.querySelectorAll('#xvSyncViews [data-sync-view]:checked')].map(input => input.value);
+      await save({ syncNotifyViews: ids });
+    });
+    document.querySelector('#g-sync')?.addEventListener('change', event => {
+      if (event.target.matches('[data-setting]')) setTimeout(refreshSync, 400);
+    });
+    refreshSync();
+  }
+
   try {
     new BroadcastChannel('xvault-derived-jobs').onmessage = event => {
       const message = event.data || {};
@@ -105,8 +203,12 @@
       else paint();
     };
   } catch {}
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
-  else mount();
+  const mountAll = () => {
+    mount();
+    mountSync();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountAll, { once: true });
+  else mountAll();
 
   const previousCommands = window.XVaultExtraCommands;
   window.XVaultExtraCommands = query => [
@@ -116,6 +218,12 @@
       hint: 'makes ocr: searches work · runs in the background',
       run: () => act('start'),
     },
+    {
+      name: 'Sync bookmarks now',
+      hint: 'reads the newest bookmarks in a background X tab',
+      run: () => syncAction('bookmarks'),
+    },
+    { name: 'Sync likes now', hint: 'reads the newest likes in a background X tab', run: () => syncAction('likes') },
   ];
-  window.XVaultBackgroundJobs = { refresh, jobs, counts };
+  window.XVaultBackgroundJobs = { refresh, refreshSync, jobs, counts };
 })();

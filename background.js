@@ -8,6 +8,7 @@ import {
 } from './reliability.mjs';
 import { createInsightsAccumulator, orderThread, compactPost, previewUrl, mediaKind } from './vault-insights.mjs';
 import { createDerivedService } from './sw/derived-service.mjs';
+import { createSyncScheduler } from './sw/sync-scheduler.mjs';
 import {
   readLibraryPage,
   readLibraryRecords,
@@ -447,6 +448,16 @@ const defaults = {
   recentProfiles: [],
   pinnedProfiles: [],
   savedViews: [],
+  // XVault 19: scheduled Bookmarks/Likes sync (opt-in), calendar time zone.
+  syncEnabled: false,
+  syncPaused: false,
+  syncBookmarksMinutes: 360,
+  syncLikesMinutes: 0,
+  syncMaxPages: 3,
+  syncNotifications: true,
+  syncNotifyAll: false,
+  syncNotifyViews: [],
+  calendarTimeZone: 'local',
   quietCompletionOnly: false,
   dashboardSounds: true,
   soundVolume: 0.14,
@@ -1074,6 +1085,15 @@ function normalizeSettings(raw = {}) {
   if (!['off', 'reduced', 'subtle', 'normal', 'rich', 'extreme'].includes(out.motionLevel)) out.motionLevel = 'normal';
   if (!(Number(out.inboxSince) > 0)) out.inboxSince = Date.now();
   out.libraryTileSize = Math.min(440, Math.max(150, Number(out.libraryTileSize) || 260));
+  for (const key of ['syncBookmarksMinutes', 'syncLikesMinutes']) {
+    const minutes = Math.round(Number(out[key]));
+    out[key] = !Number.isFinite(minutes) || minutes <= 0 ? 0 : Math.min(10080, Math.max(30, minutes));
+  }
+  out.syncMaxPages = Math.min(20, Math.max(1, Math.round(Number(out.syncMaxPages)) || 3));
+  out.syncNotifyViews = Array.isArray(out.syncNotifyViews)
+    ? [...new Set(out.syncNotifyViews.map(String).filter(id => id.length <= 128))].slice(0, 50)
+    : [];
+  if (!['local', 'utc'].includes(out.calendarTimeZone)) out.calendarTimeZone = 'local';
   return out;
 }
 async function getSettings() {
@@ -1098,6 +1118,8 @@ async function writeSettingsPatch(p) {
   h.unshift({ at: Date.now(), settings: cur });
   await chrome.storage.local.set({ settings: next, settingsHistory: h.slice(0, 12) });
   if (next.crossPostDuplicates === 'skip') void runDownloadAssetIndexBackfill();
+  if (['syncEnabled', 'syncBookmarksMinutes', 'syncLikesMinutes'].some(key => key in p))
+    queueMicrotask(() => syncScheduler.schedule().catch(() => {}));
   return next;
 }
 const updateSmartCollections = createSmartCollectionService({
@@ -3125,10 +3147,47 @@ const derived = createDerivedService({
 });
 derived.resume().catch(() => {});
 
+async function postsArchivedSince(since, limit = 2000) {
+  const database = await db();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = database.transaction('tweets', 'readonly'),
+        request = tx
+          .objectStore('tweets')
+          .index('archivedAt')
+          .getAll(IDBKeyRange.lowerBound(Number(since) || 0), limit);
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+const syncScheduler = createSyncScheduler({
+  getSettings,
+  setSettings,
+  activeXTab,
+  sendToX,
+  getJob: id => store('jobs', 'readonly', os => req(os.get(String(id)))),
+  postsArchivedSince,
+  matchesQuery: (post, query) =>
+    globalThis.XVaultLibrarySearch.matchesQuery(globalThis.XVaultLibrarySearch.projectPost(post, 0, {}), query),
+  notify: async (title, message) => {
+    try {
+      await chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon128.png', title, message, priority: 0 });
+    } catch {}
+  },
+});
+syncScheduler.schedule().catch(() => {});
+
 chrome.runtime.onMessage.addListener((m, s, reply) => {
   (async () => {
     const messageCapability = authorizeMessage(m, s, chrome.runtime.id);
     await privateStorageReady;
+    if (syncScheduler.handles(m.type)) {
+      if (messageCapability === 'content') throw Error('Scheduled sync is managed from XVault pages');
+      return await syncScheduler.handle(m);
+    }
     if (derived.handles(m.type)) {
       if (messageCapability === 'content') throw Error('Derived-data jobs are managed from XVault pages');
       return await derived.handle(m);
@@ -5769,6 +5828,7 @@ async function verifyCompletedDownloadCore(downloadId) {
 // remove a file before its metadata/magic-byte result is persisted.
 chrome.alarms.onAlarm.addListener(async alarm => {
   if (derived.onAlarm(alarm?.name)) return;
+  if (syncScheduler.onAlarm(alarm?.name)) return;
   if (alarm?.name === DOWNLOAD_ASSET_INDEX_ALARM) {
     await runDownloadAssetIndexBackfill();
     return;

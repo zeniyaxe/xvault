@@ -1297,6 +1297,77 @@
                 </header>
                 <div class="groups">
                   <div id="xSlot"></div>
+                  <section class="settinggroup" id="g-sync">
+                    <h3>Scheduled sync</h3>
+                    <p class="settingHint">
+                      Keeps Bookmarks and Likes current while an x.com tab is open. XVault reads only the newest pages
+                      in a background tab using your signed-in session, at a gentle pace, and backs off when X asks it
+                      to.
+                    </p>
+                    <div class="toggles">
+                      <label
+                        ><span
+                          ><b>Sync automatically</b
+                          ><small>Off by default. Nothing runs without an open X tab.</small></span
+                        ><input type="checkbox" data-setting="syncEnabled"
+                      /></label>
+                    </div>
+                    <div class="formgrid two">
+                      <label class="field"
+                        ><span>Bookmarks</span
+                        ><select data-setting="syncBookmarksMinutes">
+                          <option value="0">Off</option>
+                          <option value="60">Every hour</option>
+                          <option value="180">Every 3 hours</option>
+                          <option value="360">Every 6 hours</option>
+                          <option value="720">Every 12 hours</option>
+                          <option value="1440">Daily</option>
+                          <option value="10080">Weekly</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Likes</span
+                        ><select data-setting="syncLikesMinutes">
+                          <option value="0">Off</option>
+                          <option value="60">Every hour</option>
+                          <option value="180">Every 3 hours</option>
+                          <option value="360">Every 6 hours</option>
+                          <option value="720">Every 12 hours</option>
+                          <option value="1440">Daily</option>
+                          <option value="10080">Weekly</option>
+                        </select></label
+                      >
+                      <label class="field"
+                        ><span>Newest pages per run</span
+                        ><input type="number" min="1" max="20" data-setting="syncMaxPages"
+                      /></label>
+                    </div>
+                    <div class="toggles">
+                      <label
+                        ><span
+                          ><b>Notify about matching posts</b
+                          ><small>For the Smart Collections ticked below.</small></span
+                        ><input type="checkbox" data-setting="syncNotifications"
+                      /></label>
+                      <label
+                        ><span><b>Notify after every sync with new posts</b></span
+                        ><input type="checkbox" data-setting="syncNotifyAll"
+                      /></label>
+                    </div>
+                    <fieldset class="xv-sync-views" id="xvSyncViews">
+                      <legend>Smart Collections to watch</legend>
+                      <p class="settingHint">Save a search as a Smart Collection in the Library to watch it here.</p>
+                    </fieldset>
+                    <div class="xv-job" id="xvSyncPanel">
+                      <p class="xv-job-status" data-sync-status role="status" aria-live="polite">Checking…</p>
+                      <div class="row">
+                        <button type="button" data-sync="bookmarks">Sync bookmarks now</button
+                        ><button type="button" data-sync="likes">Sync likes now</button
+                        ><button type="button" class="quiet" data-sync="pause" aria-pressed="false">Pause</button
+                        ><button type="button" class="quiet" data-sync="stop" hidden>Stop</button>
+                      </div>
+                    </div>
+                  </section>
                   <section class="settinggroup" id="g-floating">
                     <h3>XV button</h3>
                     <p class="settingHint">The floating shortcut on x.com.</p>
