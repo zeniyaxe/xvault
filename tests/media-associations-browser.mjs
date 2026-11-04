@@ -1,0 +1,3 @@
+import assert from'node:assert/strict';import{createRequire}from'node:module';
+const pw=createRequire(import.meta.url)(process.argv[2]||'playwright'),browser=await pw.chromium.launch({headless:true,executablePath:process.argv[3]});
+try{const page=await browser.newPage();await page.goto('http://127.0.0.1:8765/tests/media-associations.html');await page.waitForFunction(()=>window.testResult);const result=await page.evaluate(()=>window.testResult);assert.ok(!result.error,result.error);console.log('PASS real IndexedDB shared-file associations:',result.passed,'assertions')}finally{await browser.close()}

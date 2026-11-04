@@ -4,25 +4,46 @@
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.XVaultLibraryModel = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
-  const _asset = (typeof globalThis !== 'undefined' && globalThis.XVaultMediaAsset) || (typeof require === 'function' ? (() => { try { return require('./media-asset.js'); } catch { return null; } })() : null);
+  const _asset =
+    (typeof globalThis !== 'undefined' && globalThis.XVaultMediaAsset) ||
+    (typeof require === 'function'
+      ? (() => {
+          try {
+            return require('./media-asset.js');
+          } catch {
+            return null;
+          }
+        })()
+      : null);
   const sameMedia = (a, b) => a === b || Boolean(a && b && _asset && _asset.sameAsset(a, b));
   function isDownloaded(post, downloadMap) {
-    return (downloadMap.get(String(post.id)) || []).some(row => row.state === 'complete' &&
-      !['mismatch', 'corrupt', 'missing'].includes(row.verification?.state || row.verificationState));
+    return (downloadMap.get(String(post.id)) || []).some(
+      row =>
+        row.state === 'complete' &&
+        !['mismatch', 'corrupt', 'missing'].includes(row.verification?.state || row.verificationState)
+    );
   }
 
   function downloadedMediaCount(post, downloadMap) {
     const media = post.media || [];
     if (!media.length) return 0;
     const rows = downloadMap.get(String(post.id)) || [];
-    return media.filter(item => rows.some(row => {
-      if (row.state !== 'complete' || ['mismatch', 'corrupt', 'missing'].includes(row.verification?.state || row.verificationState)) return false;
-      if (item.id && row.item?.mediaId && String(item.id) === String(row.item.mediaId)) return true;
-      const urls = [item.url, item.playbackUrl, ...(item.variants || []).map(variant => variant.url)].filter(Boolean);
-      return urls.some(url => sameMedia(url, row.item?.url));
-    })).length;
+    return media.filter(item =>
+      rows.some(row => {
+        if (
+          row.state !== 'complete' ||
+          ['mismatch', 'corrupt', 'missing'].includes(row.verification?.state || row.verificationState)
+        )
+          return false;
+        if (item.id && row.item?.mediaId && String(item.id) === String(row.item.mediaId)) return true;
+        const urls = [item.url, item.playbackUrl, ...(item.variants || []).map(variant => variant.url)].filter(Boolean);
+        return urls.some(url => sameMedia(url, row.item?.url));
+      })
+    ).length;
   }
-  function hasMissingMedia(post,downloadMap){return(post.media||[]).length>downloadedMediaCount(post,downloadMap)}
+  function hasMissingMedia(post, downloadMap) {
+    return (post.media || []).length > downloadedMediaCount(post, downloadMap);
+  }
 
   // Inbox: posts archived after the cut-off that the user has not yet reviewed.
   function isInbox(post, since) {
@@ -41,13 +62,22 @@
   }
 
   function sortPosts(rows, value) {
-    const metric = { likes: 'likes', views: 'views', bookmarks: 'bookmarks', reposts: 'reposts', replies: 'replies' }[value];
-    return [...rows].sort((a, b) => metric ? Number(b.metrics?.[metric] || 0) - Number(a.metrics?.[metric] || 0)
-      : value === 'old' ? Number(a.archivedAt || 0) - Number(b.archivedAt || 0)
-      : value === 'media' ? (b.media?.length || 0) - (a.media?.length || 0)
-      : value === 'author' ? String(a.author?.handle || '').localeCompare(String(b.author?.handle || ''))
-      : value === 'random' ? Number(a.randomOrder ?? 0) - Number(b.randomOrder ?? 0)
-      : Number(b.archivedAt || 0) - Number(a.archivedAt || 0));
+    const metric = { likes: 'likes', views: 'views', bookmarks: 'bookmarks', reposts: 'reposts', replies: 'replies' }[
+      value
+    ];
+    return [...rows].sort((a, b) =>
+      metric
+        ? Number(b.metrics?.[metric] || 0) - Number(a.metrics?.[metric] || 0)
+        : value === 'old'
+          ? Number(a.archivedAt || 0) - Number(b.archivedAt || 0)
+          : value === 'media'
+            ? (b.media?.length || 0) - (a.media?.length || 0)
+            : value === 'author'
+              ? String(a.author?.handle || '').localeCompare(String(b.author?.handle || ''))
+              : value === 'random'
+                ? Number(a.randomOrder ?? 0) - Number(b.randomOrder ?? 0)
+                : Number(b.archivedAt || 0) - Number(a.archivedAt || 0)
+    );
   }
 
   function virtualWindow(count, scrollTop, viewportHeight, rowHeight = 76, overscan = 3) {
@@ -81,8 +111,10 @@
   }
 
   function applySelectionRange(selection, rows, anchorId, targetId, checked) {
-    const anchor = String(anchorId), target = String(targetId);
-    let start = -1, end = -1;
+    const anchor = String(anchorId),
+      target = String(targetId);
+    let start = -1,
+      end = -1;
     for (let index = 0; index < rows.length; index++) {
       const id = rows[index]?.id;
       if (id == null) continue;
@@ -104,7 +136,9 @@
   function createMediaResourcePool({ create, revoke }) {
     const entries = new Map();
     return Object.freeze({
-      get(path) { return entries.get(path)?.url || null; },
+      get(path) {
+        return entries.get(path)?.url || null;
+      },
       add(path, blob) {
         if (entries.has(path)) return entries.get(path).url;
         const url = create(blob);
@@ -135,17 +169,38 @@
       clear() {
         for (const entry of entries.values()) revoke(entry.url);
         entries.clear();
-      }
+      },
     });
   }
 
   function destinationQuery(id) {
     const queries = {
-      all: '', inbox: 'inbox:true', favorites: 'fav:true', untagged: 'untagged:true', images: 'type:image', videos: 'type:video',
-      animations: 'type:gif', local: 'downloaded:true', missing: 'missing:true'
+      all: '',
+      inbox: 'inbox:true',
+      favorites: 'fav:true',
+      untagged: 'untagged:true',
+      images: 'type:image',
+      videos: 'type:video',
+      animations: 'type:gif',
+      local: 'downloaded:true',
+      missing: 'missing:true',
     };
     return Object.hasOwn(queries, id) ? queries[id] : null;
   }
 
-  return Object.freeze({ isInbox, isDownloaded, hasMissingMedia, downloadedMediaCount, paginate, sortPosts, virtualWindow, replaceSelection, addSelection, invertSelection, applySelectionRange, createMediaResourcePool, destinationQuery });
+  return Object.freeze({
+    isInbox,
+    isDownloaded,
+    hasMissingMedia,
+    downloadedMediaCount,
+    paginate,
+    sortPosts,
+    virtualWindow,
+    replaceSelection,
+    addSelection,
+    invertSelection,
+    applySelectionRange,
+    createMediaResourcePool,
+    destinationQuery,
+  });
 });

@@ -1,1 +1,45 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>XVault Quick</title><link rel="stylesheet" href="xv-base.css"><link rel="stylesheet" href="sidepanel.css"></head><body data-theme="graphite"><main><header><img class="mark" src="icons/xvault-mark.svg" alt="" width="28" height="28"><div><b>XVault</b><small>Acts on the X tab you have open</small></div><button id="dash" class="quiet" title="Open the dashboard" aria-label="Open dashboard">Open</button></header><section class="hero"><strong id="count">0</strong><span>posts in your vault</span></section><div class="grid"><button data-action="copy"><b>Copy link</b><small>post in view</small></button><button data-action="download"><b>Download media</b><small>best quality</small></button><button data-action="archive"><b>Archive post</b><small>post in view</small></button><button data-action="timeline"><b>Archive page</b><small>everything loaded</small></button></div><section class="card"><label>Copy links as<select id="provider"><option value="fixvx">FixVX (default)</option><option value="fixupx">FixupX</option><option value="x">Original X</option><option value="fxtwitter">FxTwitter</option><option value="vxtwitter">VXTwitter</option></select></label><div class="row"><span>Passive capture</span><input id="capture" type="checkbox"></div><div class="row"><span>Inline copy button</span><input id="inline" type="checkbox"></div></section><section class="card shortcuts"><b>Keyboard</b><span><kbd>Alt⇧C</kbd> copy</span><span><kbd>Alt⇧D</kbd> media</span><span><kbd>Alt⇧A</kbd> archive</span></section><div id="toast"></div></main><script src="sidepanel.js"></script></body></html>
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>XVault Quick</title>
+    <link rel="stylesheet" href="xv-base.css" />
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body data-theme="graphite">
+    <main>
+      <header>
+        <img class="mark" src="icons/xvault-mark.svg" alt="" width="28" height="28" />
+        <div><b>XVault</b><small>Acts on the X tab you have open</small></div>
+        <button id="dash" class="quiet" title="Open the dashboard" aria-label="Open dashboard">Open</button>
+      </header>
+      <section class="hero"><strong id="count">0</strong><span>posts in your vault</span></section>
+      <div class="grid">
+        <button data-action="copy"><b>Copy link</b><small>post in view</small></button
+        ><button data-action="download"><b>Download media</b><small>best quality</small></button
+        ><button data-action="archive"><b>Archive post</b><small>post in view</small></button
+        ><button data-action="timeline"><b>Archive page</b><small>everything loaded</small></button>
+      </div>
+      <section class="card">
+        <label
+          >Copy links as<select id="provider">
+            <option value="fixvx">FixVX (default)</option>
+            <option value="fixupx">FixupX</option>
+            <option value="x">Original X</option>
+            <option value="fxtwitter">FxTwitter</option>
+            <option value="vxtwitter">VXTwitter</option>
+          </select></label
+        >
+        <div class="row"><span>Passive capture</span><input id="capture" type="checkbox" /></div>
+        <div class="row"><span>Inline copy button</span><input id="inline" type="checkbox" /></div>
+      </section>
+      <section class="card shortcuts">
+        <b>Keyboard</b><span><kbd>Alt⇧C</kbd> copy</span><span><kbd>Alt⇧D</kbd> media</span
+        ><span><kbd>Alt⇧A</kbd> archive</span>
+      </section>
+      <div id="toast"></div>
+    </main>
+    <script src="sidepanel.js"></script>
+  </body>
+</html>

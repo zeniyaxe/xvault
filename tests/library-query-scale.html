@@ -1,0 +1,145 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Library cursor scale test</title>
+<output id="result">Running</output>
+<script type="module">
+  import { readLibraryQueryPage } from '../library-storage.mjs';
+  import { readLibraryPage, readLibraryRecords, readLibraryRevision } from '../library-storage.mjs';
+  import { LibraryRankPlanCache, buildLibraryRankPlan, pageLibraryRankPlan, MAX_LIBRARY_RANKS } from '../library-ranked-query.mjs';
+  import { readStoredLibraryPlan, writeStoredLibraryPlan } from '../library-plan-storage.mjs';
+  import '../library-search-core.js';
+  import { readRemoteCursorPage } from '../remote-cursor-query.mjs';
+  const output = document.querySelector('#result');
+    const longTasks = [];
+    try { new PerformanceObserver(list => longTasks.push(...list.getEntries().map(entry => ({ startTime: entry.startTime, duration: entry.duration })))).observe({ type: 'longtask', buffered: true }); } catch {}
+  const name = `xvault-query-scale-${crypto.randomUUID()}`;
+  try {
+    let fullStoreReads = 0;
+    let libraryPageCountReads = 0, trackingLibraryPageReads = false;
+    const libraryPageCountTimes = [];
+    const originalGetAll = IDBObjectStore.prototype.getAll;
+    const originalCount = IDBObjectStore.prototype.count;
+    IDBObjectStore.prototype.getAll = function (...args) { fullStoreReads++; return originalGetAll.apply(this, args); };
+    IDBObjectStore.prototype.count = function (...args) {
+      const request = originalCount.apply(this, args);
+      if (this.name === 'tweets' && trackingLibraryPageReads) {
+        libraryPageCountReads++;
+        const started = performance.now();
+        request.addEventListener('success', () => libraryPageCountTimes.push(performance.now() - started), { once: true });
+      }
+      return request;
+    };
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(name, 1);
+      request.onupgradeneeded = () => {
+        const database = request.result;
+        database.createObjectStore('tweets', { keyPath: 'id' }).createIndex('archivedAt', 'archivedAt');
+        database.createObjectStore('checkpoints', { keyPath: 'key' });
+        database.createObjectStore('libraryPlans', { keyPath: 'id' }).createIndex('updatedAt', 'updatedAt');
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const sizes = [1000, 10000, 50000, 100000];
+    const measurements = [];
+    let seeded = 0;
+    for (const target of sizes) {
+      while (seeded < target) {
+        const batchEnd = Math.min(target, seeded + 250);
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('tweets', 'readwrite'), store = tx.objectStore('tweets');
+          for (let index = seeded; index < batchEnd; index++) {
+            const pathological = index % 251 === 0;
+            const row = {
+              id: String(index + 1).padStart(8, '0'),
+              archivedAt: index % 97 === 0 ? undefined : index + 1,
+              createdAt: new Date(1700000000000 + index * 1000).toISOString(),
+              text: `synthetic media record ${index}${index % 200 === 0 ? ' sparse-needle' : ''}${index === 0 ? ' rare-tail-target' : ''}${pathological ? ` ${'long-note-'.repeat(350)}` : ''}`,
+              author: { handle: `artist${index % 431}`, name: `Artist ${index % 431}` },
+              metrics: { likes: index % 9000, views: index * 17, bookmarks: index % 200, reposts: index % 700, replies: index % 31 },
+              media: index % 7 === 0 ? Array.from({ length: pathological ? 20 : 2 }, (_, mediaIndex) => ({ id: `m${index}-${mediaIndex}`, type: mediaIndex % 2 ? 'video' : 'photo', url: `https://example.invalid/${index}/${mediaIndex}`, width: 1920, height: 1080, variants: pathological ? Array.from({ length: 8 }, (_, variant) => ({ url: `https://example.invalid/v${variant}` })) : [] })) : [],
+              ...(index % 53 !== 0 ? { userMeta: { favorite: index % 11 === 0, tags: Array.from({ length: pathological ? 200 : index % 6 === 0 ? 20 : 2 }, (_, tag) => `tag-${tag}`), note: pathological ? 'Context '.repeat(350) : index % 13 === 0 ? 'a short private note' : '' } } : {}),
+              ...(pathological ? { provenance: Array.from({ length: 40 }, (_, history) => ({ at: index + history, source: `capture-${history}`, revision: history })) } : {})
+            };
+            store.put(row);
+          }
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error);
+          tx.onabort = () => reject(tx.error || new Error('Seed transaction aborted'));
+        });
+        seeded = batchEnd;
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      const heapBefore = performance.memory?.usedJSHeapSize ?? null;
+      const archiveCountStarted = performance.now();
+      const archiveCount = await new Promise((resolve, reject) => {
+        const tx = db.transaction('tweets', 'readonly'), request = tx.objectStore('tweets').count();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const archiveCountMs = performance.now() - archiveCountStarted;
+      if (archiveCount !== target) throw Error(`${target}: diagnostic archive count returned ${archiveCount}`);
+      const countCallsBeforeFirstPage = libraryPageCountReads;
+      trackingLibraryPageReads = true;
+      const started = performance.now();
+      const first = await readLibraryQueryPage(db, { sort: 'new', limit: 50, scanLimit: 250 });
+      const firstPageMs = performance.now() - started;
+      trackingLibraryPageReads = false;
+      if (libraryPageCountReads !== countCallsBeforeFirstPage) throw Error(`${target}: first page issued a full-store count request`);
+      if (first.rows.length !== 50 || first.recordsRead !== 50 || first.materialized !== 50 || first.totalRecords !== null) throw Error(`${target}: first page was not bounded to 50 records (${JSON.stringify(first)})`);
+      const countCallsBeforeSecondPage = libraryPageCountReads;
+      trackingLibraryPageReads = true;
+      const second = await readLibraryQueryPage(db, { sort: 'new', limit: 50, scanLimit: 250, after: first.nextKey, expectedRevision: first.revision });
+      trackingLibraryPageReads = false;
+      if (libraryPageCountReads !== countCallsBeforeSecondPage) throw Error(`${target}: a cursor page issued a full-store count request`);
+      if (second.rows.some(row => first.rows.some(prior => prior.id === row.id))) throw Error(`${target}: cursor pages duplicated a record`);
+      const countCallsBeforeSparse = libraryPageCountReads;
+      trackingLibraryPageReads = true;
+      const sparse = await readLibraryQueryPage(db, { sort: 'new', limit: 2, scanLimit: 250, match: row => String(row.text).includes('sparse-needle') });
+      trackingLibraryPageReads = false;
+      if (libraryPageCountReads !== countCallsBeforeSparse) throw Error(`${target}: a filtered page issued a full-store count request`);
+      if (sparse.recordsRead > 250 || sparse.rows.length > 2) throw Error(`${target}: sparse filter exceeded its bounded work plan`);
+      const rankCache = new LibraryRankPlanCache({ maxPlans: 3, maxRanks: MAX_LIBRARY_RANKS });
+      let rankCursorOperations = 0, rankRecordsRead = 0, rankPageCalls = 0;
+      const rankHeapBefore = performance.memory?.usedJSHeapSize ?? null, rankStarted = performance.now();
+      const identityKey = `likes:${target}:${await readLibraryRevision(db)}`;
+      const planId = `likes-${target}`;
+      const ranked = await buildLibraryRankPlan({ cache: rankCache, planId, identityKey,
+        readPage: async (afterKey, limit) => { rankPageCalls++; const page = await readLibraryPage(db, afterKey, limit); rankRecordsRead += page.rows.length; rankCursorOperations += page.cursorOperations; return page; },
+        project: (post, index) => globalThis.XVaultLibrarySearch.projectRankPost(post, index),
+        matches: () => true,
+        toRank: (projection, post, index) => ({ id: post.id, index, metrics: Object.fromEntries(['likes', 'views', 'bookmarks', 'reposts', 'replies'].map(key => [key, Number(projection.metrics?.[key] || 0)])), archivedAt: projection.archivedAt, mediaCount: projection.mediaCount, handle: projection.handle, randomOrder: projection.randomOrder }),
+        compare: (a, b) => globalThis.XVaultLibrarySearch.compareRows(a, b, 'likes') || String(a.id).localeCompare(String(b.id)),
+        savePlan: (id, identity, plan) => writeStoredLibraryPlan(db, id, identity, plan, 3),
+        isCurrent: async () => true
+      });
+      const rankPlanMs = performance.now() - rankStarted;
+      const rankEnded = performance.now(), rankLongTasks = longTasks.filter(task => task.startTime < rankEnded && task.startTime + task.duration > rankStarted).map(task => Number(task.duration.toFixed(1)));
+      const rankHeapAfter = performance.memory?.usedJSHeapSize ?? null;
+      if (!ranked.plan || ranked.plan.scanned !== target || ranked.plan.ranks.length !== Math.min(target, MAX_LIBRARY_RANKS)) throw Error(`${target}: ranked scan produced an incomplete bounded plan`);
+      const rankPageStarted = performance.now();
+      const rankFirst = pageLibraryRankPlan(ranked.plan, 0, 50);
+      const rankFirstRows = await readLibraryRecords(db, rankFirst.ranks.map(row => row.id));
+      const rankFirstPageMs = performance.now() - rankPageStarted;
+      const rankNextPlan = await buildLibraryRankPlan({ cache: new LibraryRankPlanCache({ maxPlans: 3, maxRanks: MAX_LIBRARY_RANKS }), planId, identityKey,
+        loadPlan: id => readStoredLibraryPlan(db, id), readPage: async () => { throw Error('durable cache hit reread the archive'); }, project: () => ({}), matches: () => true, toRank: () => ({}), compare: () => 0, isCurrent: async () => true });
+      const rankSecond = pageLibraryRankPlan(rankNextPlan.plan, 50, 50);
+      if (rankNextPlan.cached !== true || !rankNextPlan.durableHit || rankSecond.ranks.some(row => rankFirst.ranks.some(firstRow => firstRow.id === row.id))) throw Error(`${target}: durable cached ranked pages duplicated or rescanned results`);
+      const remoteStarted = performance.now();
+      const remoteFirst = await readRemoteCursorPage(db, { query: '', sort: 'new', limit: 50, scanLimit: 2500 });
+      const remoteFirstPageMs = performance.now() - remoteStarted;
+      const remoteSparseStarted = performance.now();
+      const remoteSparse = await readRemoteCursorPage(db, { query: 'rare-tail-target', sort: 'new', limit: 50, scanLimit: 2500, expectedRevision: remoteFirst.revision });
+      const remoteSparseMs = performance.now() - remoteSparseStarted;
+      if (remoteFirst.rows.length !== 50 || remoteFirst.recordsRead !== 50 || remoteFirst.materialized !== 50 || remoteFirst.index !== 'archivedAt') throw Error(`${target}: Remote default page was not cursor-backed and page-bounded`);
+      if (remoteSparse.recordsRead > 2500 || remoteSparse.rows.length > 50 || target > 2500 && (remoteSparse.rows.length !== 0 || !remoteSparse.hasMore)) throw Error(`${target}: Remote sparse query did not stop at its bounded continuation window`);
+      measurements.push({ records: target, indexedReads: first.recordsRead, materialized: first.materialized, returned: first.returned, cursorOperations: first.cursorOperations, cursorIndex: first.index, firstPageMs: Number(firstPageMs.toFixed(2)), diagnosticArchiveCountMs: Number(archiveCountMs.toFixed(2)), archiveCountInPageRequests: libraryPageCountReads - countCallsBeforeFirstPage, firstPageBytes: first.bytesEstimate, sparseReads: sparse.recordsRead, sparseMatches: sparse.returned, rankRecordsRead, rankPlanPages: rankPageCalls, rankCursorOperations, rankPlanAndPersistMs: Number(rankPlanMs.toFixed(2)), rankDurablePageReadMs: Number(rankFirstPageMs.toFixed(2)), rankLongTasks, rankHeapDeltaBytes: rankHeapBefore != null && rankHeapAfter != null ? rankHeapAfter - rankHeapBefore : null, rankCacheHit: rankNextPlan.cached, rankDurableHit: rankNextPlan.durableHit, rankRetained: ranked.plan.ranks.length, rankFirstRowsRead: rankFirstRows.length, rankTupleTextBytes: JSON.stringify(ranked.plan.ranks).length * 2, remoteFirstPageReads: remoteFirst.recordsRead, remoteFirstPageMaterialized: remoteFirst.materialized, remoteFirstPageMs: Number(remoteFirstPageMs.toFixed(2)), remoteSparseReads: remoteSparse.recordsRead, remoteSparseMatches: remoteSparse.rows.length, remoteSparseHasMore: remoteSparse.hasMore, remoteSparseMs: Number(remoteSparseMs.toFixed(2)), heapDeltaBytes: heapBefore != null && performance.memory ? performance.memory.usedJSHeapSize - heapBefore : null });
+    }
+    if (fullStoreReads) throw Error(`A scale query called getAll ${fullStoreReads} times`);
+    db.close();
+    indexedDB.deleteDatabase(name);
+    output.textContent = JSON.stringify({ ok: true, measurements });
+  } catch (error) {
+    output.textContent = `FAIL: ${error.stack || error.message}`;
+  }
+</script>

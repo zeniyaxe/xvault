@@ -1,0 +1,117 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Per-media metadata transaction invariants</title>
+<output id="result">Running</output>
+<script>
+  addEventListener('error', event => { document.querySelector('#result').textContent = `FAIL ${event.message}`; });
+  addEventListener('unhandledrejection', event => { document.querySelector('#result').textContent = `FAIL ${event.reason?.stack || event.reason}`; });
+</script>
+<script type="module">
+  import { updateLibraryMediaMetadata, importLibraryMediaSidecar, previewLibraryMediaSidecar, readLibraryRevision, mergeLibraryCapture, moveLibraryToTrash } from '../library-storage.mjs';
+  import { mergeCapturedRecord } from '../library-capture.mjs';
+  import '../media-metadata.js';
+  const metadata = globalThis.XVaultMediaMetadata;
+  const output = document.querySelector('#result');
+  const name = `xvault-media-meta-${crypto.randomUUID()}`;
+  const request = indexedDB.open(name, 1);
+  request.onupgradeneeded = () => {
+    const db = request.result;
+    db.createObjectStore('tweets', { keyPath: 'id' }).createIndex('archivedAt', 'archivedAt');
+    db.createObjectStore('trash', { keyPath: 'id' });
+    db.createObjectStore('checkpoints', { keyPath: 'key' });
+    db.createObjectStore('revisions', { keyPath: 'key' });
+  };
+  request.onerror = () => { output.textContent = `FAIL ${request.error}`; };
+  request.onsuccess = async () => {
+    const db = request.result;
+    const post = { id: '420000001', url: 'https://x.com/artist/status/420000001', text: 'Frame study', author: { handle: 'artist' }, archivedAt: 10, contentObservedAt: 10, media: [{ id: 'video-id', type: 'video', url: 'https://video.twimg.com/ext_tw_video/1/v1/video.mp4?sig=original', playbackUrl: 'https://video.twimg.com/ext_tw_video/1/v1/video.mp4?sig=original', width: 1280, height: 720, provenance: [{ source: 'bookmarks', capturedAt: 5 }] }], userMeta: { note: 'post note', tags: ['kept'] }, provenance: [{ source: 'bookmarks', capturedAt: 5 }] };
+    const write = rows => new Promise((resolve, reject) => { const tx = db.transaction('tweets', 'readwrite'); for (const row of rows) tx.objectStore('tweets').put(row); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error); });
+    const get = id => new Promise((resolve, reject) => { const tx = db.transaction('tweets'); const req = tx.objectStore('tweets').get(id); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
+    try {
+      await write([post]);
+      const key = metadata.mediaKey(post.id, post.media[0], 0);
+      const note = await updateLibraryMediaMetadata(db, post.id, key, { type: 'fields', values: { note: 'Light through the doorway', tags: ['shot', 'reference'], source: 'Original author', sourceUrl: 'https://example.test/source' }, expected: { note: '', tags: [], source: '', sourceUrl: '' } });
+      if (!note.ok || note.row.media[0].xvault.note !== 'Light through the doorway' || note.revision !== 1) throw Error('First per-media edit did not commit with an archive revision');
+      const malformedPost = { ...post, id: '420000003', media: [{ ...post.media[0], xvault: { mediaKey: '', note: '', tags: [], source: '', sourceUrl: '', annotations: [{ id: 'legacy-bad', atMs: -1, text: '' }] } }] };
+      const malformedKey = metadata.mediaKey(malformedPost.id, malformedPost.media[0], 0);
+      malformedPost.media[0].xvault.mediaKey = malformedKey;
+      const malformedEvidence = structuredClone(malformedPost.media[0].xvault.annotations);
+      await write([malformedPost]);
+      const repairedFields = await updateLibraryMediaMetadata(db, malformedPost.id, malformedKey, { type: 'fields', values: { note: 'Preserve the malformed annotation', tags: ['safe'], source: '', sourceUrl: '' }, expected: { note: '', tags: [], source: '', sourceUrl: '' } });
+      if (!repairedFields.ok || repairedFields.row.media[0].xvault.note !== 'Preserve the malformed annotation' || JSON.stringify(repairedFields.row.media[0].xvault.annotations) !== JSON.stringify(malformedEvidence)) throw Error('Editing independent fields must preserve malformed legacy annotation evidence without rewriting it');
+      const guardedAnnotationEdit = await updateLibraryMediaMetadata(db, malformedPost.id, malformedKey, { type: 'annotation-add', annotation: { id: 'new-on-bad-row', atMs: 10, text: 'Should remain blocked' } });
+      if (guardedAnnotationEdit.ok || !/malformed/i.test(guardedAnnotationEdit.error || '') || JSON.stringify((await get(malformedPost.id)).media[0].xvault.annotations) !== JSON.stringify(malformedEvidence)) throw Error('Timestamp editing must stop explicitly when existing malformed evidence prevents a safe merge');
+      const races = await Promise.all([
+        updateLibraryMediaMetadata(db, post.id, key, { type: 'fields', values: { note: 'Window one', tags: ['shot', 'reference'], source: 'Original author', sourceUrl: 'https://example.test/source' }, expected: { note: 'Light through the doorway', tags: ['shot', 'reference'], source: 'Original author', sourceUrl: 'https://example.test/source' } }),
+        updateLibraryMediaMetadata(db, post.id, key, { type: 'fields', values: { note: 'Window two', tags: ['shot', 'reference'], source: 'Original author', sourceUrl: 'https://example.test/source' }, expected: { note: 'Light through the doorway', tags: ['shot', 'reference'], source: 'Original author', sourceUrl: 'https://example.test/source' } })
+      ]);
+      if (races.filter(value => value.ok).length !== 1 || races.filter(value => value.conflict).length !== 1) throw Error('Concurrent media-note edits must yield exactly one write and one conflict');
+      const current = (await get(post.id)).media[0].xvault.note;
+      const annotationA = await updateLibraryMediaMetadata(db, post.id, key, { type: 'annotation-add', annotation: { id: 'a', atMs: 4250, text: 'Door opens' } });
+      const annotationB = await updateLibraryMediaMetadata(db, post.id, key, { type: 'annotation-add', annotation: { id: 'b', atMs: 4250, text: 'Second note, same instant' } });
+      if (!annotationA.ok || !annotationB.ok || annotationB.row.media[0].xvault.annotations.length !== 2) throw Error('Two notes at one exact media time were not retained');
+      const annotation = annotationB.row.media[0].xvault.annotations.find(item => item.id === 'a');
+      const staleEdit = await updateLibraryMediaMetadata(db, post.id, key, { type: 'annotation-edit', annotation: { ...annotation, text: 'Stale edit' }, expectedUpdatedAt: 1 });
+      if (!staleEdit.conflict || staleEdit.row.media[0].xvault.annotations.find(item => item.id === 'a').text !== 'Door opens') throw Error('A stale annotation edit replaced current evidence');
+      const revisionBeforeRetry = await readLibraryRevision(db);
+      const duplicateAdd = await updateLibraryMediaMetadata(db, post.id, key, { type: 'annotation-add', annotation: { id: 'a', atMs: 4250, text: 'Door opens' } });
+      if (!duplicateAdd.ok || !duplicateAdd.unchanged || await readLibraryRevision(db) !== revisionBeforeRetry) throw Error('Retrying an identical annotation add must be idempotent');
+      const editedAnnotation = await updateLibraryMediaMetadata(db, post.id, key, { type: 'annotation-edit', annotation: { ...annotation, text: 'Door opens slowly' }, expectedUpdatedAt: annotation.updatedAt });
+      if (!editedAnnotation.ok) throw Error('A current annotation edit did not commit');
+      const currentAnnotation = editedAnnotation.row.media[0].xvault.annotations.find(item => item.id === 'a');
+      const deletedAnnotation = await updateLibraryMediaMetadata(db, post.id, key, { type: 'annotation-delete', annotationId: 'a', expectedUpdatedAt: currentAnnotation.updatedAt });
+      if (!deletedAnnotation.ok || !deletedAnnotation.row.media[0].xvault.annotations.find(item => item.id === 'a').deletedAt) throw Error('Annotation removal must be a recoverable tombstone');
+      const staleRestore = await updateLibraryMediaMetadata(db, post.id, key, { type: 'annotation-restore', annotationId: 'a', expectedUpdatedAt: currentAnnotation.updatedAt });
+      if (!staleRestore.conflict) throw Error('A stale undo must not overwrite the annotation tombstone');
+      const tombstone = deletedAnnotation.row.media[0].xvault.annotations.find(item => item.id === 'a');
+      const restoredAnnotation = await updateLibraryMediaMetadata(db, post.id, key, { type: 'annotation-restore', annotationId: 'a', expectedUpdatedAt: tombstone.updatedAt });
+      if (!restoredAnnotation.ok || restoredAnnotation.row.media[0].xvault.annotations.find(item => item.id === 'a').deletedAt) throw Error('An explicit current undo did not restore its annotation');
+      const order = restoredAnnotation.row.media[0].xvault.annotations.filter(item => !item.deletedAt).sort((a, b) => a.position - b.position).map(item => item.id);
+      const reordered = await updateLibraryMediaMetadata(db, post.id, key, { type: 'annotation-move', annotationId: 'a', delta: -1, expectedOrder: order });
+      if (!reordered.ok || reordered.row.media[0].xvault.annotations.find(item => item.id === 'a').position !== 0) throw Error('Annotation reorder should preserve a complete validated order');
+      const staleOrder = await updateLibraryMediaMetadata(db, post.id, key, { type: 'annotation-move', annotationId: 'a', delta: 1, expectedOrder: order });
+      if (!staleOrder.conflict) throw Error('A stale reorder must be rejected');
+      const beforeCapture = await get(post.id);
+      const captured = mergeCapturedRecord(beforeCapture, { ...post, observedAt: 50, contentObservedAt: 50, lastSeenAt: 50, media: [{ ...post.media[0], url: 'https://video.twimg.com/ext_tw_video/1/v1/video.mp4?sig=refreshed', playbackUrl: 'https://video.twimg.com/ext_tw_video/1/v1/video.mp4?sig=refreshed' }] }, 60);
+      await write([captured.row]);
+      const afterCapture = await get(post.id);
+      if (afterCapture.media[0].url.includes('sig=original') || afterCapture.media[0].xvault.note !== current || afterCapture.media[0].xvault.annotations.length !== 2) throw Error('A refreshed capture failed to preserve media metadata or update its source URL');
+      const sidecar = metadata.buildMediaSidecar(afterCapture, [], 100);
+      sidecar.sidecarId = 'import-once';
+      sidecar.media[0].metadata.note = 'Conflicting sidecar note';
+      sidecar.media[0].metadata.annotations[0].text = 'Conflicting annotation evidence';
+      sidecar.media[0].metadata.tags.push('portable');
+      sidecar.media[0].metadata.annotations.push({ id: 'c', atMs: 4250, position: 2, text: 'Third note, same instant', createdAt: 80, updatedAt: 80 });
+      const preview = await previewLibraryMediaSidecar(db, sidecar);
+      if (preview.action !== 'merge' || preview.conflicts.length !== 2) throw Error('Import preview did not identify both divergent fields before writing');
+      const beforeConcurrentEdit = await get(post.id), oldMedia = beforeConcurrentEdit.media[0].xvault;
+      const concurrentEdit = await updateLibraryMediaMetadata(db, post.id, key, { type: 'fields', values: { note: oldMedia.note, tags: oldMedia.tags, source: 'Newer source credit', sourceUrl: oldMedia.sourceUrl }, expected: { note: oldMedia.note, tags: oldMedia.tags, source: oldMedia.source, sourceUrl: oldMedia.sourceUrl } });
+      if (!concurrentEdit.ok) throw Error('Could not prepare a post-preview race');
+      const staleImport = await importLibraryMediaSidecar(db, sidecar, 119, preview.revision, preview.planId);
+      if (!staleImport.stale || (await get(post.id)).media[0].xvault.note !== current || (await get(post.id)).userMeta.mediaSidecarImports) throw Error('An archive mutation after preview must block the stale import without partial writes');
+      const refreshedPreview = await previewLibraryMediaSidecar(db, sidecar);
+      if (refreshedPreview.conflicts.length !== 3) throw Error('A refreshed preview should show the newly divergent source credit');
+      const revisionBefore = await readLibraryRevision(db);
+      const imported = await importLibraryMediaSidecar(db, sidecar, 120, refreshedPreview.revision, refreshedPreview.planId);
+      if (!imported.ok || imported.conflicts.length !== 3 || imported.row.media[0].xvault.note !== current || imported.row.media[0].xvault.source !== 'Newer source credit') throw Error('Import overwrote a conflicting media note or source');
+      const saved = await get(post.id);
+      if (!saved.media[0].xvault.tags.includes('portable') || saved.media[0].xvault.annotations.length !== 3 || saved.media[0].xvault.importConflicts.length !== 3) throw Error('Safe sidecar fields or both conflict variants were not retained');
+      if (await readLibraryRevision(db) !== revisionBefore + 1) throw Error('A single sidecar import must advance the Library revision exactly once');
+      const repeatedPreview = await previewLibraryMediaSidecar(db, sidecar);
+      const repeated = await importLibraryMediaSidecar(db, sidecar, 121, repeatedPreview.revision, repeatedPreview.planId);
+      if (repeated.action !== 'already-imported' || await readLibraryRevision(db) !== revisionBefore + 1) throw Error('Repeated sidecar import must be idempotent');
+
+      const recovery = metadata.buildMediaSidecar({ ...post, id: '420000002', media: [{ ...post.media[0], id: 'recovery-video' }], userMeta: { tags: ['recovered'] } }, [], 200);
+      recovery.sidecarId = 'recovery-1';
+      const recoveryPreview = await previewLibraryMediaSidecar(db, recovery);
+      const reconstructed = await importLibraryMediaSidecar(db, recovery, 201, recoveryPreview.revision, recoveryPreview.planId);
+      if (reconstructed.action !== 'reconstructed' || reconstructed.row.recoveryStatus !== 'reconstructed-from-metadata-sidecar') throw Error('A missing post was not reconstructed as a clearly labeled metadata-only archive record');
+      await moveLibraryToTrash(db, ['420000002']);
+      const trashedSidecar = { ...recovery, sidecarId: 'recovery-2' }, trashPreview = await previewLibraryMediaSidecar(db, trashedSidecar);
+      const trashed = await importLibraryMediaSidecar(db, trashedSidecar, 202, trashPreview.revision, trashPreview.planId);
+      if (trashed.action !== 'trashed' || await get('420000002')) throw Error('Sidecar import silently resurrected a post already in Trash');
+      output.textContent = 'PASS atomic per-media edits, stale conflicts, duplicate timestamps, capture refresh, sidecar preview/import, recovery, and Trash guard';
+    } catch (error) { output.textContent = `FAIL ${error.stack || error}`; }
+    finally { db.close(); indexedDB.deleteDatabase(name); }
+  };
+</script>

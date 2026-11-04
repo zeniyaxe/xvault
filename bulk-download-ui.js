@@ -1,9 +1,19 @@
 /* Library bulk-download planner UI. It delegates scanning and queue creation to the worker. */
 (() => {
   const style = document.createElement('style');
-  style.textContent = '.xv-bulk-modal{position:fixed;z-index:1200;inset:0;background:rgba(0,0,0,.62);backdrop-filter:none;display:grid;place-items:center;padding:18px}.xv-bulk-dialog{box-sizing:border-box;min-width:0;width:min(920px,100%);max-height:min(900px,94vh);overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--card2);box-shadow:0 40px 140px #000b;padding:22px}.xv-bulk-dialog header,.xv-bulk-plan-head,.xv-bulk-dialog footer{display:flex;align-items:flex-start;gap:14px}.xv-bulk-dialog header>div{flex:1}.xv-bulk-dialog header>button{font-size:22px;padding:5px 11px}.xv-bulk-dialog h2{margin:5px 0;font-size:26px}.xv-bulk-dialog p{color:var(--muted);font-size:11px}.xv-bulk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}.xv-bulk-grid label{display:grid;gap:5px}.xv-bulk-grid label span{font-size:9px;color:var(--muted);font-weight:750;text-transform:uppercase;letter-spacing:.08em}.xv-bulk-grid input,.xv-bulk-grid select{min-width:0}.xv-bulk-wide{grid-column:1/-1}.bulk-check{display:flex!important;align-items:center;grid-template-columns:auto 1fr!important;padding:10px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.03)}.bulk-check span{color:var(--text)!important;text-transform:none!important;letter-spacing:0!important}.xv-bulk-plan{border:1px solid var(--line);border-radius:18px;padding:15px;background:rgba(255,255,255,.025)}.xv-bulk-plan-head{align-items:center}.xv-bulk-plan-head>div{display:grid;gap:3px;flex:1}.xv-bulk-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:13px}.xv-bulk-summary div{border:1px solid var(--line);border-radius:12px;padding:10px;background:rgba(0,0,0,.12)}.xv-bulk-summary b,.xv-bulk-summary small{display:block}.xv-bulk-summary b{font-size:18px}.xv-bulk-summary small{color:var(--muted);font-size:9px;margin-top:3px}.bulkPlanError{grid-column:1/-1;color:var(--danger)}.xv-bulk-dialog footer{align-items:center;margin-top:18px}.xv-bulk-dialog footer span{flex:1}.xv-bulk-dialog footer button{white-space:nowrap}@media(max-width:760px){.xv-bulk-grid{grid-template-columns:1fr 1fr}.xv-bulk-summary{grid-template-columns:1fr 1fr}.xv-bulk-dialog{padding:15px}.xv-bulk-dialog footer{flex-wrap:wrap}.xv-bulk-dialog footer span{display:none}}@media(max-width:480px){.xv-bulk-grid{grid-template-columns:1fr}.xv-bulk-wide{grid-column:auto}}body.reduce .xv-bulk-modal *{transition:none!important;animation:none!important}';
-  style.textContent+='.xv-bulk-modal{margin:0;width:100%;height:100%;max-width:none;max-height:none;border:0;color:var(--text)}.xv-bulk-modal:not([open]){display:none}.xv-bulk-modal::backdrop{background:#0008}.xv-bulk-summary{gap:0;border-block:1px solid var(--line)}.xv-bulk-summary div{border:0;border-radius:0;background:none}.xv-bulk-plan{border-radius:6px;background:none}';document.head.append(style);
-  const extraStyle = document.createElement('style'); extraStyle.textContent = '.xv-queue-tools{display:flex;gap:8px;align-items:center;margin:10px 0}.xv-queue-tools input{flex:1}.xv-media-menu{position:fixed;z-index:1300;display:grid;gap:5px;min-width:210px;padding:10px;border:1px solid var(--line);border-radius:14px;background:var(--card2);box-shadow:0 20px 70px #0009}.xv-media-menu b{font-size:10px;color:var(--muted);padding:2px 5px}.xv-media-menu button{text-align:left}.libraryLoadTop{margin:12px 0}.libraryMoveUp{display:block;margin:14px auto 0;position:sticky;bottom:10px;z-index:4}@media(max-width:600px){.xv-queue-tools{flex-wrap:wrap}.xv-queue-tools input{flex-basis:100%}}'; document.head.append(extraStyle); const fileStyle = document.createElement('style'); fileStyle.textContent = '.xv-bulk-files{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}.xv-bulk-files summary{cursor:pointer;color:var(--muted);font-size:11px}.xv-bulk-files ul{max-height:180px;overflow:auto;margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:10px}.xv-bulk-files li{padding:3px 0;overflow-wrap:anywhere}'; document.head.append(fileStyle);
+  style.textContent =
+    '.xv-bulk-modal{position:fixed;z-index:1200;inset:0;background:rgba(0,0,0,.62);backdrop-filter:none;display:grid;place-items:center;padding:18px}.xv-bulk-dialog{box-sizing:border-box;min-width:0;width:min(920px,100%);max-height:min(900px,94vh);overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--card2);box-shadow:0 40px 140px #000b;padding:22px}.xv-bulk-dialog header,.xv-bulk-plan-head,.xv-bulk-dialog footer{display:flex;align-items:flex-start;gap:14px}.xv-bulk-dialog header>div{flex:1}.xv-bulk-dialog header>button{font-size:22px;padding:5px 11px}.xv-bulk-dialog h2{margin:5px 0;font-size:26px}.xv-bulk-dialog p{color:var(--muted);font-size:11px}.xv-bulk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}.xv-bulk-grid label{display:grid;gap:5px}.xv-bulk-grid label span{font-size:9px;color:var(--muted);font-weight:750;text-transform:uppercase;letter-spacing:.08em}.xv-bulk-grid input,.xv-bulk-grid select{min-width:0}.xv-bulk-wide{grid-column:1/-1}.bulk-check{display:flex!important;align-items:center;grid-template-columns:auto 1fr!important;padding:10px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.03)}.bulk-check span{color:var(--text)!important;text-transform:none!important;letter-spacing:0!important}.xv-bulk-plan{border:1px solid var(--line);border-radius:18px;padding:15px;background:rgba(255,255,255,.025)}.xv-bulk-plan-head{align-items:center}.xv-bulk-plan-head>div{display:grid;gap:3px;flex:1}.xv-bulk-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:13px}.xv-bulk-summary div{border:1px solid var(--line);border-radius:12px;padding:10px;background:rgba(0,0,0,.12)}.xv-bulk-summary b,.xv-bulk-summary small{display:block}.xv-bulk-summary b{font-size:18px}.xv-bulk-summary small{color:var(--muted);font-size:9px;margin-top:3px}.bulkPlanError{grid-column:1/-1;color:var(--danger)}.xv-bulk-dialog footer{align-items:center;margin-top:18px}.xv-bulk-dialog footer span{flex:1}.xv-bulk-dialog footer button{white-space:nowrap}@media(max-width:760px){.xv-bulk-grid{grid-template-columns:1fr 1fr}.xv-bulk-summary{grid-template-columns:1fr 1fr}.xv-bulk-dialog{padding:15px}.xv-bulk-dialog footer{flex-wrap:wrap}.xv-bulk-dialog footer span{display:none}}@media(max-width:480px){.xv-bulk-grid{grid-template-columns:1fr}.xv-bulk-wide{grid-column:auto}}body.reduce .xv-bulk-modal *{transition:none!important;animation:none!important}';
+  style.textContent +=
+    '.xv-bulk-modal{margin:0;width:100%;height:100%;max-width:none;max-height:none;border:0;color:var(--text)}.xv-bulk-modal:not([open]){display:none}.xv-bulk-modal::backdrop{background:#0008}.xv-bulk-summary{gap:0;border-block:1px solid var(--line)}.xv-bulk-summary div{border:0;border-radius:0;background:none}.xv-bulk-plan{border-radius:6px;background:none}';
+  document.head.append(style);
+  const extraStyle = document.createElement('style');
+  extraStyle.textContent =
+    '.xv-queue-tools{display:flex;gap:8px;align-items:center;margin:10px 0}.xv-queue-tools input{flex:1}.xv-media-menu{position:fixed;z-index:1300;display:grid;gap:5px;min-width:210px;padding:10px;border:1px solid var(--line);border-radius:14px;background:var(--card2);box-shadow:0 20px 70px #0009}.xv-media-menu b{font-size:10px;color:var(--muted);padding:2px 5px}.xv-media-menu button{text-align:left}.libraryLoadTop{margin:12px 0}.libraryMoveUp{display:block;margin:14px auto 0;position:sticky;bottom:10px;z-index:4}@media(max-width:600px){.xv-queue-tools{flex-wrap:wrap}.xv-queue-tools input{flex-basis:100%}}';
+  document.head.append(extraStyle);
+  const fileStyle = document.createElement('style');
+  fileStyle.textContent =
+    '.xv-bulk-files{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}.xv-bulk-files summary{cursor:pointer;color:var(--muted);font-size:11px}.xv-bulk-files ul{max-height:180px;overflow:auto;margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:10px}.xv-bulk-files li{padding:3px 0;overflow-wrap:anywhere}';
+  document.head.append(fileStyle);
   const builtIns = {
     everything: { label: 'Everything', mediaFilter: 'all', animationMode: 'all' },
     native: { label: 'Native media', mediaFilter: 'all', animationMode: 'gif-webp' },
@@ -14,125 +24,502 @@
     videos: { label: 'Videos only', mediaFilter: 'videos', animationMode: 'mp4' },
     missing: { label: 'Missing media', mediaFilter: 'all', animationMode: 'all', onlyMissing: true },
   };
-  const outputMode = mode => (window.XVaultBulkModel?.outputMode?.(mode) || ({ mp4: { keepMp4: true, gif: false, webp: false }, gif: { keepMp4: false, gif: true, webp: false }, webp: { keepMp4: false, gif: false, webp: true }, 'gif-webp': { keepMp4: false, gif: true, webp: true }, 'mp4-gif': { keepMp4: true, gif: true, webp: false }, 'mp4-webp': { keepMp4: true, gif: false, webp: true }, all: { keepMp4: true, gif: true, webp: true } }[mode] || { keepMp4: true, gif: true, webp: true }));
-  const fmtBytes = value => { const n = Number(value || 0); if (!n) return 'Unknown'; const units = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = n; while (x >= 1024 && i < units.length - 1) { x /= 1024; i++; } return `${x.toFixed(x >= 10 || i === 0 ? 0 : 1)} ${units[i]}`; };
-  const escText = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-  let modal, modalReturn, lastPlan = null, plannedOptions = null, planning = false, starting = false, planGeneration = 0, planRequestId = null;
+  const outputMode = mode =>
+    window.XVaultBulkModel?.outputMode?.(mode) ||
+    {
+      mp4: { keepMp4: true, gif: false, webp: false },
+      gif: { keepMp4: false, gif: true, webp: false },
+      webp: { keepMp4: false, gif: false, webp: true },
+      'gif-webp': { keepMp4: false, gif: true, webp: true },
+      'mp4-gif': { keepMp4: true, gif: true, webp: false },
+      'mp4-webp': { keepMp4: true, gif: false, webp: true },
+      all: { keepMp4: true, gif: true, webp: true },
+    }[mode] || { keepMp4: true, gif: true, webp: true };
+  const fmtBytes = value => {
+    const n = Number(value || 0);
+    if (!n) return 'Unknown';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0,
+      x = n;
+    while (x >= 1024 && i < units.length - 1) {
+      x /= 1024;
+      i++;
+    }
+    return `${x.toFixed(x >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+  };
+  const escText = value =>
+    String(value ?? '').replace(
+      /[&<>"']/g,
+      char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]
+    );
+  let modal,
+    modalReturn,
+    lastPlan = null,
+    plannedOptions = null,
+    planning = false,
+    starting = false,
+    planGeneration = 0,
+    planRequestId = null;
   const savedPresets = () => [...(settings.bulkDownloadPresets || [])];
   function optionsFromForm() {
-    const scope = modal.querySelector('[name="bulk-scope"]').value, query = modal.querySelector('[name="bulk-query"]').value.trim();
+    const scope = modal.querySelector('[name="bulk-scope"]').value,
+      query = modal.querySelector('[name="bulk-query"]').value.trim();
     const preset = modal.querySelector('[name="bulk-preset"]').value;
-    return { scope, query, mediaFilter: modal.querySelector('[name="bulk-media"]').value, animationMode: modal.querySelector('[name="bulk-animation"]').value, existingPolicy: modal.querySelector('[name="bulk-existing"]').value, onlyMissing: modal.querySelector('[name="bulk-missing"]').checked, onlyFailed: modal.querySelector('[name="bulk-failed"]').checked, selectedIds: window.XVaultLibrarySelection?.() || [], author: modal.querySelector('[name="bulk-author"]').value.trim(), tag: modal.querySelector('[name="bulk-tag"]').value.trim(), dateFrom: modal.querySelector('[name="bulk-from"]').value ? Date.parse(modal.querySelector('[name="bulk-from"]').value) : 0, dateTo: modal.querySelector('[name="bulk-to"]').value ? Date.parse(`${modal.querySelector('[name="bulk-to"]').value}T23:59:59`) : 0, preset };
+    return {
+      scope,
+      query,
+      mediaFilter: modal.querySelector('[name="bulk-media"]').value,
+      animationMode: modal.querySelector('[name="bulk-animation"]').value,
+      existingPolicy: modal.querySelector('[name="bulk-existing"]').value,
+      onlyMissing: modal.querySelector('[name="bulk-missing"]').checked,
+      onlyFailed: modal.querySelector('[name="bulk-failed"]').checked,
+      selectedIds: window.XVaultLibrarySelection?.() || [],
+      author: modal.querySelector('[name="bulk-author"]').value.trim(),
+      tag: modal.querySelector('[name="bulk-tag"]').value.trim(),
+      dateFrom: modal.querySelector('[name="bulk-from"]').value
+        ? Date.parse(modal.querySelector('[name="bulk-from"]').value)
+        : 0,
+      dateTo: modal.querySelector('[name="bulk-to"]').value
+        ? Date.parse(`${modal.querySelector('[name="bulk-to"]').value}T23:59:59`)
+        : 0,
+      preset,
+    };
   }
   function setPreset(key) {
-    const value = builtIns[key] || savedPresets().find(p => p.id === key); if (!value) return;
-    modal.querySelector('[name="bulk-media"]').value = value.mediaFilter || 'all'; modal.querySelector('[name="bulk-animation"]').value = value.animationMode || 'all'; modal.querySelector('[name="bulk-missing"]').checked = !!value.onlyMissing; modal.querySelector('[name="bulk-failed"]').checked = !!value.onlyFailed; plan();
+    const value = builtIns[key] || savedPresets().find(p => p.id === key);
+    if (!value) return;
+    modal.querySelector('[name="bulk-media"]').value = value.mediaFilter || 'all';
+    modal.querySelector('[name="bulk-animation"]').value = value.animationMode || 'all';
+    modal.querySelector('[name="bulk-missing"]').checked = !!value.onlyMissing;
+    modal.querySelector('[name="bulk-failed"]').checked = !!value.onlyFailed;
+    plan();
   }
   const hasPlannedFiles = result => Array.isArray(result?.items) && result.items.length > 0;
   function renderPlan(planResult) {
-    lastPlan = planResult; const t = planResult?.totals || {}, summary = modal.querySelector('#bulkPlanSummary');
+    lastPlan = planResult;
+    const t = planResult?.totals || {},
+      summary = modal.querySelector('#bulkPlanSummary');
     summary.innerHTML = `<div><b>${(t.postsMatched || 0).toLocaleString()}</b><small>posts matched</small></div><div><b>${(t.media || 0).toLocaleString()}</b><small>media selected</small></div><div><b>${(t.needDownload || 0).toLocaleString()}</b><small>need download</small></div><div><b>${fmtBytes(t.estimatedBytes)}</b><small>estimated size</small></div><div><b>${(t.alreadyLocal || 0).toLocaleString()}</b><small>already local</small></div><div><b>${(t.failed || 0).toLocaleString()}</b><small>failed / repair</small></div><div><b>${(t.gifConversions || 0).toLocaleString()}</b><small>GIF conversions</small></div><div><b>${(t.webpConversions || 0).toLocaleString()}</b><small>WebP conversions</small></div>`;
-    const detail = modal.querySelector('#bulkPlanDetail'); detail.textContent = planResult?.sampleLimited ? 'Showing a bounded sample; the worker will re-scan and batch the full scope when started.' : `${(t.images || 0).toLocaleString()} images · ${(t.videos || 0).toLocaleString()} videos · ${(t.animations || 0).toLocaleString()} animations`;
-    const list = modal.querySelector('#bulkPlanFilesList'); if (list) list.innerHTML = (planResult?.items || []).slice(0, 60).map(item => `<li><b>${escText(item.media?.type || item.media?.mediaType || 'media')}</b> · ${escText(item.post?.author?.handle || 'unknown')} · ${escText(item.post?.id || '')} · ${escText(item.media?.url || item.media?.playbackUrl || '')}</li>`).join('') || '<li>No individual files in this scope.</li>';
+    const detail = modal.querySelector('#bulkPlanDetail');
+    detail.textContent = planResult?.sampleLimited
+      ? 'Showing a bounded sample; the worker will re-scan and batch the full scope when started.'
+      : `${(t.images || 0).toLocaleString()} images · ${(t.videos || 0).toLocaleString()} videos · ${(t.animations || 0).toLocaleString()} animations`;
+    const list = modal.querySelector('#bulkPlanFilesList');
+    if (list)
+      list.innerHTML =
+        (planResult?.items || [])
+          .slice(0, 60)
+          .map(
+            item =>
+              `<li><b>${escText(item.media?.type || item.media?.mediaType || 'media')}</b> · ${escText(item.post?.author?.handle || 'unknown')} · ${escText(item.post?.id || '')} · ${escText(item.media?.url || item.media?.playbackUrl || '')}</li>`
+          )
+          .join('') || '<li>No individual files in this scope.</li>';
     modal.querySelector('#bulkStart').disabled = starting || !hasPlannedFiles(planResult);
   }
   async function plan() {
     if (!modal) return;
-    if(planRequestId)void call({type:'CANCEL_LIBRARY_PLAN',requestId:planRequestId}).catch(()=>{});
-    const requestId=planRequestId=crypto.randomUUID();
-    const target=modal,generation=++planGeneration,options=optionsFromForm();
-    planning=true;lastPlan=null;plannedOptions=null;
-    target.querySelector('#bulkPlanStatus').textContent='Scanning IndexedDB…';target.querySelector('#bulkStart').disabled=true;
+    if (planRequestId) void call({ type: 'CANCEL_LIBRARY_PLAN', requestId: planRequestId }).catch(() => {});
+    const requestId = (planRequestId = crypto.randomUUID());
+    const target = modal,
+      generation = ++planGeneration,
+      options = optionsFromForm();
+    planning = true;
+    lastPlan = null;
+    plannedOptions = null;
+    target.querySelector('#bulkPlanStatus').textContent = 'Scanning IndexedDB…';
+    target.querySelector('#bulkStart').disabled = true;
     try {
-      const result=await call({type:'PLAN_LIBRARY_DOWNLOAD',options,requestId});
-      if(modal!==target||generation!==planGeneration)return;
-      if(!result?.ok)throw Error(result?.error||'Planning failed');
-      renderPlan(result);plannedOptions=options;target.querySelector('#bulkPlanStatus').textContent=hasPlannedFiles(result)?'Plan ready':'Nothing to queue';
-    }catch(error){
-      if(modal!==target||generation!==planGeneration)return;
-      target.querySelector('#bulkPlanStatus').textContent=error.message||'Could not create plan';target.querySelector('#bulkPlanSummary').innerHTML='<div class="bulkPlanError">Planning failed. Nothing was queued.</div>';
-    }finally{if(generation===planGeneration)planning=false;}
+      const result = await call({ type: 'PLAN_LIBRARY_DOWNLOAD', options, requestId });
+      if (modal !== target || generation !== planGeneration) return;
+      if (!result?.ok) throw Error(result?.error || 'Planning failed');
+      renderPlan(result);
+      plannedOptions = options;
+      target.querySelector('#bulkPlanStatus').textContent = hasPlannedFiles(result) ? 'Plan ready' : 'Nothing to queue';
+    } catch (error) {
+      if (modal !== target || generation !== planGeneration) return;
+      target.querySelector('#bulkPlanStatus').textContent = error.message || 'Could not create plan';
+      target.querySelector('#bulkPlanSummary').innerHTML =
+        '<div class="bulkPlanError">Planning failed. Nothing was queued.</div>';
+    } finally {
+      if (generation === planGeneration) planning = false;
+    }
   }
   async function start() {
-    if(starting||planning||!hasPlannedFiles(lastPlan)||!plannedOptions)return;
-    if(JSON.stringify(optionsFromForm())!==JSON.stringify(plannedOptions)){await plan();return toast('The scope changed. Review the refreshed plan before starting.');}
-    const target=modal,options=plannedOptions;starting=true;target.querySelector('#bulkStart').disabled=true;
-    try{const result=await call({type:'START_LIBRARY_BULK_DOWNLOAD',options});if(!result?.ok)throw Error(result?.error||'Could not start bulk download');if(modal===target)close();toast(result.blocked?`${result.error}${result.added?` ${result.added} other files were queued.`:''}`:`Queued ${result.added||0} media · ${result.skipped||0} skipped`);if(typeof queueStats==='function')queueStats();}
-    catch(error){toast(error.message);if(modal===target)target.querySelector('#bulkStart').disabled=false;}
-    finally{starting=false;if(modal)modal.querySelector('#bulkStart').disabled=planning||!hasPlannedFiles(lastPlan);}
+    if (starting || planning || !hasPlannedFiles(lastPlan) || !plannedOptions) return;
+    if (JSON.stringify(optionsFromForm()) !== JSON.stringify(plannedOptions)) {
+      await plan();
+      return toast('The scope changed. Review the refreshed plan before starting.');
+    }
+    const target = modal,
+      options = plannedOptions;
+    starting = true;
+    target.querySelector('#bulkStart').disabled = true;
+    try {
+      const result = await call({ type: 'START_LIBRARY_BULK_DOWNLOAD', options });
+      if (!result?.ok) throw Error(result?.error || 'Could not start bulk download');
+      if (modal === target) close();
+      toast(
+        result.blocked
+          ? `${result.error}${result.added ? ` ${result.added} other files were queued.` : ''}`
+          : `Queued ${result.added || 0} media · ${result.skipped || 0} skipped`
+      );
+      if (typeof queueStats === 'function') queueStats();
+    } catch (error) {
+      toast(error.message);
+      if (modal === target) target.querySelector('#bulkStart').disabled = false;
+    } finally {
+      starting = false;
+      if (modal) modal.querySelector('#bulkStart').disabled = planning || !hasPlannedFiles(lastPlan);
+    }
   }
   async function savePreset() {
-    const name = prompt('Preset name'); if (!name?.trim()) return; const options = optionsFromForm(), presets = savedPresets().filter(p => p.name !== name.trim()); presets.push({ id: `custom-${Date.now()}`, name: name.trim().slice(0, 48), ...options }); await save({ bulkDownloadPresets: presets.slice(-40) }); renderPresetOptions(); toast('Download preset saved');
+    const name = prompt('Preset name');
+    if (!name?.trim()) return;
+    const options = optionsFromForm(),
+      presets = savedPresets().filter(p => p.name !== name.trim());
+    presets.push({ id: `custom-${Date.now()}`, name: name.trim().slice(0, 48), ...options });
+    await save({ bulkDownloadPresets: presets.slice(-40) });
+    renderPresetOptions();
+    toast('Download preset saved');
   }
-  async function deletePreset() { const select = modal.querySelector('[name="bulk-preset"]'), value = select.value; if (!value.startsWith('custom-')) return toast('Built-in presets can be reset, not deleted'); const presets = savedPresets().filter(p => p.id !== value); await save({ bulkDownloadPresets: presets }); renderPresetOptions(); toast('Preset deleted'); }
-  function renderPresetOptions() { const select = modal.querySelector('[name="bulk-preset"]'); select.innerHTML = '<option value="">Preset…</option><optgroup label="Built in">' + Object.entries(builtIns).map(([id, value]) => `<option value="${id}">${escText(value.label)}</option>`).join('') + '</optgroup>' + (savedPresets().length ? `<optgroup label="Saved">${savedPresets().map(p => `<option value="${escText(p.id)}">${escText(p.name)}</option>`).join('')}</optgroup>` : ''); }
+  async function deletePreset() {
+    const select = modal.querySelector('[name="bulk-preset"]'),
+      value = select.value;
+    if (!value.startsWith('custom-')) return toast('Built-in presets can be reset, not deleted');
+    const presets = savedPresets().filter(p => p.id !== value);
+    await save({ bulkDownloadPresets: presets });
+    renderPresetOptions();
+    toast('Preset deleted');
+  }
+  function renderPresetOptions() {
+    const select = modal.querySelector('[name="bulk-preset"]');
+    select.innerHTML =
+      '<option value="">Preset…</option><optgroup label="Built in">' +
+      Object.entries(builtIns)
+        .map(([id, value]) => `<option value="${id}">${escText(value.label)}</option>`)
+        .join('') +
+      '</optgroup>' +
+      (savedPresets().length
+        ? `<optgroup label="Saved">${savedPresets()
+            .map(p => `<option value="${escText(p.id)}">${escText(p.name)}</option>`)
+            .join('')}</optgroup>`
+        : '');
+  }
   function mountDownloadSettings() {
     const grid = document.querySelector('#set-downloads .groups');
     if (!grid || document.querySelector('#xv-bulk-settings')) return;
-    const panel = document.createElement('section'); panel.className = 'settinggroup advancedOnly'; panel.id = 'xv-bulk-settings';
-    panel.innerHTML = '<h3>Bulk downloads and conversion</h3><p>Safe defaults keep original playback files and limit helper work. These controls also apply to Library Download all… plans.</p><div class="formgrid two"><label class="field"><span>Default bulk preset</span><select data-bulk-setting="bulkDefaultPreset"><option value="everything">Everything</option><option value="native">Native media</option><option value="originals">Originals only</option><option value="animations">Animations only</option><option value="sources">Animation sources</option><option value="images">Images only</option><option value="videos">Videos only</option><option value="missing">Missing media</option></select></label><label class="field"><span>Plan queue batch size</span><input type="number" min="10" max="200" step="10" data-bulk-setting="bulkPlanBatchSize"></label><label class="field"><span>Conversion concurrency</span><input type="number" min="1" max="4" data-bulk-setting="conversionConcurrency"></label><label class="field"><span>Conversion timeout (seconds)</span><input type="number" min="60" max="3600" data-bulk-setting="conversionTimeout"></label><label class="field"><span>GIF FPS</span><input type="number" min="5" max="60" data-bulk-setting="conversionGifFps"></label><label class="field"><span>GIF max width (0 = source)</span><input type="number" min="0" max="4096" step="64" data-bulk-setting="conversionGifMaxWidth"></label><label class="field"><span>WebP FPS</span><input type="number" min="5" max="60" data-bulk-setting="conversionWebPFps"></label><label class="field"><span>WebP quality</span><input type="number" min="1" max="100" data-bulk-setting="conversionWebPQuality"></label></div><div class="toggles"><label><span><b>Convert while downloading</b><small>Start helper work as verified MP4 sources arrive.</small></span><input type="checkbox" data-bulk-setting="conversionWhileDownloading"></label><label><span><b>Keep original playback MP4</b><small>Recommended for archival recovery.</small></span><input type="checkbox" data-bulk-setting="keepConversionSource"></label><label><span><b>WebP lossless</b></span><input type="checkbox" data-bulk-setting="conversionWebPLossless"></label></div><button type="button" id="xvBulkResetSettings">Reset bulk defaults</button>';
+    const panel = document.createElement('section');
+    panel.className = 'settinggroup advancedOnly';
+    panel.id = 'xv-bulk-settings';
+    panel.innerHTML =
+      '<h3>Bulk downloads and conversion</h3><p>Safe defaults keep original playback files and limit helper work. These controls also apply to Library Download all… plans.</p><div class="formgrid two"><label class="field"><span>Default bulk preset</span><select data-bulk-setting="bulkDefaultPreset"><option value="everything">Everything</option><option value="native">Native media</option><option value="originals">Originals only</option><option value="animations">Animations only</option><option value="sources">Animation sources</option><option value="images">Images only</option><option value="videos">Videos only</option><option value="missing">Missing media</option></select></label><label class="field"><span>Plan queue batch size</span><input type="number" min="10" max="200" step="10" data-bulk-setting="bulkPlanBatchSize"></label><label class="field"><span>Conversion concurrency</span><input type="number" min="1" max="4" data-bulk-setting="conversionConcurrency"></label><label class="field"><span>Conversion timeout (seconds)</span><input type="number" min="60" max="3600" data-bulk-setting="conversionTimeout"></label><label class="field"><span>GIF FPS</span><input type="number" min="5" max="60" data-bulk-setting="conversionGifFps"></label><label class="field"><span>GIF max width (0 = source)</span><input type="number" min="0" max="4096" step="64" data-bulk-setting="conversionGifMaxWidth"></label><label class="field"><span>WebP FPS</span><input type="number" min="5" max="60" data-bulk-setting="conversionWebPFps"></label><label class="field"><span>WebP quality</span><input type="number" min="1" max="100" data-bulk-setting="conversionWebPQuality"></label></div><div class="toggles"><label><span><b>Convert while downloading</b><small>Start helper work as verified MP4 sources arrive.</small></span><input type="checkbox" data-bulk-setting="conversionWhileDownloading"></label><label><span><b>Keep original playback MP4</b><small>Recommended for archival recovery.</small></span><input type="checkbox" data-bulk-setting="keepConversionSource"></label><label><span><b>WebP lossless</b></span><input type="checkbox" data-bulk-setting="conversionWebPLossless"></label></div><button type="button" id="xvBulkResetSettings">Reset bulk defaults</button>';
     grid.append(panel);
-    const defaults = { bulkDefaultPreset: 'everything', bulkPlanBatchSize: 80, conversionConcurrency: 1, conversionTimeout: 900, conversionGifFps: 20, conversionGifMaxWidth: 1280, conversionWebPFps: 20, conversionWebPQuality: 90, conversionWhileDownloading: true, keepConversionSource: true, conversionWebPLossless: false };
-    const applyValues = values => panel.querySelectorAll('[data-bulk-setting]').forEach(el => { const value = values[el.dataset.bulkSetting]; if (value == null) return; if (el.type === 'checkbox') el.checked = !!value; else el.value = String(value); });
+    const defaults = {
+      bulkDefaultPreset: 'everything',
+      bulkPlanBatchSize: 80,
+      conversionConcurrency: 1,
+      conversionTimeout: 900,
+      conversionGifFps: 20,
+      conversionGifMaxWidth: 1280,
+      conversionWebPFps: 20,
+      conversionWebPQuality: 90,
+      conversionWhileDownloading: true,
+      keepConversionSource: true,
+      conversionWebPLossless: false,
+    };
+    const applyValues = values =>
+      panel.querySelectorAll('[data-bulk-setting]').forEach(el => {
+        const value = values[el.dataset.bulkSetting];
+        if (value == null) return;
+        if (el.type === 'checkbox') el.checked = !!value;
+        else el.value = String(value);
+      });
     applyValues({ ...defaults, ...(typeof settings === 'object' ? settings : {}) });
-    panel.querySelectorAll('[data-bulk-setting]').forEach(el => el.addEventListener('change', async () => { const key = el.dataset.bulkSetting, value = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value; const result = await call({ type: 'SET_SETTINGS', settings: { [key]: value } }); if (result?.settings && typeof settings === 'object') Object.assign(settings, result.settings); toast('Download setting saved'); }));
-    panel.querySelector('#xvBulkResetSettings').onclick = async () => { const result = await call({ type: 'SET_SETTINGS', settings: defaults }); if (result?.settings && typeof settings === 'object') Object.assign(settings, result.settings); applyValues({ ...defaults, ...(result?.settings || {}) }); toast('Bulk defaults restored'); };
+    panel.querySelectorAll('[data-bulk-setting]').forEach(el =>
+      el.addEventListener('change', async () => {
+        const key = el.dataset.bulkSetting,
+          value = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
+        const result = await call({ type: 'SET_SETTINGS', settings: { [key]: value } });
+        if (result?.settings && typeof settings === 'object') Object.assign(settings, result.settings);
+        toast('Download setting saved');
+      })
+    );
+    panel.querySelector('#xvBulkResetSettings').onclick = async () => {
+      const result = await call({ type: 'SET_SETTINGS', settings: defaults });
+      if (result?.settings && typeof settings === 'object') Object.assign(settings, result.settings);
+      applyValues({ ...defaults, ...(result?.settings || {}) });
+      toast('Bulk defaults restored');
+    };
   }
   function mountLibraryPerformanceSettings() {
     const grid = document.querySelector('#set-library .groups');
     if (!grid || document.querySelector('#xv-library-performance-settings')) return;
-    const panel = document.createElement('section'); panel.className = 'settinggroup advancedOnly'; panel.id = 'xv-library-performance-settings';
-    panel.innerHTML = '<h3>Performance on large archives</h3><p>These controls reduce DOM work, media decoding, and repeated searches on large archives.</p><div class="formgrid two"><label class="field"><span>Performance mode</span><select data-library-setting="libraryPerformanceMode"><option value="balanced">Balanced</option><option value="performance">Performance (smaller pages)</option></select></label><label class="field"><span>Search debounce (ms)</span><input type="number" min="0" max="1000" step="10" data-library-setting="librarySearchDebounce"></label></div><div class="toggles"><label><span><b>Lazy-load media</b><small>Decode thumbnails only near the viewport.</small></span><input type="checkbox" data-library-setting="libraryLazyMedia"></label><label><span><b>Contain offscreen cards</b><small>Let the browser skip layout and paint work outside the viewport.</small></span><input type="checkbox" data-library-setting="libraryContentVisibility"></label><label><span><b>Pause offscreen video</b><small>Stop background playback while scrolling.</small></span><input type="checkbox" data-library-setting="libraryPauseOffscreenVideo"></label></div><button type="button" id="xvLibraryPerfReset">Reset performance defaults</button>';
+    const panel = document.createElement('section');
+    panel.className = 'settinggroup advancedOnly';
+    panel.id = 'xv-library-performance-settings';
+    panel.innerHTML =
+      '<h3>Performance on large archives</h3><p>These controls reduce DOM work, media decoding, and repeated searches on large archives.</p><div class="formgrid two"><label class="field"><span>Performance mode</span><select data-library-setting="libraryPerformanceMode"><option value="balanced">Balanced</option><option value="performance">Performance (smaller pages)</option></select></label><label class="field"><span>Search debounce (ms)</span><input type="number" min="0" max="1000" step="10" data-library-setting="librarySearchDebounce"></label></div><div class="toggles"><label><span><b>Lazy-load media</b><small>Decode thumbnails only near the viewport.</small></span><input type="checkbox" data-library-setting="libraryLazyMedia"></label><label><span><b>Contain offscreen cards</b><small>Let the browser skip layout and paint work outside the viewport.</small></span><input type="checkbox" data-library-setting="libraryContentVisibility"></label><label><span><b>Pause offscreen video</b><small>Stop background playback while scrolling.</small></span><input type="checkbox" data-library-setting="libraryPauseOffscreenVideo"></label></div><button type="button" id="xvLibraryPerfReset">Reset performance defaults</button>';
     grid.insertBefore(panel, grid.firstElementChild);
-    const defaults = { libraryPerformanceMode: 'balanced', libraryPageSize: 120, librarySearchDebounce: 120, libraryPreloadMedia: 'metadata', libraryLazyMedia: true, libraryContentVisibility: true, libraryPauseOffscreenVideo: true };
-    const applyValues = values => panel.querySelectorAll('[data-library-setting]').forEach(el => { const value = values[el.dataset.librarySetting]; if (value == null) return; if (el.type === 'checkbox') el.checked = !!value; else el.value = String(value); });
+    const defaults = {
+      libraryPerformanceMode: 'balanced',
+      libraryPageSize: 120,
+      librarySearchDebounce: 120,
+      libraryPreloadMedia: 'metadata',
+      libraryLazyMedia: true,
+      libraryContentVisibility: true,
+      libraryPauseOffscreenVideo: true,
+    };
+    const applyValues = values =>
+      panel.querySelectorAll('[data-library-setting]').forEach(el => {
+        const value = values[el.dataset.librarySetting];
+        if (value == null) return;
+        if (el.type === 'checkbox') el.checked = !!value;
+        else el.value = String(value);
+      });
     applyValues({ ...defaults, ...(typeof settings === 'object' ? settings : {}) });
-    panel.querySelectorAll('[data-library-setting]').forEach(el => el.addEventListener('change', async () => { const key = el.dataset.librarySetting, value = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value; const result = await call({ type: 'SET_SETTINGS', settings: { [key]: value } }); if (result?.settings && typeof settings === 'object') Object.assign(settings, result.settings); if (typeof renderLib === 'function') renderLib(); toast('Library performance setting saved'); }));
-    panel.querySelector('#xvLibraryPerfReset').onclick = async () => { const result = await call({ type: 'SET_SETTINGS', settings: defaults }); if (result?.settings && typeof settings === 'object') Object.assign(settings, result.settings); applyValues({ ...defaults, ...(result?.settings || {}) }); if (typeof renderLib === 'function') renderLib(); toast('Library performance defaults restored'); };
+    panel.querySelectorAll('[data-library-setting]').forEach(el =>
+      el.addEventListener('change', async () => {
+        const key = el.dataset.librarySetting,
+          value = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
+        const result = await call({ type: 'SET_SETTINGS', settings: { [key]: value } });
+        if (result?.settings && typeof settings === 'object') Object.assign(settings, result.settings);
+        if (typeof renderLib === 'function') renderLib();
+        toast('Library performance setting saved');
+      })
+    );
+    panel.querySelector('#xvLibraryPerfReset').onclick = async () => {
+      const result = await call({ type: 'SET_SETTINGS', settings: defaults });
+      if (result?.settings && typeof settings === 'object') Object.assign(settings, result.settings);
+      applyValues({ ...defaults, ...(result?.settings || {}) });
+      if (typeof renderLib === 'function') renderLib();
+      toast('Library performance defaults restored');
+    };
   }
-  function close() { if(planRequestId)void call({type:'CANCEL_LIBRARY_PLAN',requestId:planRequestId}).catch(()=>{});planRequestId=null;planGeneration++;planning=false;modal?.close();modal?.remove(); modal = null; lastPlan = null;plannedOptions=null;(modalReturn?.isConnected?modalReturn:document.querySelector('#search'))?.focus({preventScroll:true}); }
+  function close() {
+    if (planRequestId) void call({ type: 'CANCEL_LIBRARY_PLAN', requestId: planRequestId }).catch(() => {});
+    planRequestId = null;
+    planGeneration++;
+    planning = false;
+    modal?.close();
+    modal?.remove();
+    modal = null;
+    lastPlan = null;
+    plannedOptions = null;
+    (modalReturn?.isConnected ? modalReturn : document.querySelector('#search'))?.focus({ preventScroll: true });
+  }
   function open() {
-    if (modal) return;modalReturn=document.activeElement; modal = document.createElement('dialog');modal.setAttribute('aria-labelledby','bulkTitle');modal.addEventListener('cancel',event=>{event.preventDefault();close()}); modal.className = 'xv-bulk-modal'; modal.innerHTML = `<div class="xv-bulk-dialog"><header><div><small>LIBRARY DOWNLOAD PLANNER</small><h2 id="bulkTitle">Download a media plan</h2><p>Choose the scope, formats, and existing-file policy before XVault queues anything.</p></div><button type="button" data-bulk-close aria-label="Close">×</button></header><div class="xv-bulk-grid"><label><span>Preset</span><select name="bulk-preset"></select></label><label><span>Scope</span><select name="bulk-scope"><option value="all">Entire Library</option><option value="query">Current search / filters</option><option value="selected">Selected posts</option><option value="favorites">Favorites only</option><option value="author">Current author / profile</option><option value="tag">Specific tag</option><option value="date">Date range</option></select></label><label><span>Media</span><select name="bulk-media"><option value="all">All media</option><option value="images">Images only</option><option value="videos">Videos only</option><option value="animations">GIFs / animations</option><option value="animated-webp">Animated WebP only</option><option value="gif-webp">GIF + WebP animations</option><option value="images-animation">Images + GIF/WebP</option><option value="videos-animation">Videos + GIF/WebP</option></select></label><label><span>Animation output</span><select name="bulk-animation"><option value="all">MP4 + GIF + WebP</option><option value="mp4">Original playback MP4</option><option value="gif">Native GIF</option><option value="webp">Native animated WebP</option><option value="gif-webp">GIF + WebP</option><option value="mp4-gif">MP4 + GIF</option><option value="mp4-webp">MP4 + WebP</option></select></label><label><span>Existing media</span><select name="bulk-existing"><option value="skip">Skip verified local files</option><option value="verify">Verify then skip</option><option value="repair">Repair invalid files</option><option value="redownload">Re-download / keep both</option></select></label><label class="bulk-check"><input type="checkbox" name="bulk-missing"><span>Only media not already downloaded</span></label><label class="bulk-check"><input type="checkbox" name="bulk-failed"><span>Only failed or missing media</span></label><label class="bulk-wide"><span>Custom query</span><input name="bulk-query" placeholder="artist:username type:gif likes:>500"></label><label><span>Author</span><input name="bulk-author" placeholder="username"></label><label><span>Tag</span><input name="bulk-tag" placeholder="#reaction"></label><label><span>From</span><input type="date" name="bulk-from"></label><label><span>To</span><input type="date" name="bulk-to"></label></div><section class="xv-bulk-plan"><div class="xv-bulk-plan-head"><div><small>DOWNLOAD PLAN</small><b id="bulkPlanStatus">Ready to scan</b></div><button type="button" id="bulkPlanRefresh">Refresh estimate</button></div><div id="bulkPlanSummary" class="xv-bulk-summary"><div><b>—</b><small>Plan not scanned</small></div></div><p id="bulkPlanDetail">No files have been queued.</p></section><footer><button type="button" id="bulkPresetSave">Save preset</button><button type="button" id="bulkPresetDelete">Delete saved preset</button><span></span><button type="button" data-bulk-close>Cancel</button><button class="primary" type="button" id="bulkStart" disabled>Start download</button></footer></div>`;
-    document.body.append(modal); const fileDetails = document.createElement('details'); fileDetails.className = 'xv-bulk-files'; fileDetails.innerHTML = '<summary>Inspect planned files (bounded preview)</summary><ul id="bulkPlanFilesList"><li>Plan the scope first.</li></ul>'; modal.querySelector('.xv-bulk-plan').append(fileDetails); renderPresetOptions(); const context = window.XVaultLibraryContext?.(); if (context?.query) modal.querySelector('[name="bulk-query"]').value = context.query; modal.querySelector('[name="bulk-scope"]').value = context?.query ? 'query' : 'all';
-    modal.querySelectorAll('[data-bulk-close]').forEach(button => button.onclick = close); modal.querySelector('#bulkPlanRefresh').onclick = plan; modal.querySelector('#bulkStart').onclick = start; modal.querySelector('#bulkPresetSave').onclick = savePreset; modal.querySelector('#bulkPresetDelete').onclick = deletePreset; modal.querySelector('[name="bulk-preset"]').onchange = event => event.target.value && setPreset(event.target.value); modal.querySelectorAll('select,input').forEach(input => { if (input.name !== 'bulk-preset') input.addEventListener('change', plan); }); modal.addEventListener('click', event => { if (event.target === modal) close(); }); modal.showModal();modal.querySelector('[name="bulk-scope"]').focus(); plan();
+    if (modal) return;
+    modalReturn = document.activeElement;
+    modal = document.createElement('dialog');
+    modal.setAttribute('aria-labelledby', 'bulkTitle');
+    modal.addEventListener('cancel', event => {
+      event.preventDefault();
+      close();
+    });
+    modal.className = 'xv-bulk-modal';
+    modal.innerHTML = `<div class="xv-bulk-dialog"><header><div><small>LIBRARY DOWNLOAD PLANNER</small><h2 id="bulkTitle">Download a media plan</h2><p>Choose the scope, formats, and existing-file policy before XVault queues anything.</p></div><button type="button" data-bulk-close aria-label="Close">×</button></header><div class="xv-bulk-grid"><label><span>Preset</span><select name="bulk-preset"></select></label><label><span>Scope</span><select name="bulk-scope"><option value="all">Entire Library</option><option value="query">Current search / filters</option><option value="selected">Selected posts</option><option value="favorites">Favorites only</option><option value="author">Current author / profile</option><option value="tag">Specific tag</option><option value="date">Date range</option></select></label><label><span>Media</span><select name="bulk-media"><option value="all">All media</option><option value="images">Images only</option><option value="videos">Videos only</option><option value="animations">GIFs / animations</option><option value="animated-webp">Animated WebP only</option><option value="gif-webp">GIF + WebP animations</option><option value="images-animation">Images + GIF/WebP</option><option value="videos-animation">Videos + GIF/WebP</option></select></label><label><span>Animation output</span><select name="bulk-animation"><option value="all">MP4 + GIF + WebP</option><option value="mp4">Original playback MP4</option><option value="gif">Native GIF</option><option value="webp">Native animated WebP</option><option value="gif-webp">GIF + WebP</option><option value="mp4-gif">MP4 + GIF</option><option value="mp4-webp">MP4 + WebP</option></select></label><label><span>Existing media</span><select name="bulk-existing"><option value="skip">Skip verified local files</option><option value="verify">Verify then skip</option><option value="repair">Repair invalid files</option><option value="redownload">Re-download / keep both</option></select></label><label class="bulk-check"><input type="checkbox" name="bulk-missing"><span>Only media not already downloaded</span></label><label class="bulk-check"><input type="checkbox" name="bulk-failed"><span>Only failed or missing media</span></label><label class="bulk-wide"><span>Custom query</span><input name="bulk-query" placeholder="artist:username type:gif likes:>500"></label><label><span>Author</span><input name="bulk-author" placeholder="username"></label><label><span>Tag</span><input name="bulk-tag" placeholder="#reaction"></label><label><span>From</span><input type="date" name="bulk-from"></label><label><span>To</span><input type="date" name="bulk-to"></label></div><section class="xv-bulk-plan"><div class="xv-bulk-plan-head"><div><small>DOWNLOAD PLAN</small><b id="bulkPlanStatus">Ready to scan</b></div><button type="button" id="bulkPlanRefresh">Refresh estimate</button></div><div id="bulkPlanSummary" class="xv-bulk-summary"><div><b>—</b><small>Plan not scanned</small></div></div><p id="bulkPlanDetail">No files have been queued.</p></section><footer><button type="button" id="bulkPresetSave">Save preset</button><button type="button" id="bulkPresetDelete">Delete saved preset</button><span></span><button type="button" data-bulk-close>Cancel</button><button class="primary" type="button" id="bulkStart" disabled>Start download</button></footer></div>`;
+    document.body.append(modal);
+    const fileDetails = document.createElement('details');
+    fileDetails.className = 'xv-bulk-files';
+    fileDetails.innerHTML =
+      '<summary>Inspect planned files (bounded preview)</summary><ul id="bulkPlanFilesList"><li>Plan the scope first.</li></ul>';
+    modal.querySelector('.xv-bulk-plan').append(fileDetails);
+    renderPresetOptions();
+    const context = window.XVaultLibraryContext?.();
+    if (context?.query) modal.querySelector('[name="bulk-query"]').value = context.query;
+    modal.querySelector('[name="bulk-scope"]').value = context?.query ? 'query' : 'all';
+    modal.querySelectorAll('[data-bulk-close]').forEach(button => (button.onclick = close));
+    modal.querySelector('#bulkPlanRefresh').onclick = plan;
+    modal.querySelector('#bulkStart').onclick = start;
+    modal.querySelector('#bulkPresetSave').onclick = savePreset;
+    modal.querySelector('#bulkPresetDelete').onclick = deletePreset;
+    modal.querySelector('[name="bulk-preset"]').onchange = event => event.target.value && setPreset(event.target.value);
+    modal.querySelectorAll('select,input').forEach(input => {
+      if (input.name !== 'bulk-preset') input.addEventListener('change', plan);
+    });
+    modal.addEventListener('click', event => {
+      if (event.target === modal) close();
+    });
+    modal.showModal();
+    modal.querySelector('[name="bulk-scope"]').focus();
+    plan();
   }
-  function mount() { const command = document.querySelector('#page-library .libraryCommand'); if (!command || document.querySelector('#libraryDownloadAll')) return; const tools = document.querySelector('#libraryToolsBody'); const button = document.createElement('button'); button.id = 'libraryDownloadAll'; button.type = 'button'; button.textContent = 'Download media…'; button.title = 'Plan a bulk Library download'; button.onclick = () => { if (tools?.parentElement) tools.parentElement.open = false; open(); }; (tools || command).prepend(button); }
-  function mountQueueTools() { const history = document.querySelector('#downloadHistory'); if (!history || document.querySelector('#xvQueueTools')) return; const tools = document.createElement('div'); tools.id = 'xvQueueTools'; tools.className = 'xv-queue-tools'; tools.innerHTML = '<input id="xvQueueSearch" placeholder="Filter queue…" aria-label="Filter download queue"><select id="xvQueueKind"><option value="">All items</option><option value="image">Images</option><option value="video">Videos</option><option value="gif">Animations</option><option value="conversion">Conversions</option><option value="failed">Failed</option><option value="complete">Completed</option></select><button type="button" id="xvPauseQueue">Pause all</button><button type="button" id="xvResumeQueue">Resume all</button>';
-    history.parentNode.insertBefore(tools, history); const filter = () => { const query = tools.querySelector('#xvQueueSearch').value.toLowerCase(), kind = tools.querySelector('#xvQueueKind').value; history.querySelectorAll('.dlrow').forEach(row => { const text = row.textContent.toLowerCase(); row.hidden = !!((query && !text.includes(query)) || (kind && !text.includes(kind))); }); }; tools.querySelector('#xvQueueSearch').oninput = filter; tools.querySelector('#xvQueueKind').onchange = filter; tools.querySelector('#xvPauseQueue').onclick = async () => { const result = await call({ type: 'PAUSE_ALL_DOWNLOADS' }); toast(`Paused ${result?.paused || 0} downloads`); }; tools.querySelector('#xvResumeQueue').onclick = async () => { const result = await call({ type: 'RESUME_ALL_DOWNLOADS' }); toast(`Resumed ${result?.resumed || 0} downloads`); }; }
+  function mount() {
+    const command = document.querySelector('#page-library .libraryCommand');
+    if (!command || document.querySelector('#libraryDownloadAll')) return;
+    const tools = document.querySelector('#libraryToolsBody');
+    const button = document.createElement('button');
+    button.id = 'libraryDownloadAll';
+    button.type = 'button';
+    button.textContent = 'Download media…';
+    button.title = 'Plan a bulk Library download';
+    button.onclick = () => {
+      if (tools?.parentElement) tools.parentElement.open = false;
+      open();
+    };
+    (tools || command).prepend(button);
+  }
+  function mountQueueTools() {
+    const history = document.querySelector('#downloadHistory');
+    if (!history || document.querySelector('#xvQueueTools')) return;
+    const tools = document.createElement('div');
+    tools.id = 'xvQueueTools';
+    tools.className = 'xv-queue-tools';
+    tools.innerHTML =
+      '<input id="xvQueueSearch" placeholder="Filter queue…" aria-label="Filter download queue"><select id="xvQueueKind"><option value="">All items</option><option value="image">Images</option><option value="video">Videos</option><option value="gif">Animations</option><option value="conversion">Conversions</option><option value="failed">Failed</option><option value="complete">Completed</option></select><button type="button" id="xvPauseQueue">Pause all</button><button type="button" id="xvResumeQueue">Resume all</button>';
+    history.parentNode.insertBefore(tools, history);
+    const filter = () => {
+      const query = tools.querySelector('#xvQueueSearch').value.toLowerCase(),
+        kind = tools.querySelector('#xvQueueKind').value;
+      history.querySelectorAll('.dlrow').forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.hidden = !!((query && !text.includes(query)) || (kind && !text.includes(kind)));
+      });
+    };
+    tools.querySelector('#xvQueueSearch').oninput = filter;
+    tools.querySelector('#xvQueueKind').onchange = filter;
+    tools.querySelector('#xvPauseQueue').onclick = async () => {
+      const result = await call({ type: 'PAUSE_ALL_DOWNLOADS' });
+      toast(`Paused ${result?.paused || 0} downloads`);
+    };
+    tools.querySelector('#xvResumeQueue').onclick = async () => {
+      const result = await call({ type: 'RESUME_ALL_DOWNLOADS' });
+      toast(`Resumed ${result?.resumed || 0} downloads`);
+    };
+  }
   let dismissMediaMenu;
   function openMediaMenu(button) {
     dismissMediaMenu?.(false);
-    const card=button.closest('.tweet'),id=card?.dataset.id,mediaIndex=Number(String(button.dataset.dlOne||'').split(':')[1]);
-    const post=(window.XVaultLibraryRows?.()||window.library||[]).find(row=>String(row.id)===String(id)),media=post?.media?.[mediaIndex];
-    if(!post||!media)return;
-    const menu=document.createElement('div');menu.className='xv-media-menu';menu.setAttribute('role','menu');menu.setAttribute('aria-label','Media actions');
-    const animation=/gif|animation|webp/i.test(String(media.type||media.mediaType||''))||!!media.playbackUrl;
-    const modes=animation?[['mp4','Original MP4'],['gif','Native GIF'],['webp','Native WebP'],['mp4-gif','MP4 + GIF'],['mp4-webp','MP4 + WebP'],['gif-webp','GIF + WebP'],['all','Everything']]:[['original','Original / best quality']];
-    modes.push(['copy','Copy original URL']);
-    menu.innerHTML=`<b>Media actions</b>${modes.map(([mode,label])=>`<button type="button" role="menuitem" data-media-mode="${mode}">${label}</button>`).join('')}`;
-    document.body.append(menu);button.setAttribute('aria-haspopup','menu');button.setAttribute('aria-expanded','true');
-    const rect=button.getBoundingClientRect();menu.style.left=`${Math.max(8,Math.min(window.innerWidth-230,rect.left))}px`;menu.style.top=`${Math.max(8,Math.min(window.innerHeight-menu.offsetHeight-8,rect.bottom+6))}px`;
-    const dismiss=event=>{if(!menu.contains(event.target)&&event.target!==button&&!button.contains(event.target))close(false)};
-    const close=(restore=true)=>{if(!menu.isConnected)return;document.removeEventListener('pointerdown',dismiss,true);menu.remove();button.setAttribute('aria-expanded','false');if(dismissMediaMenu===close)dismissMediaMenu=null;if(restore&&button.isConnected)button.focus()};
-    dismissMediaMenu=close;
-    menu.addEventListener('keydown',event=>{
-      if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();return}
-      if(event.key==='Tab'){close();return}
-      const actions=[...menu.querySelectorAll('[role="menuitem"]')],index=actions.indexOf(document.activeElement);
-      if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();event.stopPropagation();const next=event.key==='Home'?0:event.key==='End'?actions.length-1:(index+(event.key==='ArrowDown'?1:-1)+actions.length)%actions.length;actions[next].focus()}
+    const card = button.closest('.tweet'),
+      id = card?.dataset.id,
+      mediaIndex = Number(String(button.dataset.dlOne || '').split(':')[1]);
+    const post = (window.XVaultLibraryRows?.() || window.library || []).find(row => String(row.id) === String(id)),
+      media = post?.media?.[mediaIndex];
+    if (!post || !media) return;
+    const menu = document.createElement('div');
+    menu.className = 'xv-media-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Media actions');
+    const animation = /gif|animation|webp/i.test(String(media.type || media.mediaType || '')) || !!media.playbackUrl;
+    const modes = animation
+      ? [
+          ['mp4', 'Original MP4'],
+          ['gif', 'Native GIF'],
+          ['webp', 'Native WebP'],
+          ['mp4-gif', 'MP4 + GIF'],
+          ['mp4-webp', 'MP4 + WebP'],
+          ['gif-webp', 'GIF + WebP'],
+          ['all', 'Everything'],
+        ]
+      : [['original', 'Original / best quality']];
+    modes.push(['copy', 'Copy original URL']);
+    menu.innerHTML = `<b>Media actions</b>${modes.map(([mode, label]) => `<button type="button" role="menuitem" data-media-mode="${mode}">${label}</button>`).join('')}`;
+    document.body.append(menu);
+    button.setAttribute('aria-haspopup', 'menu');
+    button.setAttribute('aria-expanded', 'true');
+    const rect = button.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(window.innerWidth - 230, rect.left))}px`;
+    menu.style.top = `${Math.max(8, Math.min(window.innerHeight - menu.offsetHeight - 8, rect.bottom + 6))}px`;
+    const dismiss = event => {
+      if (!menu.contains(event.target) && event.target !== button && !button.contains(event.target)) close(false);
+    };
+    const close = (restore = true) => {
+      if (!menu.isConnected) return;
+      document.removeEventListener('pointerdown', dismiss, true);
+      menu.remove();
+      button.setAttribute('aria-expanded', 'false');
+      if (dismissMediaMenu === close) dismissMediaMenu = null;
+      if (restore && button.isConnected) button.focus();
+    };
+    dismissMediaMenu = close;
+    menu.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+        return;
+      }
+      if (event.key === 'Tab') {
+        close();
+        return;
+      }
+      const actions = [...menu.querySelectorAll('[role="menuitem"]')],
+        index = actions.indexOf(document.activeElement);
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault();
+        event.stopPropagation();
+        const next =
+          event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? actions.length - 1
+              : (index + (event.key === 'ArrowDown' ? 1 : -1) + actions.length) % actions.length;
+        actions[next].focus();
+      }
     });
-    menu.querySelectorAll('[data-media-mode]').forEach(action=>action.onclick=async()=>{
-      const mode=action.dataset.mediaMode;
-      action.disabled=true;
-      try{
-        if(mode==='copy'){const url=media.playbackUrl||media.url;if(!url)throw Error('No media URL available');await navigator.clipboard.writeText(url);toast('Original media URL copied');close();return}
-        const item=downloadItem(post,media,mediaIndex);if(!item)throw Error('No media URL available');
-        if(mode!=='original'){const output=outputMode(mode);item.conversionMode=mode;item.conversionKeepSource=output.keepMp4;item.conversionGif=output.gif;item.conversionWebP=output.webp}
-        const result=await call({type:'DOWNLOAD_URLS',items:[item]});if(!result?.ok)throw Error(result?.error||'Could not queue media');toast(result.added?'Media queued':'Already queued / downloaded');close();
-      }catch(error){toast(error.message||'Media action failed');action.disabled=false;action.focus()}
-    });
-    document.addEventListener('pointerdown',dismiss,true);menu.querySelector('[role="menuitem"]').focus();
+    menu.querySelectorAll('[data-media-mode]').forEach(
+      action =>
+        (action.onclick = async () => {
+          const mode = action.dataset.mediaMode;
+          action.disabled = true;
+          try {
+            if (mode === 'copy') {
+              const url = media.playbackUrl || media.url;
+              if (!url) throw Error('No media URL available');
+              await navigator.clipboard.writeText(url);
+              toast('Original media URL copied');
+              close();
+              return;
+            }
+            const item = downloadItem(post, media, mediaIndex);
+            if (!item) throw Error('No media URL available');
+            if (mode !== 'original') {
+              const output = outputMode(mode);
+              item.conversionMode = mode;
+              item.conversionKeepSource = output.keepMp4;
+              item.conversionGif = output.gif;
+              item.conversionWebP = output.webp;
+            }
+            const result = await call({ type: 'DOWNLOAD_URLS', items: [item] });
+            if (!result?.ok) throw Error(result?.error || 'Could not queue media');
+            toast(result.added ? 'Media queued' : 'Already queued / downloaded');
+            close();
+          } catch (error) {
+            toast(error.message || 'Media action failed');
+            action.disabled = false;
+            action.focus();
+          }
+        })
+    );
+    document.addEventListener('pointerdown', dismiss, true);
+    menu.querySelector('[role="menuitem"]').focus();
   }
-  document.addEventListener('click', event => { const button = event.target.closest?.('[data-dl-one]'); if (!button || !document.querySelector('#page-library.show')) return; event.preventDefault(); event.stopImmediatePropagation(); openMediaMenu(button); }, true);
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { mount(); mountQueueTools(); mountDownloadSettings(); mountLibraryPerformanceSettings(); }, { once: true }); else { mount(); mountQueueTools(); mountDownloadSettings(); mountLibraryPerformanceSettings(); }
+  document.addEventListener(
+    'click',
+    event => {
+      const button = event.target.closest?.('[data-dl-one]');
+      if (!button || !document.querySelector('#page-library.show')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openMediaMenu(button);
+    },
+    true
+  );
+  if (document.readyState === 'loading')
+    document.addEventListener(
+      'DOMContentLoaded',
+      () => {
+        mount();
+        mountQueueTools();
+        mountDownloadSettings();
+        mountLibraryPerformanceSettings();
+      },
+      { once: true }
+    );
+  else {
+    mount();
+    mountQueueTools();
+    mountDownloadSettings();
+    mountLibraryPerformanceSettings();
+  }
 })();

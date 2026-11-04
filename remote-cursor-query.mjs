@@ -14,7 +14,7 @@ export async function readRemoteCursorPage(database, options = {}) {
   const limit = Math.max(1, Math.min(50, Math.floor(Number(options.limit) || 40)));
   const scanLimit = Math.max(limit, Math.min(2500, Math.floor(Number(options.scanLimit) || 2500)));
   const compiled = search.compileQuery(query);
-  const needsDownloads = compiled.some(rule => ['downloaded', 'missing', 'size'].includes(rule.kind));
+  const needsDownloads = search.usesRuleKind(compiled, ['downloaded', 'missing', 'size']);
   const page = await readLibraryQueryPage(database, {
     sort,
     limit,
@@ -33,12 +33,12 @@ export async function readRemoteCursorPage(database, options = {}) {
         projection.knownBytes = Number(download.bytes) || 0;
       }
       return search.matchesCompiledQuery(projection, compiled);
-    }
+    },
   });
   return {
     ...page,
     matched: page.rows.length,
     scannedThisPage: page.scanned,
-    hasMore: page.hasMore && !page.stale && !page.cancelled
+    hasMore: page.hasMore && !page.stale && !page.cancelled,
   };
 }

@@ -1,24 +1,121 @@
 /* v16 X.com integration layer: small, native-feeling, and entirely optional. */
-.xv2-actions{transition:opacity var(--xv-motion,190ms) ease}
-.xv2-actions[data-visibility="hover"]{opacity:0}
-.xv2-actions[data-visibility="hover"]:focus-within,article[data-testid="tweet"]:hover .xv2-actions[data-visibility="hover"]{opacity:1}
-.xv2-action{transition:transform var(--xv-motion,190ms) ease,background var(--xv-motion,190ms) ease,color var(--xv-motion,190ms) ease!important}
-.xv2-action:focus-visible,.xv2-menu button:focus-visible{outline:2px solid #1d9bf0;outline-offset:2px}
-.xv2-action:active{transform:scale(.92)}
-.xv2-menu{width:250px;animation-duration:var(--xv-motion,190ms)}
-#xv2-toast{transition-duration:var(--xv-motion,190ms)}
-@media (prefers-reduced-motion:reduce){.xv2-action,.xv2-menu,#xv2-toast,#xv2-dock .xv2-dock-body{animation:none!important;transition-duration:1ms!important}}
+.xv2-actions {
+  transition: opacity var(--xv-motion, 190ms) ease;
+}
+.xv2-actions[data-visibility='hover'] {
+  opacity: 0;
+}
+.xv2-actions[data-visibility='hover']:focus-within,
+article[data-testid='tweet']:hover .xv2-actions[data-visibility='hover'] {
+  opacity: 1;
+}
+.xv2-action {
+  transition:
+    transform var(--xv-motion, 190ms) ease,
+    background var(--xv-motion, 190ms) ease,
+    color var(--xv-motion, 190ms) ease !important;
+}
+.xv2-action:focus-visible,
+.xv2-menu button:focus-visible {
+  outline: 2px solid #1d9bf0;
+  outline-offset: 2px;
+}
+.xv2-action:active {
+  transform: scale(0.92);
+}
+.xv2-menu {
+  width: 250px;
+  animation-duration: var(--xv-motion, 190ms);
+}
+#xv2-toast {
+  transition-duration: var(--xv-motion, 190ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .xv2-action,
+  .xv2-menu,
+  #xv2-toast,
+  #xv2-dock .xv2-dock-body {
+    animation: none !important;
+    transition-duration: 1ms !important;
+  }
+}
 
 /* Coherent utility palette across X light, dim and dark modes. */
-html{--xv-surface:#171b19;--xv-ink:#eef1ed;--xv-muted:#a6afa8;--xv-line:#454c46;--xv-hover:#29322a;--xv-focus:#c5ad7b}
-html[data-xv-theme=light]{--xv-surface:#fff;--xv-ink:#20241f;--xv-muted:#5c655e;--xv-line:#c6cec7;--xv-hover:#eef1ed;--xv-focus:#856021}
-.xv2-menu,#xv2-toast,#xv2-dock .xv2-dock-body,#xv2-dock .xv2-dock-toggle,#xvault-hover,#xvault-menu,#xvault-stale,#xvault-toast,#xvault-corner{background:var(--xv-surface)!important;color:var(--xv-ink)!important;border-color:var(--xv-line)!important;backdrop-filter:none!important}
-.xv2-menu button,#xv2-dock .xv2-dock-body button{color:var(--xv-ink)}
-.xv2-menu button:hover,#xv2-dock .xv2-dock-body button:hover,#xvault-menu button:hover,#xvault-hover button:hover{background:var(--xv-hover)}
-.xv2-menu-head span,#xv2-dock small,#xvault-hover small,#xvault-stale span{color:var(--xv-muted)}
-.xv2-action:hover{color:var(--xv-ink)!important;background:var(--xv-hover)!important}
-.xv2-action:focus-visible,.xv2-menu button:focus-visible,.xvault-download:focus-visible{outline:2px solid var(--xv-focus)!important;outline-offset:2px}
-.xvault-download:disabled{cursor:progress;opacity:.65}
-html[data-xv-motion=off] .xv2-menu,html[data-xv-motion=off] .xv2-action,html[data-xv-motion=off] #xv2-toast,html[data-xv-motion=off] #xv2-dock *,html[data-xv-motion=off] #xvault-corner,html[data-xv-motion=off] #xvault-corner *,html[data-xv-motion=off] #xvault-hover,html[data-xv-motion=off] #xvault-menu,html[data-xv-motion=off] #xvault-toast{animation:none!important;transition:none!important}
+html {
+  --xv-surface: #171b19;
+  --xv-ink: #eef1ed;
+  --xv-muted: #a6afa8;
+  --xv-line: #454c46;
+  --xv-hover: #29322a;
+  --xv-focus: #c5ad7b;
+}
+html[data-xv-theme='light'] {
+  --xv-surface: #fff;
+  --xv-ink: #20241f;
+  --xv-muted: #5c655e;
+  --xv-line: #c6cec7;
+  --xv-hover: #eef1ed;
+  --xv-focus: #856021;
+}
+.xv2-menu,
+#xv2-toast,
+#xv2-dock .xv2-dock-body,
+#xv2-dock .xv2-dock-toggle,
+#xvault-hover,
+#xvault-menu,
+#xvault-stale,
+#xvault-toast,
+#xvault-corner {
+  background: var(--xv-surface) !important;
+  color: var(--xv-ink) !important;
+  border-color: var(--xv-line) !important;
+  backdrop-filter: none !important;
+}
+.xv2-menu button,
+#xv2-dock .xv2-dock-body button {
+  color: var(--xv-ink);
+}
+.xv2-menu button:hover,
+#xv2-dock .xv2-dock-body button:hover,
+#xvault-menu button:hover,
+#xvault-hover button:hover {
+  background: var(--xv-hover);
+}
+.xv2-menu-head span,
+#xv2-dock small,
+#xvault-hover small,
+#xvault-stale span {
+  color: var(--xv-muted);
+}
+.xv2-action:hover {
+  color: var(--xv-ink) !important;
+  background: var(--xv-hover) !important;
+}
+.xv2-action:focus-visible,
+.xv2-menu button:focus-visible,
+.xvault-download:focus-visible {
+  outline: 2px solid var(--xv-focus) !important;
+  outline-offset: 2px;
+}
+.xvault-download:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+html[data-xv-motion='off'] .xv2-menu,
+html[data-xv-motion='off'] .xv2-action,
+html[data-xv-motion='off'] #xv2-toast,
+html[data-xv-motion='off'] #xv2-dock *,
+html[data-xv-motion='off'] #xvault-corner,
+html[data-xv-motion='off'] #xvault-corner *,
+html[data-xv-motion='off'] #xvault-hover,
+html[data-xv-motion='off'] #xvault-menu,
+html[data-xv-motion='off'] #xvault-toast {
+  animation: none !important;
+  transition: none !important;
+}
 
-.xvault-download:hover{background:var(--xv-hover);color:var(--xv-ink);transform:none}
+.xvault-download:hover {
+  background: var(--xv-hover);
+  color: var(--xv-ink);
+  transform: none;
+}

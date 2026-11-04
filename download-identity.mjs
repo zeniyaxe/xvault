@@ -27,7 +27,9 @@ export function mediaIdentity(item = {}) {
 }
 
 export function isExistingDownload(row) {
-  return Boolean(row && ['complete', 'queued', 'downloading', 'retry-wait', 'paused', 'verifying', 'converting'].includes(row.state));
+  return Boolean(
+    row && ['complete', 'queued', 'downloading', 'retry-wait', 'paused', 'verifying', 'converting'].includes(row.state)
+  );
 }
 
 /**
@@ -35,18 +37,68 @@ export function isExistingDownload(row) {
  * @param {{ key: string, seenInRequest: boolean, existing: object|null, force: boolean, skipCompletedDuplicates: boolean, sibling?: object|null, crossPostPolicy?: 'keep'|'skip' }} input
  * @returns {{ accept: boolean, code: string, reason: string, matchKey: string|null, matchState: string|null }}
  */
-export function decideEnqueue({ key, seenInRequest, existing, force, skipCompletedDuplicates, sibling = null, crossPostPolicy = 'keep' }) {
-  const matchKey = existing?.key || null, matchState = existing?.state || null;
-  if (seenInRequest) return { accept: false, code: 'same-request', reason: 'The same file appears twice in this request', matchKey: key, matchState: null };
+export function decideEnqueue({
+  key,
+  seenInRequest,
+  existing,
+  force,
+  skipCompletedDuplicates,
+  sibling = null,
+  crossPostPolicy = 'keep',
+}) {
+  const matchKey = existing?.key || null,
+    matchState = existing?.state || null;
+  if (seenInRequest)
+    return {
+      accept: false,
+      code: 'same-request',
+      reason: 'The same file appears twice in this request',
+      matchKey: key,
+      matchState: null,
+    };
   if (existing && isExistingDownload(existing) && existing.state !== 'complete') {
     return { accept: false, code: 'in-flight', reason: `Already ${existing.state}`, matchKey, matchState };
   }
   if (existing?.state === 'complete') {
-    if (force) return { accept: true, code: 'explicit-redownload', reason: 'Explicit redownload of a completed file', matchKey, matchState };
-    if (skipCompletedDuplicates) return { accept: false, code: 'already-downloaded', reason: 'Already downloaded', matchKey, matchState };
-    return { accept: true, code: 'keep-both', reason: 'Duplicate skipping is off; keeping a second copy', matchKey, matchState };
+    if (force)
+      return {
+        accept: true,
+        code: 'explicit-redownload',
+        reason: 'Explicit redownload of a completed file',
+        matchKey,
+        matchState,
+      };
+    if (skipCompletedDuplicates)
+      return { accept: false, code: 'already-downloaded', reason: 'Already downloaded', matchKey, matchState };
+    return {
+      accept: true,
+      code: 'keep-both',
+      reason: 'Duplicate skipping is off; keeping a second copy',
+      matchKey,
+      matchState,
+    };
   }
-  if (existing) return { accept: true, code: 'retry-failed', reason: `Previous attempt ${existing.state}; queued again`, matchKey, matchState };
-  if (sibling && crossPostPolicy === 'skip' && !force) return { accept: false, code: 'same-asset-other-post', reason: 'This exact file is already saved for another post', matchKey: sibling.key, matchState: sibling.state };
-  return { accept: true, code: sibling ? 'new-for-post' : 'new', reason: sibling ? 'Same file exists for another post; each post keeps its own copy' : 'No matching download', matchKey: null, matchState: null };
+  if (existing)
+    return {
+      accept: true,
+      code: 'retry-failed',
+      reason: `Previous attempt ${existing.state}; queued again`,
+      matchKey,
+      matchState,
+    };
+  if (sibling && crossPostPolicy === 'skip' && !force)
+    return {
+      accept: false,
+      code: 'same-asset-other-post',
+      reason: 'This exact file is already saved for another post',
+      matchKey: sibling.key,
+      matchState: sibling.state,
+    };
+  return {
+    accept: true,
+    code: sibling ? 'new-for-post' : 'new',
+    reason: sibling ? 'Same file exists for another post; each post keeps its own copy' : 'No matching download',
+    matchKey: null,
+    matchState: null,
+  };
 }

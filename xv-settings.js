@@ -5,22 +5,43 @@
   let rows = [];
   let changedOnly = false;
 
-  const norm = text => String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const norm = text =>
+    String(text || '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
 
   // A "row" is the smallest unit a person looks for: one toggle, one field, one action button group.
   function collectRows() {
     rows = [];
     for (const group of $$('#settingsContent .settinggroup')) {
-      const items = [...group.querySelectorAll('.toggles > label, .formgrid > .field, .swatch, .theme-card, .toolbar-choice, .workspace-row, .workspace-save, .row > button, .seg > button, .settingHint, .remote-heading, .remote-toolbar')];
-      rows.push({ group, section: group.closest('.settings-section'), items: items.map(element => ({ element, text: norm(element.textContent + ' ' + (element.getAttribute('title') || '') + ' ' + (element.querySelector('input,select')?.dataset.setting || '')) })) });
+      const items = [
+        ...group.querySelectorAll(
+          '.toggles > label, .formgrid > .field, .swatch, .theme-card, .toolbar-choice, .workspace-row, .workspace-save, .row > button, .seg > button, .settingHint, .remote-heading, .remote-toolbar'
+        ),
+      ];
+      rows.push({
+        group,
+        section: group.closest('.settings-section'),
+        items: items.map(element => ({
+          element,
+          text: norm(
+            element.textContent +
+              ' ' +
+              (element.getAttribute('title') || '') +
+              ' ' +
+              (element.querySelector('input,select')?.dataset.setting || '')
+          ),
+        })),
+      });
     }
   }
-
 
   // A setting counts as changed when its saved value differs from the shipped default.
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   function changedKeys() {
-    const defaults = window.XVaultSettingDefaults, current = typeof settings === 'object' ? settings : null;
+    const defaults = window.XVaultSettingDefaults,
+      current = typeof settings === 'object' ? settings : null;
     if (!defaults || !current) return null;
     const keys = new Set();
     for (const element of $$('#settingsContent [data-setting]')) {
@@ -29,7 +50,11 @@
     }
     return keys;
   }
-  const isChanged = (element, keys) => !keys || [element, ...element.querySelectorAll('[data-setting]')].some(node => node.dataset?.setting && keys.has(node.dataset.setting));
+  const isChanged = (element, keys) =>
+    !keys ||
+    [element, ...element.querySelectorAll('[data-setting]')].some(
+      node => node.dataset?.setting && keys.has(node.dataset.setting)
+    );
   function refreshChangedChip() {
     const chip = $('#settingsChanged');
     if (!chip) return;
@@ -67,7 +92,11 @@
     document.body.classList.toggle('settings-searching', active);
     document.body.classList.toggle('settings-changed-only', changedOnly && !!keys);
     const empty = $('#settingsEmpty');
-    if (empty) { empty.hidden = any || !active; empty.textContent = changedOnly && keys && !q ? 'Every setting is at its default.' : 'No setting matches that search.'; }
+    if (empty) {
+      empty.hidden = any || !active;
+      empty.textContent =
+        changedOnly && keys && !q ? 'Every setting is at its default.' : 'No setting matches that search.';
+    }
   }
 
   function mount() {
@@ -85,37 +114,65 @@
     page.addEventListener('click', () => setTimeout(refreshChangedChip, 300));
     setTimeout(refreshChangedChip, 600);
     $('#settingsSearch')?.addEventListener('keydown', event => {
-      if (event.key === 'Escape' && event.target.value) { event.target.value = ''; filter(''); event.stopPropagation(); }
+      if (event.key === 'Escape' && event.target.value) {
+        event.target.value = '';
+        filter('');
+        event.stopPropagation();
+      }
     });
     $('#settingsLinks')?.addEventListener('click', event => {
       const link = event.target.closest('[data-section-link]');
       if (!link) return;
       const search = $('#settingsSearch');
-      if (search?.value) { search.value = ''; filter(''); }
+      if (search?.value) {
+        search.value = '';
+        filter('');
+      }
       const target = $(`#set-${link.dataset.sectionLink}`);
       const reduced = ['off', 'reduced'].includes(document.body.dataset.motion);
-      const content=$('#settingsContent');if(target&&content)content.scrollTo({top:target.getBoundingClientRect().top-content.getBoundingClientRect().top+content.scrollTop,behavior:reduced?'auto':'smooth'});
+      const content = $('#settingsContent');
+      if (target && content)
+        content.scrollTo({
+          top: target.getBoundingClientRect().top - content.getBoundingClientRect().top + content.scrollTop,
+          behavior: reduced ? 'auto' : 'smooth',
+        });
     });
     // Scroll-spy: the section nearest the top of the scroller owns the nav highlight.
     const sections = $$('#settingsContent .settings-section');
     const visibleNow = new Map();
     const mark = () => {
       const top = [...visibleNow.entries()].sort((a, b) => a[1] - b[1])[0]?.[0];
-      for (const link of $$('#settingsLinks [data-section-link]')) link.setAttribute('aria-current', String(link.dataset.sectionLink === top?.dataset.section));
+      for (const link of $$('#settingsLinks [data-section-link]'))
+        link.setAttribute('aria-current', String(link.dataset.sectionLink === top?.dataset.section));
     };
     if ('IntersectionObserver' in window) {
-      const observer = new IntersectionObserver(entries => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) visibleNow.set(entry.target, entry.boundingClientRect.top);
-          else visibleNow.delete(entry.target);
-        }
-        mark();
-      }, { root: page, rootMargin: '0px 0px -62% 0px', threshold: [0, 1] });
+      const observer = new IntersectionObserver(
+        entries => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) visibleNow.set(entry.target, entry.boundingClientRect.top);
+            else visibleNow.delete(entry.target);
+          }
+          mark();
+        },
+        { root: page, rootMargin: '0px 0px -62% 0px', threshold: [0, 1] }
+      );
       sections.forEach(section => observer.observe(section));
-      page.addEventListener('scroll', () => { for (const section of visibleNow.keys()) visibleNow.set(section, section.getBoundingClientRect().top); mark(); }, { passive: true });
+      page.addEventListener(
+        'scroll',
+        () => {
+          for (const section of visibleNow.keys()) visibleNow.set(section, section.getBoundingClientRect().top);
+          mark();
+        },
+        { passive: true }
+      );
     }
     $('#inboxReviewed')?.addEventListener('click', async () => {
-      if (!confirm('Mark every post currently in the Inbox as reviewed? Nothing is deleted or changed except the Inbox marker.')) return;
+      if (
+        !confirm(
+          'Mark every post currently in the Inbox as reviewed? Nothing is deleted or changed except the Inbox marker.'
+        )
+      )
+        return;
       await save({ inboxSince: Date.now() }, false);
       window.XVaultLibraryRecordUpdated?.([]);
       toast('Inbox cleared. New captures will arrive here again.');
@@ -126,7 +183,9 @@
       toast('Every unreviewed post is back in the Inbox.');
     });
     // Late-injected groups (X.com, Motion) join the search index when they arrive.
-    new MutationObserver(() => { rows = []; }).observe($('#settingsContent'), { childList: true, subtree: true });
+    new MutationObserver(() => {
+      rows = [];
+    }).observe($('#settingsContent'), { childList: true, subtree: true });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });

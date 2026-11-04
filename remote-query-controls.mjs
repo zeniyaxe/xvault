@@ -3,8 +3,13 @@
 // supersedes work issued by the same tab.
 export function beginRemoteQuery(controls, key, { query, sort, cursorPlanId = null } = {}) {
   const previous = controls.get(key);
-  const canShare = !!cursorPlanId && !!previous && !previous.cancelled &&
-    previous.query === query && previous.sort === sort && previous.planId === cursorPlanId;
+  const canShare =
+    !!cursorPlanId &&
+    !!previous &&
+    !previous.cancelled &&
+    previous.query === query &&
+    previous.sort === sort &&
+    previous.planId === cursorPlanId;
   if (canShare) {
     previous.requests++;
     return previous;

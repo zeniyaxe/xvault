@@ -1,10 +1,22 @@
+# Local helper configuration, credentials and state
 FFmpeg_Helper/config.json
 FFmpeg_Helper/.xvault*
+.env*
+
+# Logs, caches and tooling output
 *.log
 __pycache__/
-.env*
+node_modules/
 output/
-tests/
 .playwright-mcp/
+coverage/
+
+# Build artifacts — distribute via CI artifacts / GitHub Releases, never commit
+dist/
+*.zip
+*.crx
+*.pem
+
+# Personal agent notes
 AGENTS.md
 continue.md

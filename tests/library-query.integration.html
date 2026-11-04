@@ -1,0 +1,259 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Library query cursor invariants</title>
+<output id="result">Running</output>
+<script type="module">
+  import { replaceCompletedDownloadWithHistory } from '../library-storage.mjs';
+  import { readLibraryQueryPage, readLibraryRecords, readDownloadRows, updateLibraryRecord, moveLibraryToTrash, restoreLibraryFromTrash, mergeLibraryCapture, writeLibraryDownloads, deleteLibraryDownloads, deleteLibraryDownloadsByState, deleteCompletedDownloadIfEligible, clearLibraryData, readLibraryRevision, readLibraryDownloadRevision } from '../library-storage.mjs';
+  import { mergeCapturedRecord } from '../library-capture.mjs';
+  import { readStoredLibraryPlan, writeStoredLibraryPlan, deleteStoredLibraryPlan } from '../library-plan-storage.mjs';
+  import { readRemoteCursorPage } from '../remote-cursor-query.mjs';
+  const output = document.querySelector('#result');
+  const name = `xvault-query-test-${crypto.randomUUID()}`;
+  try {
+    let fullStoreReads = 0, fullCounts = 0;
+    const originalGetAll = IDBObjectStore.prototype.getAll;
+    IDBObjectStore.prototype.getAll = function (...args) { fullStoreReads++; return originalGetAll.apply(this, args); };
+    const originalStoreCount = IDBObjectStore.prototype.count, originalIndexCount = IDBIndex.prototype.count;
+    IDBObjectStore.prototype.count = function (...args) { fullCounts++; return originalStoreCount.apply(this, args); };
+    IDBIndex.prototype.count = function (...args) { fullCounts++; return originalIndexCount.apply(this, args); };
+    let planValueReads = 0;
+    const originalGet = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (...args) { if (this.name === 'libraryPlans') planValueReads++; return originalGet.apply(this, args); };
+    const db = await new Promise((resolve, reject) => {
+      const open = indexedDB.open(name, 1);
+      open.onupgradeneeded = () => {
+        const database = open.result;
+        database.createObjectStore('tweets', { keyPath: 'id' }).createIndex('archivedAt', 'archivedAt');
+        database.createObjectStore('trash', { keyPath: 'id' });
+        database.createObjectStore('checkpoints', { keyPath: 'key' });
+        const downloads = database.createObjectStore('downloads', { keyPath: 'key' });
+        downloads.createIndex('tweetId', 'item.tweetId');
+        downloads.createIndex('state', 'state');
+        database.createObjectStore('revisions', { keyPath: 'key' });
+        database.createObjectStore('libraryPlans', { keyPath: 'id' }).createIndex('updatedAt', 'updatedAt');
+      };
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('tweets', 'readwrite'), store = tx.objectStore('tweets');
+      for (const row of [
+        { id: 'a', archivedAt: 10, userMeta: { favorite: false } },
+        { id: 'b', archivedAt: 30, userMeta: { favorite: true } },
+        { id: 'c', archivedAt: 30, userMeta: { favorite: true } },
+        { id: 'd', archivedAt: 20, userMeta: { favorite: false } },
+        { id: 'legacy', text: 'missing sort key', userMeta: { favorite: true } }
+      ]) store.put(row);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+
+    const first = await readLibraryQueryPage(db, { sort: 'new', limit: 2 });
+    if (first.rows.map(row => row.id).join(',') !== 'c,b') throw Error(`Newest cursor order/tie break failed: ${first.rows.map(row => row.id)}`);
+    if (first.scanned !== 2 || first.materialized !== 2 || first.index !== 'archivedAt') throw Error('Query instrumentation did not describe bounded index reads');
+    if (first.cursorOperations < 2) throw Error('Query instrumentation omitted indexed cursor operations');
+    let cancellationChecks = 0;
+    const cancelled = await readLibraryQueryPage(db, { sort: 'new', limit: 2, cancelled: () => ++cancellationChecks >= 2 });
+    if (!cancelled.cancelled || cancelled.rows.length || cancelled.recordsRead > 1) throw Error('A cancelled cursor query retained or read an unbounded page');
+    const second = await readLibraryQueryPage(db, { sort: 'new', limit: 2, after: first.nextKey, expectedRevision: first.revision });
+    if (second.rows.map(row => row.id).join(',') !== 'd,a') throw Error(`Second cursor page duplicated or skipped tied rows: ${second.rows.map(row => row.id)}`);
+    const third = await readLibraryQueryPage(db, { sort: 'new', limit: 2, after: second.nextKey, expectedRevision: second.revision });
+    if (third.rows.map(row => row.id).join(',') !== 'legacy' || !third.done) throw Error('Legacy rows without indexed sort keys were omitted');
+
+    const remoteFirst = await readRemoteCursorPage(db, { query: '', sort: 'new', limit: 2, scanLimit: 2 });
+    const remoteSecond = await readRemoteCursorPage(db, { query: '', sort: 'new', limit: 2, scanLimit: 2, after: remoteFirst.nextKey, expectedRevision: remoteFirst.revision });
+    if (remoteFirst.rows.map(row => row.id).join(',') !== 'c,b' || remoteSecond.rows.map(row => row.id).join(',') !== 'd,a') throw Error('Remote chronological cursors duplicated or skipped a tied archive page');
+    if (remoteFirst.materialized !== 2 || remoteFirst.rows.length > 2) throw Error('Remote chronological page retained more than its requested records');
+    const sparseRemote = await readRemoteCursorPage(db, { query: 'fav:true', sort: 'new', limit: 2, scanLimit: 2 });
+    if (!sparseRemote.hasMore || sparseRemote.rows.map(row => row.id).join(',') !== 'c,b') throw Error('A sparse Remote query must return its page and an explicit continuation boundary');
+    const cancelledRemote = await readRemoteCursorPage(db, { query: 'fav:true', sort: 'new', limit: 2, scanLimit: 20, cancelled: () => true });
+    if (!cancelledRemote.cancelled || cancelledRemote.rows.length || cancelledRemote.hasMore) throw Error('Cancelled Remote scans must return no stale rows or continuation token');
+
+    const remoteName = `xvault-remote-cursor-${crypto.randomUUID()}`;
+    const remoteDb = await new Promise((resolve, reject) => {
+      const open = indexedDB.open(remoteName, 1);
+      open.onupgradeneeded = () => { const database = open.result; database.createObjectStore('tweets', { keyPath: 'id' }).createIndex('archivedAt', 'archivedAt'); database.createObjectStore('checkpoints', { keyPath: 'key' }); database.createObjectStore('downloads', { keyPath: 'key' }).createIndex('tweetId', 'item.tweetId'); };
+      open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = remoteDb.transaction('tweets', 'readwrite'), store = tx.objectStore('tweets');
+      for (let index = 0; index < 3000; index++) store.put({ id: String(1000000 + index), archivedAt: index + 1, text: `Synthetic remote post ${index}`, author: { handle: `maker${index % 40}` }, media: [], userMeta: { tags: index === 0 ? ['rare'] : [] } });
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    });
+    const largeRankedPage = await readLibraryRecords(remoteDb, Array.from({ length: 1200 }, (_, index) => String(1000000 + index)));
+    if (largeRankedPage.length !== 1200) throw Error('A 1,200-row ranked page exceeded the old mutation-ID limit during primary-key materialization');
+    let oversizedReadRejected = false;
+    try { await readLibraryRecords(remoteDb, Array.from({ length: 1501 }, (_, index) => String(1000000 + index))); } catch { oversizedReadRejected = true; }
+    if (!oversizedReadRejected) throw Error('Primary-key result materialization must retain an explicit maximum batch size');
+    const remoteSparseFirst = await readRemoteCursorPage(remoteDb, { query: 'tag:rare', sort: 'new', limit: 50, scanLimit: 2500, expectedRevision: 0 });
+    if (remoteSparseFirst.rows.length || !remoteSparseFirst.hasMore || remoteSparseFirst.scannedThisPage !== 2500) throw Error('Remote should stop after its bounded scan window when a match is sparse');
+    const remoteSparseNext = await readRemoteCursorPage(remoteDb, { query: 'tag:rare', sort: 'new', limit: 50, scanLimit: 2500, after: remoteSparseFirst.nextKey, expectedRevision: remoteSparseFirst.revision });
+    if (remoteSparseNext.rows.map(row => row.id).join(',') !== '1000000' || !remoteSparseNext.done || remoteSparseNext.scannedThisPage !== 500) throw Error('Remote continuation failed to find the sparse record without repeating or skipping the cursor boundary');
+    await updateLibraryRecord(remoteDb, '1000000', { favorite: true });
+    const remoteStale = await readRemoteCursorPage(remoteDb, { query: 'tag:rare', sort: 'new', limit: 50, after: remoteSparseFirst.nextKey, expectedRevision: remoteSparseFirst.revision });
+    if (!remoteStale.stale || remoteStale.rows.length) throw Error('Remote must invalidate an issued cursor when metadata changes');
+    remoteDb.close(); indexedDB.deleteDatabase(remoteName);
+
+    const legacyDownloadName = `xvault-legacy-downloads-${crypto.randomUUID()}`;
+    const legacyDownloadDb = await new Promise((resolve, reject) => {
+      const open = indexedDB.open(legacyDownloadName, 1);
+      open.onupgradeneeded = () => open.result.createObjectStore('downloads', { keyPath: 'key' });
+      open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = legacyDownloadDb.transaction('downloads', 'readwrite'), store = tx.objectStore('downloads');
+      for (let index = 0; index < 10050; index++) store.put({ key: String(index).padStart(6, '0'), state: 'failed', item: { tweetId: index === 10049 ? 'target' : 'unrelated' } });
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    });
+    const boundedLegacyDownloads = await readDownloadRows(legacyDownloadDb, ['target'], { totalLimit: 1 });
+    if (!boundedLegacyDownloads.truncated || boundedLegacyDownloads.scanned > 10000 || boundedLegacyDownloads.cursorOperations > 10001) throw Error('Legacy download fallback must stop at its explicit scan ceiling instead of walking the whole ledger');
+    legacyDownloadDb.close(); indexedDB.deleteDatabase(legacyDownloadName);
+
+    const staleBase = await readLibraryQueryPage(db, { sort: 'new', limit: 1 });
+    await updateLibraryRecord(db, 'a', { favorite: true });
+    const stale = await readLibraryQueryPage(db, { sort: 'new', limit: 2, after: staleBase.nextKey, expectedRevision: staleBase.revision });
+    if (!stale.stale || stale.rows.length) throw Error('A cursor silently continued across a committed metadata revision');
+
+    // Model a removal after the cursor transaction returns but before its
+    // selected records/download decorations reach the dashboard. The worker's
+    // post-decoration revision check must reject this apparently successful
+    // page instead of publishing the deleted row.
+    const decoratePage = await readLibraryQueryPage(db, { sort: 'new', limit: 1 });
+    const decorateId = String(decoratePage.rows[0]?.id || '');
+    if (!decorateId) throw Error('Could not prepare the page-decoration race fixture');
+    await moveLibraryToTrash(db, [decorateId]);
+    const afterDecorationRace = await readLibraryRevision(db);
+    if (afterDecorationRace === decoratePage.revision) throw Error('A concurrent removal failed to advance the query revision');
+    const staleDecoration = await readLibraryQueryPage(db, { sort: 'new', limit: 1, after: decoratePage.nextKey, expectedRevision: decoratePage.revision });
+    if (!staleDecoration.stale || staleDecoration.rows.length) throw Error('A page whose selected record was removed during decoration was not invalidated');
+    const restoredDecoration = await restoreLibraryFromTrash(db, [decorateId]);
+    if (restoredDecoration.restored !== 1) throw Error('The page-decoration race fixture could not be restored');
+
+    const moved = await moveLibraryToTrash(db, ['c']);
+    if (moved.moved !== 1) throw Error('Trash move did not commit');
+    const fresh = await readLibraryQueryPage(db, { sort: 'new', limit: 10, match: row => row.userMeta?.favorite === true });
+    if (fresh.rows.some(row => row.id === 'c')) throw Error('A cursor resurrected a removed record');
+    const restored = await restoreLibraryFromTrash(db, ['c']);
+    if (restored.restored !== 1) throw Error('Restore did not commit');
+    const afterRestore = await readLibraryQueryPage(db, { sort: 'new', limit: 10, match: row => row.userMeta?.favorite === true });
+    if (!afterRestore.rows.some(row => row.id === 'c')) throw Error('A committed restore was not visible in a fresh query');
+
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('tweets', 'readwrite');
+      tx.objectStore('tweets').put({ id: 'capture-race', archivedAt: 1, text: 'baseline', contentObservedAt: 100, profileObservedAt: 100, metricsObservedAt: 100, lastSeenAt: 100, author: { handle: 'baseline' }, metrics: { likes: 1 }, media: [{ id: 'same-media', url: 'baseline.jpg' }], provenance: Array.from({ length: 24 }, (_, index) => ({ source: `existing-${index}`, capturedAt: index + 1 })), userMeta: { note: 'Keep this note', favorite: true, tags: ['private'] } });
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    });
+    const makeCapture = (version, observedAt) => ({ id: 'capture-race', text: version, observedAt, contentObservedAt: observedAt, profileObservedAt: observedAt, metricsObservedAt: observedAt, lastSeenAt: observedAt, author: { handle: version }, metrics: { likes: observedAt }, media: [{ id: 'same-media', url: `${version}.jpg`, type: 'photo', provenance: [{ source: `media-${version}`, capturedAt: observedAt }] }, { id: `${version}-only`, url: `${version}-only.jpg`, type: 'photo' }], provenance: [...Array.from({ length: 24 }, (_, index) => ({ source: `prepared-history-${version}-${index}`, capturedAt: observedAt - 100 + index })), { source: `prepared-${version}`, capturedAt: observedAt }], userMeta: { note: `stale ${version}` }, archiveSource: version, sourceFlags: [version], archiveSources: [version] });
+    const [newerCapture, olderCapture] = await Promise.all([
+      mergeLibraryCapture(db, makeCapture('newer', 400), mergeCapturedRecord),
+      mergeLibraryCapture(db, makeCapture('older', 200), mergeCapturedRecord)
+    ]);
+    const captureRow = await new Promise((resolve, reject) => {
+      const tx = db.transaction('tweets', 'readonly'), request = tx.objectStore('tweets').get('capture-race');
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    if (captureRow.text !== 'newer' || captureRow.author.handle !== 'newer' || captureRow.profileObservedAt !== 400 || captureRow.metrics.likes !== 400 || captureRow.metricsObservedAt !== 400 || captureRow.contentObservedAt !== 400 || captureRow.media.find(item => item.id === 'same-media')?.url !== 'newer.jpg') throw Error('Concurrent stale capture replaced newer committed evidence');
+    if (captureRow.userMeta.note !== 'Keep this note' || !captureRow.userMeta.favorite || captureRow.userMeta.tags[0] !== 'private') throw Error('Concurrent capture overwrote personal metadata');
+    if (!captureRow.provenance.some(item => item.source === 'older' && item.capturedAt === 200) || !captureRow.provenance.some(item => item.source === 'newer' && item.capturedAt === 400) || !newerCapture.stored || !olderCapture.stored) throw Error('Capture-level source provenance was discarded instead of merged');
+    if (!captureRow.provenance.some(item => item.source === 'existing-23')) throw Error('Stale capture history evicted the newest retained provenance entries');
+    const sameMedia = captureRow.media.find(item => item.id === 'same-media');
+    if (!captureRow.media.some(item => item.id === 'older-only') || !captureRow.media.some(item => item.id === 'newer-only') || !sameMedia?.provenance?.some(item => item.capturedAt === 200 && item.url === 'older.jpg') || !sameMedia?.provenance?.some(item => item.capturedAt === 400 && item.url === 'newer.jpg')) throw Error('Older media evidence was lost or replaced instead of retained per media identity');
+    if (!captureRow.sourceFlags.includes('older') || !captureRow.sourceFlags.includes('newer')) throw Error('Competing capture source flags were lost');
+
+    const download = { key: 'capture-download', state: 'complete', totalBytes: 4096, verification: { state: 'verified' }, item: { tweetId: 'capture-race', mediaId: 'same-media', url: 'newer.jpg' } };
+    const wrote = await writeLibraryDownloads(db, [download]);
+    if (wrote.changedIds.join(',') !== 'capture-race' || await readLibraryDownloadRevision(db) !== 1) throw Error('A download completion did not advance its own query revision');
+    await writeLibraryDownloads(db, [{ ...download, bytesReceived: 4096, updatedAt: Date.now() }]);
+    if (await readLibraryDownloadRevision(db) !== 1) throw Error('Progress-only writes unnecessarily invalidated Library download queries');
+    const downloaded = await readLibraryQueryPage(db, { sort: 'new', limit: 1, downloads: true, expectedDownloadRevision: 1, match: (_, summary) => summary.downloaded });
+    if (downloaded.stale || downloaded.rows.length !== 1 || downloaded.downloadRevision !== 1) throw Error('Download-filter query did not use the committed download revision');
+    const downloadCursor = downloaded.nextKey;
+    const secondDownload = await readLibraryQueryPage(db, { sort: 'new', limit: 2, downloads: true, after: downloadCursor, expectedRevision: downloaded.revision, expectedDownloadRevision: downloaded.downloadRevision, match: (_, summary) => summary.downloaded });
+    if (secondDownload.rows.length > 0 && secondDownload.stale) throw Error('Unexpected stale download query result');
+    const removedDownload = await deleteLibraryDownloads(db, ['capture-download']);
+    if (removedDownload.changedIds[0] !== 'capture-race' || await readLibraryDownloadRevision(db) !== 2) throw Error('Removing a completed file did not advance the download query revision');
+    const staleDownload = await readLibraryQueryPage(db, { sort: 'new', limit: 2, downloads: true, after: downloadCursor, expectedRevision: downloaded.revision, expectedDownloadRevision: downloaded.downloadRevision, match: (_, summary) => summary.downloaded });
+    if (!staleDownload.stale || staleDownload.rows.length) throw Error('A paged download filter continued across a file-state mutation');
+
+    // A verified completion may be cleared only if the current committed row
+    // still has no conversion dependency. Two concurrent finalizers must not
+    // delete twice or advance the query generation twice.
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('downloads', 'readwrite'), store = tx.objectStore('downloads');
+      store.put({ key: 'conversion-race', state: 'complete', totalBytes: 8192, verification: { state: 'verified' }, item: { tweetId: 'conversion-race', mediaId: 'gif-source', url: 'original.mp4' } });
+      store.put({ key: 'retained-conversion', state: 'complete', totalBytes: 4096, verification: { state: 'verified' }, conversionExpected: true, item: { tweetId: 'retained-conversion', mediaId: 'source', url: 'retained.mp4' } });
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    });
+    const [conditionalA, conditionalB] = await Promise.all([
+      deleteCompletedDownloadIfEligible(db, 'conversion-race'),
+      deleteCompletedDownloadIfEligible(db, 'conversion-race')
+    ]);
+    if ([conditionalA, conditionalB].filter(result => result.deleted).length !== 1) throw Error('Concurrent verified-download cleanup did not commit exactly once');
+    if (await readLibraryDownloadRevision(db) !== 3) throw Error('Conditional completion cleanup did not bump the download query revision exactly once');
+    const conversionPreserved = await deleteCompletedDownloadIfEligible(db, 'retained-conversion');
+    if (conversionPreserved.deleted || conversionPreserved.reason !== 'conversion-pending') throw Error('Verified-download cleanup removed a row already claimed by derivative generation');
+    const retainedConversion = await new Promise((resolve, reject) => {
+      const tx = db.transaction('downloads', 'readonly'), request = tx.objectStore('downloads').get('retained-conversion');
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    if (!retainedConversion?.conversionExpected || await readLibraryDownloadRevision(db) !== 3) throw Error('A derivative source or its query revision was lost during conditional cleanup');
+
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('downloads', 'readwrite'), store = tx.objectStore('downloads');
+      for (const row of [
+        { key: 'bulk-queued', state: 'queued', item: { tweetId: 'bulk-queued' } },
+        { key: 'bulk-retry', state: 'retry-wait', item: { tweetId: 'bulk-retry' } },
+        { key: 'bulk-failed', state: 'failed', item: { tweetId: 'bulk-failed' } },
+        { key: 'bulk-complete', state: 'complete', verification: { state: 'verified' }, item: { tweetId: 'bulk-complete', url: 'complete.jpg' } }
+      ]) store.put(row);
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    });
+    let retryCleanupCalls = 0;
+    const removedStates = await deleteLibraryDownloadsByState(db, ['queued', 'retry-wait', 'failed'], { onDelete: () => { retryCleanupCalls++; } });
+    if (removedStates.deleted !== 3 || removedStates.recordsScanned !== 3 || removedStates.cursorOperations !== 3 || retryCleanupCalls !== 3) throw Error('Indexed state cleanup did not process only its matching cursor rows');
+    if (removedStates.changedIds.length !== 3 || await readLibraryDownloadRevision(db) !== 3) throw Error('Removing non-complete queue rows should notify their posts without invalidating downloaded-result cursors');
+    const preservedComplete = await new Promise((resolve, reject) => {
+      const tx = db.transaction('downloads', 'readonly'), request = tx.objectStore('downloads').get('bulk-complete');
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    if (!preservedComplete) throw Error('State cleanup deleted a row outside the requested states');
+    const completedCleanup = await deleteLibraryDownloadsByState(db, ['complete']);
+    if (completedCleanup.deleted !== 2 || await readLibraryDownloadRevision(db) !== 4) throw Error('Bulk completed-file cleanup must invalidate download queries once per atomic transaction');
+    if (completedCleanup.recordsScanned !== 2 || completedCleanup.cursorOperations !== 2) throw Error('Completed-file cleanup must report bounded cursor work rather than a store materialization');
+
+    const beforeClear = await readLibraryRevision(db);
+    await clearLibraryData(db, ['tweets', 'trash']);
+    const afterClear = await readLibraryRevision(db);
+    const postClear = await readLibraryQueryPage(db, { sort: 'new', limit: 5, after: afterRestore.nextKey, expectedRevision: afterRestore.revision });
+    if (afterClear <= beforeClear || !postClear.stale || postClear.rows.length) throw Error('Atomic clear did not invalidate outstanding Library cursors');
+    const compactPlan = value => ({ scanned: 1, matched: 1, rankLimit: 1, truncated: false, ranks: [{ id: value }] });
+    for (const id of ['plan-a', 'plan-b', 'plan-c']) await writeStoredLibraryPlan(db, id, `identity-${id}`, compactPlan(id), 3);
+    await writeStoredLibraryPlan(db, 'plan-d', 'identity-d', compactPlan('plan-d'), 3);
+    if (planValueReads) throw Error('Persistent plan eviction materialized an existing rank-plan value instead of using key cursors');
+    const storedPlans = await Promise.all(['plan-a', 'plan-b', 'plan-c', 'plan-d'].map(id => readStoredLibraryPlan(db, id)));
+    if (storedPlans.filter(Boolean).length !== 3 || storedPlans[0] !== null || !storedPlans[3] || storedPlans[3].plan.ranks[0].id !== 'plan-d') throw Error(`Persistent query-plan cache did not evict only the oldest compact plan at its three-plan bound: ${JSON.stringify(storedPlans.map(row=>row?.id||null))}`);
+    await deleteStoredLibraryPlan(db, 'plan-b');
+    if (await readStoredLibraryPlan(db, 'plan-b')) throw Error('A stale persistent query plan was not deleted');
+    await clearLibraryData(db, ['tweets', 'trash', 'libraryPlans']);
+    if (await readStoredLibraryPlan(db, 'plan-d')) throw Error('Clearing Library data must remove disposable persisted rank plans too');
+    if (fullStoreReads || fullCounts) throw Error(`A bounded Library/Remote query used a whole-store read/count (${fullStoreReads} getAll, ${fullCounts} count)`);
+
+    const readDownload=key=>new Promise((resolve,reject)=>{const request=db.transaction('downloads').objectStore('downloads').get(key);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});
+    await writeLibraryDownloads(db,[{key:'replacement',state:'complete',downloadId:81,item:{tweetId:'d'},verificationState:'verified',conversionState:'finished-latest',filename:'first.mp4'}]);
+    const replaced=await replaceCompletedDownloadWithHistory(db,{key:'replacement',state:'queued',item:{tweetId:'d'}},{expectedDownloadId:81});
+    const history=await readDownload(replaced.historyKey);
+    if(!replaced.queued||history.conversionState!=='finished-latest'||history.filename!=='first.mp4'||(await readDownload('replacement')).state!=='queued')throw Error('Replacement must atomically preserve current completed evidence');
+    const competing=await replaceCompletedDownloadWithHistory(db,{key:'replacement',state:'queued',item:{tweetId:'d'}},{expectedDownloadId:81});if(competing.queued)throw Error('A competing replacement must not overwrite active work');
+    await writeLibraryDownloads(db,[{key:'abort-replacement',state:'complete',downloadId:82,item:{tweetId:'d'},filename:'retained.mp4'}]);
+    const originalPut=IDBObjectStore.prototype.put;let quotaRejected=false;
+    IDBObjectStore.prototype.put=function(value,...args){if(String(value.key).startsWith('abort-replacement|copy:'))throw new DOMException('Synthetic quota exhausted','QuotaExceededError');return originalPut.call(this,value,...args)};
+    try{await replaceCompletedDownloadWithHistory(db,{key:'abort-replacement',state:'queued',item:{tweetId:'d'}},{expectedDownloadId:82})}catch{quotaRejected=true}finally{IDBObjectStore.prototype.put=originalPut}
+    if(!quotaRejected||(await readDownload('abort-replacement')).filename!=='retained.mp4')throw Error('Quota failure must leave the previous completed record intact');
+    db.close();
+    indexedDB.deleteDatabase(name);
+    output.textContent = 'PASS';
+  } catch (error) {
+    output.textContent = `FAIL: ${error.stack || error.message}`;
+  }
+</script>
