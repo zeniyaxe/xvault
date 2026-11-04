@@ -42,3 +42,28 @@ test('X content scripts are limited to capture actions', () => {
     )
   );
 });
+
+test('captured relationship and entity fields are validated at the content boundary', async () => {
+  const { authorizeMessage } = await import('../message-boundary.mjs');
+  const sender = { id: 'ext', url: 'https://x.com/home', tab: { id: 1 }, frameId: 0 };
+  const row = {
+    id: '1',
+    text: 'ok',
+    quotedPostId: '2',
+    retweetedPostId: '3',
+    replyToHandle: 'someone_1',
+    links: ['https://example.com/a'],
+    hashtags: ['space'],
+    mentions: ['nasa'],
+  };
+  assert.equal(authorizeMessage({ type: 'STORE_RECORDS', tweets: [row] }, sender, 'ext'), 'content');
+  for (const bad of [
+    { quotedPostId: 'abc' },
+    { links: ['javascript:alert(1)'] },
+    { links: Array.from({ length: 21 }, (_, i) => `https://e.com/${i}`) },
+    { hashtags: ['has space'] },
+    { mentions: ['bad-handle!'] },
+    { replyToHandle: '<script>' },
+  ])
+    assert.throws(() => authorizeMessage({ type: 'STORE_RECORDS', tweets: [{ ...row, ...bad }] }, sender, 'ext'));
+});

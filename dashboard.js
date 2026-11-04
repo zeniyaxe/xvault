@@ -447,6 +447,7 @@ function page(n) {
       home: 'Capture',
       archive: 'Capture',
       library: 'Library',
+      atlas: 'Atlas',
       explorer: 'Explore',
       media: 'Downloads',
       health: 'System',
@@ -468,6 +469,7 @@ function page(n) {
   }
   if (n === 'sessions') sessions();
   if (n === 'home') sessions(true);
+  if (n === 'atlas') window.XVaultAtlas?.show();
 }
 async function refresh() {
   if (!$('#page-library')?.classList.contains('show')) await stats();

@@ -90,8 +90,35 @@ export default [
   },
   { files: ['archive-recovery-ui.mjs'], languageOptions: { globals: dashboardGlobals } },
   {
-    files: ['scripts/**', 'tests/**', 'eslint.config.mjs'],
+    files: ['scripts/**', 'tests/**', 'tools/**', 'eslint.config.mjs'],
     languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: { ...globals.node } },
     rules,
+  },
+  // Browser-driven harnesses: callbacks passed to page.evaluate() run inside the dashboard or a fixture page, so they
+  // see the page's globals plus the window properties the harness installs itself.
+  {
+    files: ['tests/**/*-browser.mjs', 'tests/**/*-ui.mjs', 'tests/library-profile.mjs'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.webextensions,
+        ...dashboardGlobals,
+        XVaultLibraryQueryState: 'readonly',
+        XVaultLibraryRows: 'readonly',
+        XVaultLibraryMetrics: 'readonly',
+        XVaultRemoteDrafts: 'readonly',
+        messages: 'writable',
+        release: 'writable',
+        receiptStatus: 'writable',
+        __downloadEvents: 'writable',
+        __started: 'writable',
+        __presenceSearch: 'writable',
+        __presenceFetch: 'writable',
+        __verificationFetch: 'writable',
+        __originalTransaction: 'writable',
+        __cancelBindingOnce: 'writable',
+        __originalPut: 'writable',
+      },
+    },
   },
 ];

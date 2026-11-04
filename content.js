@@ -508,6 +508,10 @@ try {
       media: uniq(media),
       conversationId: l.conversation_id_str || null,
       replyToId: l.in_reply_to_status_id_str || null,
+      replyToHandle: l.in_reply_to_screen_name || null,
+      quotedPostId: relatedPostId(l.quoted_status_id_str, x?.quoted_status_result),
+      retweetedPostId: relatedPostId(null, l.retweeted_status_result || x?.retweeted_status_result),
+      ...postEntities(l, x),
       language: l.lang || null,
       sensitive: Boolean(l.possibly_sensitive || l.possibly_sensitive_editable || x?.possibly_sensitive),
       sourceFlags: [meta.source, meta.operation].filter(Boolean),
@@ -523,6 +527,39 @@ try {
       observedRunId: meta?.context?.runId || meta?.runId || null,
       archivedAt: Date.now(),
     };
+  }
+  // Relationship ids are stored on the post so quotes, reposts and threads can be rebuilt offline.
+  function relatedPostId(direct, wrapped) {
+    const value = direct || unwrap(wrapped)?.rest_id || unwrap(wrapped)?.legacy?.id_str || null;
+    return value && /^\d{1,32}$/.test(String(value)) ? String(value) : null;
+  }
+  // Expanded links, hashtags and mentions power domain:, #tag and @name search without touching post text.
+  function postEntities(l, x) {
+    const sets = [l?.entities, x?.note_tweet?.note_tweet_results?.result?.entity_set].filter(Boolean);
+    const links = new Set(),
+      hashtags = new Set(),
+      mentions = new Set();
+    for (const set of sets) {
+      for (const item of set.urls || []) {
+        const href = String(item?.expanded_url || '');
+        if (/^https?:\/\/[^\s]{1,2040}$/i.test(href) && links.size < 20) links.add(href);
+      }
+      for (const item of set.hashtags || []) {
+        const tag = String(item?.text || '')
+          .toLowerCase()
+          .slice(0, 140);
+        if (tag && hashtags.size < 30) hashtags.add(tag);
+      }
+      for (const item of set.user_mentions || []) {
+        const handle = String(item?.screen_name || '').toLowerCase();
+        if (/^[a-z0-9_]{1,30}$/.test(handle) && mentions.size < 50) mentions.add(handle);
+      }
+    }
+    const out = {};
+    if (links.size) out.links = [...links];
+    if (hashtags.size) out.hashtags = [...hashtags];
+    if (mentions.size) out.mentions = [...mentions];
+    return out;
   }
   function parseUser(n) {
     const x = unwrap(n),

@@ -48,13 +48,72 @@
     return compileSingle(raw);
   }
 
+  const DAY = 86400000;
+  const RELATIVE_UNITS = { h: 3600000, d: DAY, w: 7 * DAY, m: 30 * DAY, y: 365 * DAY };
+  const IS_VALUES = ['reply', 'quote', 'repost', 'original', 'thread', 'favorite', 'sensitive', 'media', 'text'];
+
+  function dayStamp(value) {
+    const stamp = /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
+    return Number.isFinite(stamp) && new Date(stamp).toISOString().slice(0, 10) === value ? stamp : NaN;
+  }
+
   function compileSingle(token) {
     const [rawKey, ...rest] = String(token).split(':');
     const value = rest.join(':').replace(/^"|"$/g, '').toLowerCase();
     if (!value) {
-      return { kind: 'text', value: String(token).toLowerCase() };
+      const plain = String(token).toLowerCase();
+      if (/^#[^\s#]{1,140}$/u.test(plain)) return { kind: 'hashtag', value: plain.slice(1) };
+      if (/^@[a-z0-9_]{1,30}$/.test(plain)) return { kind: 'mention', value: plain.slice(1) };
+      return { kind: 'text', value: plain };
     }
     const key = rawKey.toLowerCase();
+    if (key === 'on' || key === 'archived-on') {
+      const stamp = dayStamp(value);
+      if (!Number.isFinite(stamp)) return { kind: 'never', issue: `${key}: use a valid YYYY-MM-DD date` };
+      return { kind: 'range', field: key === 'on' ? 'postedAt' : 'archivedAt', start: stamp, end: stamp + DAY };
+    }
+    if (key === 'year' || key === 'archived-year') {
+      if (!/^\d{4}$/.test(value)) return { kind: 'never', issue: `${key}: use a four-digit year` };
+      return {
+        kind: 'range',
+        field: key === 'year' ? 'postedAt' : 'archivedAt',
+        start: Date.UTC(Number(value), 0, 1),
+        end: Date.UTC(Number(value) + 1, 0, 1),
+      };
+    }
+    if (key === 'within' || key === 'archived-within') {
+      const match = /^(\d{1,4})([hdwmy])$/.exec(value);
+      if (!match) return { kind: 'never', issue: `${key}: use a span such as 24h, 7d, 2w, 3m or 1y` };
+      return {
+        kind: 'range',
+        field: key === 'within' ? 'postedAt' : 'archivedAt',
+        start: Date.now() - Number(match[1]) * RELATIVE_UNITS[match[2]],
+        end: Number.MAX_SAFE_INTEGER,
+      };
+    }
+    if (key === 'lang' || key === 'language') return { kind: 'language', value };
+    if (key === 'is') {
+      const wanted = value === 'retweet' || value === 'rt' ? 'repost' : value === 'self-thread' ? 'thread' : value;
+      return IS_VALUES.includes(wanted)
+        ? { kind: 'is', value: wanted }
+        : { kind: 'never', issue: `is: use ${IS_VALUES.join(', ')}` };
+    }
+    if (key === 'domain' || key === 'site') return { kind: 'domain', value: value.replace(/^www\./, '') };
+    if (key === 'hashtag') return { kind: 'hashtag', value: value.replace(/^#/, '') };
+    if (key === 'mention' || key === 'mentions') return { kind: 'mention', value: value.replace(/^@/, '') };
+    if (key === 'thread' || key === 'conversation') {
+      if (!/^\d{1,32}$/.test(value)) return { kind: 'never', issue: `${key}: use a post ID` };
+      return { kind: 'conversation', value };
+    }
+    if (key === 'quotes' || key === 'quoting') {
+      if (!/^\d{1,32}$/.test(value)) return { kind: 'never', issue: `${key}: use a post ID` };
+      return { kind: 'quotes', value };
+    }
+    if (key === 'media' || key === 'items') {
+      const match = /^(>=|<=|>|<|=)?(\d{1,3})$/.exec(value);
+      if (!match) return { kind: 'never', issue: `${key}: use a count such as >2` };
+      return { kind: 'mediaCount', operator: match[1] || '=', number: Number(match[2]) };
+    }
     if (['before', 'after', 'archived-before', 'archived-after'].includes(key)) {
       const stamp = /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
       if (!Number.isFinite(stamp) || new Date(stamp).toISOString().slice(0, 10) !== value)
@@ -134,7 +193,46 @@
     return (compiled || []).some(visit);
   }
 
+  function compareNumber(value, operator, number) {
+    if (operator === '>') return value > number;
+    if (operator === '<') return value < number;
+    if (operator === '>=') return value >= number;
+    if (operator === '<=') return value <= number;
+    return value === number;
+  }
+
+  function matchIs(row, value) {
+    if (value === 'reply') return !!row.isReply;
+    if (value === 'quote') return !!row.isQuote;
+    if (value === 'repost') return !!row.isRepost;
+    if (value === 'original') return !row.isReply && !row.isRepost;
+    if (value === 'thread') return !!row.isSelfThread;
+    if (value === 'favorite') return !!row.favorite;
+    if (value === 'sensitive') return !!row.sensitive;
+    if (value === 'media') return row.mediaCount > 0;
+    if (value === 'text') return !row.mediaCount;
+    return false;
+  }
+
   function matchRule(row, rule) {
+    if (rule.kind === 'range') {
+      const value = Number(row[rule.field]);
+      return Number.isFinite(value) && value > 0 && value >= rule.start && value < rule.end;
+    }
+    if (rule.kind === 'language') return String(row.language || '') === rule.value;
+    if (rule.kind === 'is') return matchIs(row, rule.value);
+    if (rule.kind === 'hashtag')
+      return (row.hashtags || []).includes(rule.value) || String(row.text || '').includes(`#${rule.value}`);
+    if (rule.kind === 'mention')
+      return (row.mentions || []).includes(rule.value) || String(row.text || '').includes(`@${rule.value}`);
+    if (rule.kind === 'domain')
+      return (
+        (row.domains || []).some(domain => domain === rule.value || domain.endsWith(`.${rule.value}`)) ||
+        String(row.text || '').includes(rule.value)
+      );
+    if (rule.kind === 'conversation') return row.conversationId === rule.value || row.id === rule.value;
+    if (rule.kind === 'quotes') return row.quotedPostId === rule.value;
+    if (rule.kind === 'mediaCount') return compareNumber(Number(row.mediaCount) || 0, rule.operator, rule.number);
     if (rule.kind === 'date') {
       const value = Number(row[rule.field]);
       return Number.isFinite(value) && value > 0 && (rule.after ? value >= rule.value : value < rule.value);
@@ -302,11 +400,37 @@
       annotationText: annotationTexts.join(' '),
       archivedAt: Number(post.archivedAt || 0),
       postedAt: new Date(post.createdAt || 0).getTime(),
+      language: String(post.language || '').toLowerCase(),
+      hashtags: Array.isArray(post.hashtags) ? post.hashtags.map(value => String(value).toLowerCase()) : [],
+      mentions: Array.isArray(post.mentions) ? post.mentions.map(value => String(value).toLowerCase()) : [],
+      domains: linkDomains(post.links),
+      conversationId: String(post.conversationId || ''),
+      quotedPostId: String(post.quotedPostId || ''),
+      isReply: !!post.replyToId,
+      isQuote: !!post.quotedPostId,
+      isRepost: !!post.retweetedPostId || /^rt @/i.test(String(post.text || '')),
+      isSelfThread:
+        !!post.replyToId &&
+        !!post.replyToHandle &&
+        String(post.replyToHandle).toLowerCase() ===
+          String(post.author?.handle || '')
+            .replace(/^@/, '')
+            .toLowerCase(),
       knownBytes: downloads
         .filter(row => row.state === 'complete')
         .reduce((total, row) => total + Math.max(0, Number(row.totalBytes) || 0), 0),
       randomOrder: options.randomOrder || 0,
     };
+  }
+
+  function linkDomains(links) {
+    if (!Array.isArray(links) || !links.length) return [];
+    const domains = [];
+    for (const link of links) {
+      const match = /^https?:\/\/([^/?#:]+)/i.exec(String(link || ''));
+      if (match) domains.push(match[1].toLowerCase().replace(/^www\./, ''));
+    }
+    return domains;
   }
 
   // Non-indexed sorts with no filters need only the values used by the
@@ -342,5 +466,6 @@
     matchesCompiledQuery,
     compareRows,
     searchRecords,
+    linkDomains,
   });
 });

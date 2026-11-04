@@ -1,41 +1,127 @@
 const assert = require('node:assert/strict');
-const { isDownloaded, paginate, sortPosts, replaceSelection, addSelection, invertSelection, applySelectionRange } = require('../library-model.js');
+const {
+  isDownloaded,
+  paginate,
+  sortPosts,
+  replaceSelection,
+  addSelection,
+  invertSelection,
+  applySelectionRange,
+} = require('../library-model.js');
 
 const post = { id: '42' };
 assert.equal(isDownloaded(post, new Map()), false);
 assert.equal(isDownloaded(post, new Map([['42', [{ state: 'failed' }]]])), false);
 assert.equal(isDownloaded(post, new Map([['42', [{ state: 'complete', verificationState: 'mismatch' }]]])), false);
 assert.equal(isDownloaded(post, new Map([['42', [{ state: 'complete', verificationState: 'verified' }]]])), true);
-assert.equal(isDownloaded(post, new Map([['42', [{ state: 'complete', verificationState: 'verification-unavailable' }]]])), true);
-const {downloadedMediaCount}=require('../library-model.js');
-assert.equal(typeof downloadedMediaCount,'function','saved media counts must distinguish media assets from retained file copies');
-const copiedPost={id:'42',media:[{id:'m',type:'photo',url:'https://pbs.twimg.com/media/Same.jpg'}]};
-const copiedFiles=new Map([['42',[{state:'complete',item:{url:'https://pbs.twimg.com/media/Same?format=png'}},{state:'complete',item:{url:'https://pbs.twimg.com/media/Same.jpg:orig'}}]]]);
-assert.equal(downloadedMediaCount(copiedPost,copiedFiles),1,'two intentionally retained files represent one saved media asset');
+assert.equal(
+  isDownloaded(post, new Map([['42', [{ state: 'complete', verificationState: 'verification-unavailable' }]]])),
+  true
+);
+const { downloadedMediaCount } = require('../library-model.js');
+assert.equal(
+  typeof downloadedMediaCount,
+  'function',
+  'saved media counts must distinguish media assets from retained file copies'
+);
+const copiedPost = { id: '42', media: [{ id: 'm', type: 'photo', url: 'https://pbs.twimg.com/media/Same.jpg' }] };
+const copiedFiles = new Map([
+  [
+    '42',
+    [
+      { state: 'complete', item: { url: 'https://pbs.twimg.com/media/Same?format=png' } },
+      { state: 'complete', item: { url: 'https://pbs.twimg.com/media/Same.jpg:orig' } },
+    ],
+  ],
+]);
+assert.equal(
+  downloadedMediaCount(copiedPost, copiedFiles),
+  1,
+  'two intentionally retained files represent one saved media asset'
+);
 
 const records = Array.from({ length: 125 }, (_, n) => ({ id: n, archivedAt: n, metrics: { likes: n } }));
-assert.deepEqual(paginate(records, 0, 50).rows.map(x => x.id).slice(0, 2), [0, 1]);
-assert.deepEqual(paginate(records, 1, 50).rows.map(x => x.id).slice(0, 2), [50, 51]);
+assert.deepEqual(
+  paginate(records, 0, 50)
+    .rows.map(x => x.id)
+    .slice(0, 2),
+  [0, 1]
+);
+assert.deepEqual(
+  paginate(records, 1, 50)
+    .rows.map(x => x.id)
+    .slice(0, 2),
+  [50, 51]
+);
 assert.equal(paginate(records, 100, 50).pageIndex, 2);
 assert.equal(paginate([], 8, 50).pages, 1);
 assert.equal(paginate(records, 0, 300).rows.length, 125, 'existing page-size setting must be honored');
-assert.equal(paginate(Array.from({length: 500}, (_, n) => n), 0, 300).rows.length, 300);
-assert.deepEqual(sortPosts(records, 'likes').slice(0, 2).map(x => x.id), [124, 123]);
-assert.deepEqual(sortPosts([{ id: 'a', randomOrder: 9 }, { id: 'b', randomOrder: 2 }], 'random').map(x => x.id), ['b', 'a']);
+assert.equal(
+  paginate(
+    Array.from({ length: 500 }, (_, n) => n),
+    0,
+    300
+  ).rows.length,
+  300
+);
+assert.deepEqual(
+  sortPosts(records, 'likes')
+    .slice(0, 2)
+    .map(x => x.id),
+  [124, 123]
+);
+assert.deepEqual(
+  sortPosts(
+    [
+      { id: 'a', randomOrder: 9 },
+      { id: 'b', randomOrder: 2 },
+    ],
+    'random'
+  ).map(x => x.id),
+  ['b', 'a']
+);
 assert.equal(records[0].id, 0, 'sorting must not mutate the source Library order');
 
 const startingSelection = new Set(['a', 'b']);
-assert.deepEqual([...replaceSelection(['x', 'y', 'x'])], ['x', 'y'], 'select all results replaces the previous selection and removes duplicate IDs');
-assert.deepEqual([...addSelection(startingSelection, ['b', 'c'])], ['a', 'b', 'c'], 'select page adds without losing selections from other pages');
-assert.deepEqual([...invertSelection(startingSelection, ['b', 'c'])], ['a', 'c'], 'invert page toggles only the supplied visible IDs');
+assert.deepEqual(
+  [...replaceSelection(['x', 'y', 'x'])],
+  ['x', 'y'],
+  'select all results replaces the previous selection and removes duplicate IDs'
+);
+assert.deepEqual(
+  [...addSelection(startingSelection, ['b', 'c'])],
+  ['a', 'b', 'c'],
+  'select page adds without losing selections from other pages'
+);
+assert.deepEqual(
+  [...invertSelection(startingSelection, ['b', 'c'])],
+  ['a', 'c'],
+  'invert page toggles only the supplied visible IDs'
+);
 assert.deepEqual([...startingSelection], ['a', 'b'], 'selection helpers do not mutate existing selection state');
-assert.deepEqual([...invertSelection(startingSelection, ['b', 'c', 'c'])], ['a', 'c'], 'duplicate page IDs do not toggle repeatedly');
+assert.deepEqual(
+  [...invertSelection(startingSelection, ['b', 'c', 'c'])],
+  ['a', 'c'],
+  'duplicate page IDs do not toggle repeatedly'
+);
 const rangeRows = ['a', 'b', 'c', 'd', 'e'].map(id => ({ id }));
 const rangeSelection = new Set(['outside', 'b']);
-assert.equal(applySelectionRange(rangeSelection, rangeRows, 'd', 'b', false), true, 'backwards shift selection finds the inclusive range');
+assert.equal(
+  applySelectionRange(rangeSelection, rangeRows, 'd', 'b', false),
+  true,
+  'backwards shift selection finds the inclusive range'
+);
 assert.deepEqual([...rangeSelection], ['outside'], 'deselecting a range leaves selections outside it untouched');
-assert.equal(applySelectionRange(rangeSelection, rangeRows, 'b', 'd', true), true, 'forward shift selection is inclusive');
+assert.equal(
+  applySelectionRange(rangeSelection, rangeRows, 'b', 'd', true),
+  true,
+  'forward shift selection is inclusive'
+);
 assert.deepEqual([...rangeSelection], ['outside', 'b', 'c', 'd']);
-assert.equal(applySelectionRange(rangeSelection, rangeRows, 'missing', 'd', false), false, 'a stale/missing anchor does not change selection');
+assert.equal(
+  applySelectionRange(rangeSelection, rangeRows, 'missing', 'd', false),
+  false,
+  'a stale/missing anchor does not change selection'
+);
 assert.deepEqual([...rangeSelection], ['outside', 'b', 'c', 'd']);
 console.log('library model: filters, paging, sorting, and selection passed');

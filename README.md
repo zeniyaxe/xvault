@@ -9,9 +9,15 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
   profile / timeline / thread collection with resumable checkpoints.
 - **Verified downloads** — one identity per physical media asset (no duplicate files across URL spellings),
   retry with classified failure reasons, crash recovery, content verification, optional GIF/WebP conversion.
-- **Library** — fast ranked search with filters (`from:`, `has:`, `tag:`, `likes:>1k`, `after:`…), negation
-  (`-from:bot`), alternatives (`has:video|gif`), smart collections, tags, notes, favorites, Inbox review,
-  workspaces, Trash with undo, lightbox and inspector.
+- **Library** — fast ranked search with filters (`from:`, `has:`, `tag:`, `likes:>1k`, `after:`, `on:`, `year:`,
+  `is:thread`, `#hashtag`, `@mention`, `domain:`, `thread:ID`…), negation (`-from:bot`), alternatives
+  (`has:video|gif`), as-you-type suggestions, smart collections, tags, notes, favorites, Inbox review, workspaces,
+  Trash with undo, lightbox and inspector.
+- **Atlas** — an overview of the whole archive: growth, media mix, rhythm, people, conversations, languages,
+  hashtags and linked sites; a posting/archiving calendar with streaks; author profiles; and a Duplicate Lab that
+  finds shared and look-alike media.
+- **Reader** — read any archived thread as one continuous page (author spine, optional replies, media, quotes) and
+  copy or save it as Markdown.
 - **Export & recovery** — full JSON Lines recovery file (import with conflict review), CSV, Obsidian-compatible
   Markdown notes, single-file offline HTML archive, link lists, integrity scan and file manifest.
 - **Remote** — optional phone viewer (PWA) served by the local helper over your LAN, with QR pairing,

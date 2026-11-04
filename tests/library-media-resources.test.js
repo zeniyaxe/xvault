@@ -5,7 +5,7 @@ let next = 0;
 const revoked = [];
 const pool = model.createMediaResourcePool({
   create: () => `blob:test-${++next}`,
-  revoke: url => revoked.push(url)
+  revoke: url => revoked.push(url),
 });
 
 const first = pool.add('GIF/a.webp', { size: 10 });

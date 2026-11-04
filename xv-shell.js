@@ -46,6 +46,7 @@
     if (previous && previous !== `page-${shown}`) {
       const order = [
           'library',
+          'atlas',
           'explorer',
           'home',
           'archive',
@@ -61,10 +62,11 @@
       window.XVaultMotion?.play(
         $(`#page-${shown}`),
         [
-          { opacity: 0.45, transform: `translateX(${direction * 10}px)` },
+          { opacity: 0.35, transform: `translateX(${direction * 14}px)` },
           { opacity: 1, transform: 'none' },
         ],
-        170
+        240,
+        { spring: 'snappy' }
       );
     }
     return result;
@@ -95,6 +97,7 @@
 <section><h3>Anywhere</h3><dl>
 <dt><kbd>Ctrl</kbd> <kbd>K</kbd></dt><dd>Command center</dd>
 <dt><kbd>g</kbd> then <kbd>l</kbd></dt><dd>Library</dd>
+<dt><kbd>g</kbd> then <kbd>a</kbd></dt><dd>Atlas</dd>
 <dt><kbd>g</kbd> then <kbd>e</kbd></dt><dd>Explore</dd>
 <dt><kbd>g</kbd> then <kbd>c</kbd></dt><dd>Capture</dd>
 <dt><kbd>g</kbd> then <kbd>d</kbd></dt><dd>Downloads</dd>
@@ -110,6 +113,7 @@
 <dt><kbd>x</kbd></dt><dd>Select the focused post</dd>
 <dt><kbd>f</kbd></dt><dd>Favorite</dd>
 <dt><kbd>Ctrl</kbd> <kbd>A</kbd></dt><dd>Select all results</dd>
+<dt><kbd>t</kbd></dt><dd>Read the focused post's thread</dd>
 </dl></section>
 <section><h3>Quick Look and review</h3><dl>
 <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Previous or next</dd>
@@ -129,7 +133,16 @@
   window.XVaultShortcuts = shortcutSheet;
 
   let chord = 0;
-  const targets = { l: 'library', e: 'explorer', c: 'home', d: 'media', t: 'studio', y: 'health', s: 'settings' };
+  const targets = {
+    l: 'library',
+    a: 'atlas',
+    e: 'explorer',
+    c: 'home',
+    d: 'media',
+    t: 'studio',
+    y: 'health',
+    s: 'settings',
+  };
   function keys(event) {
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.target.closest('input,textarea,select,[contenteditable],video')) return;

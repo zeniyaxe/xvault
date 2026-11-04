@@ -1,5 +1,21 @@
 # Changelog
 
+## XVault 18.0.0 "Atlas" - 2026-11-04
+
+- Added **Atlas**, a new page (nav, `g a`, command center) that turns the archive into an explorable overview: animated totals, an archived/posted growth chart (click a point to open that month or day in the Library), media mix, weekly rhythm, people, conversations, sources, languages, your favorites/notes/tags, hashtag and tag clouds, linked sites, mentions, On this day and Most liked.
+- Added the Atlas **Calendar**: a UTC year heatmap of archived or posted days with arrow-key navigation, streaks and month totals; Enter opens that day in the Library.
+- Added **People**: a searchable, sortable author grid and an author sheet (posts by month, most liked, recently archived, hashtags) with one-click `from:` searches.
+- Added the **Duplicate Lab**: posts that share the same media id, plus an opt-in look-alike scan (perceptual dHash of X thumbnails, cached locally, pausable) with Compare, Tag "duplicate" and confirmed Trash actions.
+- Added the **thread Reader**: a full-screen reader for archived threads with the author's spine, optional replies, inline media, quoted posts, missing-parent notes, adjustable type, keyboard navigation and Markdown copy/save. Open it from the post drawer, `t` on a focused post or in Quick Look, or from Atlas.
+- Added **search suggestions** to the Library search box (filter keys, values from your archive, dates, recent searches) as an accessible combobox.
+- Added search filters: `on:`, `year:`, `within:` (plus `archived-` variants), `#hashtag`, `@mention`, `domain:`/`site:`, `is:reply|quote|repost|thread|original|media|text|favorite|sensitive`, `lang:`, `media:>N`, `thread:ID` and `quotes:ID`.
+- Capture now records quote, repost and reply relationships and expanded links, hashtags and mentions, validated at the content boundary. Older posts gain these fields on recapture; their archived text is never rewritten.
+- Motion system 2.0: spring easing, interruptible animations, FLIP, count-up, a travelling nav mark and same-document view transitions. Off/Reduced motion, the system setting and Safe Mode still disable movement.
+- Worker: IndexedDB schema 16 (`conversationId` index) and new `GET_VAULT_INSIGHTS`, `GET_THREAD`, `GET_AUTHOR_DETAIL` and `GET_MEDIA_FINGERPRINT_PAGE` messages.
+- Tooling: six structural tests that broke when the source was Prettier-formatted now read formatting-agnostic source views; added an insights unit test; browser-driven test harnesses and `tools/` lint without false `no-undef` errors; tests and tools are Prettier-formatted. `npm run verify` now exits 0 locally (75/75 tests).
+- Fixed Atlas at phone widths: the header and segmented controls wrap or scroll, the calendar year scrolls sideways with pinned weekday labels, and duplicate groups stack.
+- Smoke-tested by loading the unpacked extension in Chromium with a synthetic 47-post archive and a mocked X image CDN, at desktop, 820px and 390px widths; the repo's e2e scripts also pass. Live X capture, real CDN thumbnails and large real archives were not exercised.
+
 ## Remote connection fixes - 2026-10-24
 
 - Fixed the phone dropping downloaded media when Chrome supplied absolute Windows filenames. Grants accept confined local archive paths while rejecting outside/network paths. Added missing/not-downloaded/permission/Data Saver states and recovery from thumbnail-less tiles; shell cache advances to v6.

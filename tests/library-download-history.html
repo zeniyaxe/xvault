@@ -1,17 +1,41 @@
 <!doctype html>
-<meta charset="utf-8">
+<meta charset="utf-8" />
 <title>Bounded download history test</title>
 <output id="result">Running</output>
 <script type="module">
-  import { readDownloadHistoryPage, readDownloadRowsByStatePage, readDownloadRowsByKeys, readExistingDownloadRowsByAssets, findCompletedDownloadByHash, readDownloadRowByBrowserId, patchLibraryDownloadRowsIfCurrent, backfillDownloadAssetIndexPage, readDownloadAssetIndexStatus, writeLibraryDownloads, replaceCompletedDownloadWithHistory, deleteLibraryDownloads, deleteLibraryDownloadsByState, deleteCompletedDownloadIfEligible, clearLibraryData, DOWNLOAD_ASSET_INDEX_CHECKPOINT } from '../library-storage.mjs';
+  import {
+    readDownloadHistoryPage,
+    readDownloadRowsByStatePage,
+    readDownloadRowsByKeys,
+    readExistingDownloadRowsByAssets,
+    findCompletedDownloadByHash,
+    readDownloadRowByBrowserId,
+    patchLibraryDownloadRowsIfCurrent,
+    backfillDownloadAssetIndexPage,
+    readDownloadAssetIndexStatus,
+    writeLibraryDownloads,
+    replaceCompletedDownloadWithHistory,
+    deleteLibraryDownloads,
+    deleteLibraryDownloadsByState,
+    deleteCompletedDownloadIfEligible,
+    clearLibraryData,
+    DOWNLOAD_ASSET_INDEX_CHECKPOINT,
+  } from '../library-storage.mjs';
   const output = document.querySelector('#result');
   const name = `xvault-download-history-${crypto.randomUUID()}`;
   try {
-    let getAllCalls = 0, countCalls = 0;
+    let getAllCalls = 0,
+      countCalls = 0;
     const originalGetAll = IDBObjectStore.prototype.getAll;
     const originalCount = IDBObjectStore.prototype.count;
-    IDBObjectStore.prototype.getAll = function (...args) { getAllCalls++; return originalGetAll.apply(this, args); };
-    IDBObjectStore.prototype.count = function (...args) { countCalls++; return originalCount.apply(this, args); };
+    IDBObjectStore.prototype.getAll = function (...args) {
+      getAllCalls++;
+      return originalGetAll.apply(this, args);
+    };
+    IDBObjectStore.prototype.count = function (...args) {
+      countCalls++;
+      return originalCount.apply(this, args);
+    };
     const db = await new Promise((resolve, reject) => {
       const request = indexedDB.open(name, 1);
       request.onupgradeneeded = () => {
@@ -25,68 +49,171 @@
       request.onerror = () => reject(request.error);
     });
     await new Promise((resolve, reject) => {
-      const tx = db.transaction('downloads', 'readwrite'), store = tx.objectStore('downloads');
+      const tx = db.transaction('downloads', 'readwrite'),
+        store = tx.objectStore('downloads');
       for (let index = 0; index < 6000; index++) {
         const legacy = index < 1200;
-        store.put({ key: `download-${String(index).padStart(5, '0')}`, ...(legacy ? {} : { createdAt: index }), state: index % 3 ? 'complete' : 'failed', downloadId: index === 5999 ? 99123 : undefined, stateRevision: 1, updatedAt: index, item: { tweetId: String(index), mediaId: `media-${index}` }, note: index % 97 === 0 ? 'detail '.repeat(800) : '' });
+        store.put({
+          key: `download-${String(index).padStart(5, '0')}`,
+          ...(legacy ? {} : { createdAt: index }),
+          state: index % 3 ? 'complete' : 'failed',
+          downloadId: index === 5999 ? 99123 : undefined,
+          stateRevision: 1,
+          updatedAt: index,
+          item: { tweetId: String(index), mediaId: `media-${index}` },
+          note: index % 97 === 0 ? 'detail '.repeat(800) : '',
+        });
       }
       tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error('Download history seed transaction aborted'));
     });
     await new Promise((resolve, reject) => {
-      const tx = db.transaction('downloads', 'readwrite'), store = tx.objectStore('downloads');
-      store.put({ key: 'post-asset-1|img:ASSET123', state: 'complete', item: { tweetId: 'post-asset-1', url: 'https://pbs.twimg.com/media/ASSET123.jpg?format=jpg&name=large' }, totalBytes: 42, sha256: 'bounded-hash-fixture', updatedAt: 20000 });
-      store.put({ key: 'post-asset-2|img:ASSET123', state: 'queued', item: { tweetId: 'post-asset-2', url: 'https://pbs.twimg.com/media/ASSET123.jpg:orig?format=jpg' }, totalBytes: 0, updatedAt: 30000 });
-      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error || new Error('Identity fixtures could not be written'));
+      const tx = db.transaction('downloads', 'readwrite'),
+        store = tx.objectStore('downloads');
+      store.put({
+        key: 'post-asset-1|img:ASSET123',
+        state: 'complete',
+        item: { tweetId: 'post-asset-1', url: 'https://pbs.twimg.com/media/ASSET123.jpg?format=jpg&name=large' },
+        totalBytes: 42,
+        sha256: 'bounded-hash-fixture',
+        updatedAt: 20000,
+      });
+      store.put({
+        key: 'post-asset-2|img:ASSET123',
+        state: 'queued',
+        item: { tweetId: 'post-asset-2', url: 'https://pbs.twimg.com/media/ASSET123.jpg:orig?format=jpg' },
+        totalBytes: 0,
+        updatedAt: 30000,
+      });
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Identity fixtures could not be written'));
     });
     const started = performance.now();
     const page = await readDownloadHistoryPage(db, 60);
     const elapsedMs = performance.now() - started;
-    if (page.rows.length !== 60 || page.recordsRead > 1060 || page.recordsMaterialized > 1060) throw Error(`Unbounded history read: ${JSON.stringify(page)}`);
+    if (page.rows.length !== 60 || page.recordsRead > 1060 || page.recordsMaterialized > 1060)
+      throw Error(`Unbounded history read: ${JSON.stringify(page)}`);
     const indexedRows = page.rows.slice(0, 60);
-    if (indexedRows[0].createdAt !== 5999 || indexedRows.at(-1).createdAt !== 5940) throw Error('Recent indexed download history is not newest-first');
+    if (indexedRows[0].createdAt !== 5999 || indexedRows.at(-1).createdAt !== 5940)
+      throw Error('Recent indexed download history is not newest-first');
     if (getAllCalls || countCalls) throw Error(`History read called getAll=${getAllCalls} or count=${countCalls}`);
     const failedFirst = await readDownloadRowsByStatePage(db, 'failed', { limit: 25 });
     const failedSecond = await readDownloadRowsByStatePage(db, 'failed', { limit: 25, afterKey: failedFirst.nextKey });
-    if (failedFirst.rows.length !== 25 || failedSecond.rows.length !== 25 || !failedFirst.hasMore || !failedSecond.hasMore) throw Error(`State paging did not return bounded continuations: ${JSON.stringify([failedFirst, failedSecond])}`);
-    if (failedFirst.recordsRead > 26 || failedSecond.recordsRead > 26 || failedFirst.rows.some(row => row.state !== 'failed') || failedSecond.rows.some(row => row.state !== 'failed')) throw Error('State paging escaped its index window or read too many records');
+    if (
+      failedFirst.rows.length !== 25 ||
+      failedSecond.rows.length !== 25 ||
+      !failedFirst.hasMore ||
+      !failedSecond.hasMore
+    )
+      throw Error(`State paging did not return bounded continuations: ${JSON.stringify([failedFirst, failedSecond])}`);
+    if (
+      failedFirst.recordsRead > 26 ||
+      failedSecond.recordsRead > 26 ||
+      failedFirst.rows.some(row => row.state !== 'failed') ||
+      failedSecond.rows.some(row => row.state !== 'failed')
+    )
+      throw Error('State paging escaped its index window or read too many records');
     const failedIds = [...failedFirst.rows, ...failedSecond.rows].map(row => row.key);
-    if (new Set(failedIds).size !== 50 || !(failedFirst.nextKey < failedSecond.rows[0].key)) throw Error('State page continuation duplicated or skipped its boundary');
+    if (new Set(failedIds).size !== 50 || !(failedFirst.nextKey < failedSecond.rows[0].key))
+      throw Error('State page continuation duplicated or skipped its boundary');
     const byBrowserId = await readDownloadRowByBrowserId(db, 99123);
-    if (byBrowserId.row?.key !== 'download-05999' || byBrowserId.recordsRead !== 1 || byBrowserId.indexOperations !== 1) throw Error(`Browser event lookup did not use one indexed read: ${JSON.stringify(byBrowserId)}`);
+    if (byBrowserId.row?.key !== 'download-05999' || byBrowserId.recordsRead !== 1 || byBrowserId.indexOperations !== 1)
+      throw Error(`Browser event lookup did not use one indexed read: ${JSON.stringify(byBrowserId)}`);
     const identities = await readDownloadRowsByKeys(db, ['download-05999', 'missing-key', 'download-05999']);
-    if (identities.rows.size !== 1 || identities.rows.get('download-05999')?.key !== 'download-05999' || identities.indexOperations !== 2 || identities.recordsMaterialized !== 1) throw Error(`Enqueue identity lookup was not direct/bounded: ${JSON.stringify({ ...identities, rows: [...identities.rows.keys()] })}`);
+    if (
+      identities.rows.size !== 1 ||
+      identities.rows.get('download-05999')?.key !== 'download-05999' ||
+      identities.indexOperations !== 2 ||
+      identities.recordsMaterialized !== 1
+    )
+      throw Error(
+        `Enqueue identity lookup was not direct/bounded: ${JSON.stringify({ ...identities, rows: [...identities.rows.keys()] })}`
+      );
     const assetMatches = await readExistingDownloadRowsByAssets(db, ['img:ASSET123']);
-    if (assetMatches.rows.get('img:ASSET123')?.key !== 'post-asset-1|img:ASSET123' || assetMatches.recordsMaterialized !== 1 || assetMatches.recordsRead > 6002) throw Error(`Save Once lookup did not stream and prefer a completed owner: ${JSON.stringify({ ...assetMatches, rows: [...assetMatches.rows.keys()] })}`);
+    if (
+      assetMatches.rows.get('img:ASSET123')?.key !== 'post-asset-1|img:ASSET123' ||
+      assetMatches.recordsMaterialized !== 1 ||
+      assetMatches.recordsRead > 6002
+    )
+      throw Error(
+        `Save Once lookup did not stream and prefer a completed owner: ${JSON.stringify({ ...assetMatches, rows: [...assetMatches.rows.keys()] })}`
+      );
     const hashMatch = await findCompletedDownloadByHash(db, 'bounded-hash-fixture');
-    if (!hashMatch.found || hashMatch.recordsRead > 6002 || hashMatch.cursorOperations !== hashMatch.recordsRead) throw Error(`Opt-in hash check did not stop on its first cursor match: ${JSON.stringify(hashMatch)}`);
+    if (!hashMatch.found || hashMatch.recordsRead > 6002 || hashMatch.cursorOperations !== hashMatch.recordsRead)
+      throw Error(`Opt-in hash check did not stop on its first cursor match: ${JSON.stringify(hashMatch)}`);
     const limitedAssets = await readExistingDownloadRowsByAssets(db, ['img:NOT-IN-ARCHIVE'], { scanLimit: 10 });
-    if (!limitedAssets.truncated || limitedAssets.recordsRead !== 10 || limitedAssets.recordsMaterialized !== 0) throw Error(`Save Once did not stop at its explicit read budget: ${JSON.stringify(limitedAssets)}`);
+    if (!limitedAssets.truncated || limitedAssets.recordsRead !== 10 || limitedAssets.recordsMaterialized !== 0)
+      throw Error(`Save Once did not stop at its explicit read budget: ${JSON.stringify(limitedAssets)}`);
     const limitedHash = await findCompletedDownloadByHash(db, 'not-in-archive-hash', { scanLimit: 10 });
-    if (!limitedHash.truncated || limitedHash.recordsRead !== 10) throw Error(`Hash dedupe did not stop at its explicit read budget: ${JSON.stringify(limitedHash)}`);
+    if (!limitedHash.truncated || limitedHash.recordsRead !== 10)
+      throw Error(`Hash dedupe did not stop at its explicit read budget: ${JSON.stringify(limitedHash)}`);
     let cancellationChecks = 0;
-    const cancelledLookup = await readExistingDownloadRowsByAssets(db, ['img:NEVER-FOUND'], { scanLimit: 100, cancelled: () => ++cancellationChecks > 25 });
-    if (!cancelledLookup.cancelled || cancelledLookup.recordsRead > 26 || cancelledLookup.recordsMaterialized > 0) throw Error(`Cancelled asset scan did not release its bounded read: ${JSON.stringify(cancelledLookup)}`);
+    const cancelledLookup = await readExistingDownloadRowsByAssets(db, ['img:NEVER-FOUND'], {
+      scanLimit: 100,
+      cancelled: () => ++cancellationChecks > 25,
+    });
+    if (!cancelledLookup.cancelled || cancelledLookup.recordsRead > 26 || cancelledLookup.recordsMaterialized > 0)
+      throw Error(`Cancelled asset scan did not release its bounded read: ${JSON.stringify(cancelledLookup)}`);
     let cancellationFailureRejected = false;
-    try { await readExistingDownloadRowsByAssets(db, ['img:NEVER-FOUND'], { cancelled: () => { throw new Error('cancellation predicate failed'); } }); }
-    catch (error) { cancellationFailureRejected = error.message === 'cancellation predicate failed'; }
-    if (!cancellationFailureRejected) throw Error('A throwing cancellation predicate must reject cleanly instead of escaping an IndexedDB callback');
+    try {
+      await readExistingDownloadRowsByAssets(db, ['img:NEVER-FOUND'], {
+        cancelled: () => {
+          throw new Error('cancellation predicate failed');
+        },
+      });
+    } catch (error) {
+      cancellationFailureRejected = error.message === 'cancellation predicate failed';
+    }
+    if (!cancellationFailureRejected)
+      throw Error('A throwing cancellation predicate must reject cleanly instead of escaping an IndexedDB callback');
     let hashCancellationFailureRejected = false;
-    try { await findCompletedDownloadByHash(db, 'not-in-archive-hash', { cancelled: () => { throw new Error('hash cancellation predicate failed'); } }); }
-    catch (error) { hashCancellationFailureRejected = error.message === 'hash cancellation predicate failed'; }
-    if (!hashCancellationFailureRejected) throw Error('A throwing hash cancellation predicate must reject cleanly instead of escaping an IndexedDB callback');
+    try {
+      await findCompletedDownloadByHash(db, 'not-in-archive-hash', {
+        cancelled: () => {
+          throw new Error('hash cancellation predicate failed');
+        },
+      });
+    } catch (error) {
+      hashCancellationFailureRejected = error.message === 'hash cancellation predicate failed';
+    }
+    if (!hashCancellationFailureRejected)
+      throw Error(
+        'A throwing hash cancellation predicate must reject cleanly instead of escaping an IndexedDB callback'
+      );
     const stale = failedFirst.rows[0];
     await new Promise((resolve, reject) => {
-      const tx = db.transaction('downloads', 'readwrite'), store = tx.objectStore('downloads'), request = store.get(stale.key);
+      const tx = db.transaction('downloads', 'readwrite'),
+        store = tx.objectStore('downloads'),
+        request = store.get(stale.key);
       request.onsuccess = () => store.put({ ...request.result, state: 'cancelled', updatedAt: 90000 });
-      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
     });
-    const stalePatch = await patchLibraryDownloadRowsIfCurrent(db, [{ key: stale.key, expected: { state: stale.state, stateRevision: stale.stateRevision, updatedAt: stale.updatedAt }, patch: { attempts: 7 } }]);
-    if (stalePatch.updated !== 0 || stalePatch.skipped !== 1) throw Error('A stale retry preparation overwrote a newer queue state');
+    const stalePatch = await patchLibraryDownloadRowsIfCurrent(db, [
+      {
+        key: stale.key,
+        expected: { state: stale.state, stateRevision: stale.stateRevision, updatedAt: stale.updatedAt },
+        patch: { attempts: 7 },
+      },
+    ]);
+    if (stalePatch.updated !== 0 || stalePatch.skipped !== 1)
+      throw Error('A stale retry preparation overwrote a newer queue state');
     const currentFailed = failedFirst.rows[1];
-    const currentPatch = await patchLibraryDownloadRowsIfCurrent(db, [{ key: currentFailed.key, expected: { state: currentFailed.state, stateRevision: currentFailed.stateRevision, updatedAt: currentFailed.updatedAt }, patch: { attempts: 7 } }]);
-    if (currentPatch.updated !== 1 || currentPatch.skipped !== 0) throw Error('A current queue patch was not committed');
+    const currentPatch = await patchLibraryDownloadRowsIfCurrent(db, [
+      {
+        key: currentFailed.key,
+        expected: {
+          state: currentFailed.state,
+          stateRevision: currentFailed.stateRevision,
+          updatedAt: currentFailed.updatedAt,
+        },
+        patch: { attempts: 7 },
+      },
+    ]);
+    if (currentPatch.updated !== 1 || currentPatch.skipped !== 0)
+      throw Error('A current queue patch was not committed');
     db.close();
     indexedDB.deleteDatabase(name);
     const fallbackDb = await new Promise((resolve, reject) => {
@@ -96,64 +223,233 @@
       request.onerror = () => reject(request.error);
     });
     await new Promise((resolve, reject) => {
-      const tx = fallbackDb.transaction('downloads', 'readwrite'), store = tx.objectStore('downloads');
-      for (let index = 0; index < 80; index++) store.put({ key: `legacy-${String(index).padStart(3, '0')}`, state: 'complete' });
+      const tx = fallbackDb.transaction('downloads', 'readwrite'),
+        store = tx.objectStore('downloads');
+      for (let index = 0; index < 80; index++)
+        store.put({ key: `legacy-${String(index).padStart(3, '0')}`, state: 'complete' });
       tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error('Legacy history seed transaction aborted'));
     });
     const legacy = await readDownloadHistoryPage(fallbackDb, 20);
-    if (legacy.rows.length !== 20 || legacy.recordsRead !== 20 || legacy.index !== 'primaryKey') throw Error(`Legacy schema fallback was not bounded: ${JSON.stringify(legacy)}`);
+    if (legacy.rows.length !== 20 || legacy.recordsRead !== 20 || legacy.index !== 'primaryKey')
+      throw Error(`Legacy schema fallback was not bounded: ${JSON.stringify(legacy)}`);
     fallbackDb.close();
     indexedDB.deleteDatabase(`${name}-legacy`);
     const mixedDb = await new Promise((resolve, reject) => {
       const request = indexedDB.open(`${name}-mixed`, 1);
-      request.onupgradeneeded = () => { const store = request.result.createObjectStore('downloads', { keyPath: 'key' }); store.createIndex('createdAt', 'createdAt'); };
+      request.onupgradeneeded = () => {
+        const store = request.result.createObjectStore('downloads', { keyPath: 'key' });
+        store.createIndex('createdAt', 'createdAt');
+      };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
     await new Promise((resolve, reject) => {
-      const tx = mixedDb.transaction('downloads', 'readwrite'), store = tx.objectStore('downloads');
-      for (let index = 0; index < 100; index++) store.put({ key: `legacy-${String(index).padStart(3, '0')}`, state: 'complete' });
-      for (let index = 0; index < 12; index++) store.put({ key: `dated-${String(index).padStart(3, '0')}`, createdAt: index + 1, state: 'complete' });
+      const tx = mixedDb.transaction('downloads', 'readwrite'),
+        store = tx.objectStore('downloads');
+      for (let index = 0; index < 100; index++)
+        store.put({ key: `legacy-${String(index).padStart(3, '0')}`, state: 'complete' });
+      for (let index = 0; index < 12; index++)
+        store.put({ key: `dated-${String(index).padStart(3, '0')}`, createdAt: index + 1, state: 'complete' });
       tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error('Mixed history seed transaction aborted'));
     });
     const mixed = await readDownloadHistoryPage(mixedDb, 60);
-    if (mixed.rows.length !== 60 || mixed.rows.filter(row => row.createdAt != null).length !== 12 || mixed.legacyScanned !== 48) throw Error(`Indexed and legacy rows were not merged within the scan limit: ${JSON.stringify(mixed)}`);
+    if (
+      mixed.rows.length !== 60 ||
+      mixed.rows.filter(row => row.createdAt != null).length !== 12 ||
+      mixed.legacyScanned !== 48
+    )
+      throw Error(`Indexed and legacy rows were not merged within the scan limit: ${JSON.stringify(mixed)}`);
     mixedDb.close();
     indexedDB.deleteDatabase(`${name}-mixed`);
     const assetDb = await new Promise((resolve, reject) => {
       const request = indexedDB.open(`${name}-asset-index`, 1);
-      request.onupgradeneeded = () => { const d=request.result,downloads=d.createObjectStore('downloads',{keyPath:'key'});downloads.createIndex('state','state');downloads.createIndex('stateKey',['state','key']);downloads.createIndex('usableAssetKey','usableAssetKey');d.createObjectStore('checkpoints',{keyPath:'key'}); };
-      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+      request.onupgradeneeded = () => {
+        const d = request.result,
+          downloads = d.createObjectStore('downloads', { keyPath: 'key' });
+        downloads.createIndex('state', 'state');
+        downloads.createIndex('stateKey', ['state', 'key']);
+        downloads.createIndex('usableAssetKey', 'usableAssetKey');
+        d.createObjectStore('checkpoints', { keyPath: 'key' });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
     });
-    const targetAsset='img:AssetIndexTarget', targetUrl='https://pbs.twimg.com/media/AssetIndexTarget.jpg?format=jpg&name=large';
-    await new Promise((resolve,reject)=>{const tx=assetDb.transaction(['downloads','checkpoints'],'readwrite'),store=tx.objectStore('downloads');for(let index=0;index<100;index++){const key=`legacy-${String(index).padStart(3,'0')}`;store.put({key,state:index===51?'failed':'complete',item:{tweetId:String(index),url:index===50||index===51?targetUrl:`https://pbs.twimg.com/media/legacy-${index}.jpg`}})}tx.objectStore('checkpoints').put({key:DOWNLOAD_ASSET_INDEX_CHECKPOINT,complete:false,countsComplete:false,afterKey:null,processed:0,stateCounts:{}});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Legacy asset index fixture failed'))});
-    const beforeBackfill=await readExistingDownloadRowsByAssets(assetDb,[targetAsset]);
-    if(!beforeBackfill.incompleteIndex||!beforeBackfill.truncated||beforeBackfill.recordsRead!==0)throw Error(`An incomplete index did not block a potentially unsafe negative lookup: ${JSON.stringify(beforeBackfill)}`);
-    let assetIndexPages=0,assetIndexRead=0,assetIndexUpdated=0,assetIndexState;
-    do{const migrated=await backfillDownloadAssetIndexPage(assetDb,{limit:25});assetIndexPages++;assetIndexRead+=migrated.recordsRead;assetIndexUpdated+=migrated.recordsUpdated;if(migrated.recordsRead>25)throw Error('Asset index migration exceeded its page bound');assetIndexState=migrated;if(assetIndexPages>8)throw Error('Asset index migration did not finish within expected bounded pages')}while(!assetIndexState.complete);
-    if(assetIndexRead!==100||assetIndexUpdated!==100||!(await readDownloadAssetIndexStatus(assetDb)).complete)throw Error(`Legacy asset index migration did not complete its bounded cursor: ${JSON.stringify({assetIndexRead,assetIndexUpdated,assetIndexPages,assetIndexState})}`);
-    const indexedAsset=await readExistingDownloadRowsByAssets(assetDb,[targetAsset]);
-    if(indexedAsset.rows.get(targetAsset)?.key!=='legacy-050'||indexedAsset.index!=='usableAssetKey'||indexedAsset.recordsRead!==1||indexedAsset.recordsMaterialized!==1)throw Error(`A migrated duplicate did not resolve through one matching index row: ${JSON.stringify({...indexedAsset,rows:[...indexedAsset.rows.keys()]})}`);
-    const indexedMiss=await readExistingDownloadRowsByAssets(assetDb,['img:not-in-archive']);
-    if(indexedMiss.recordsRead!==0||indexedMiss.truncated||!indexedMiss.assetIndexComplete)throw Error(`An indexed absence read unrelated download rows or appeared incomplete: ${JSON.stringify(indexedMiss)}`);
-    const migratedStatus=await readDownloadAssetIndexStatus(assetDb);if(!migratedStatus.countsComplete||migratedStatus.stateCounts.complete!==99||migratedStatus.stateCounts.failed!==1)throw Error(`Queue-state backfill totals were wrong: ${JSON.stringify(migratedStatus)}`);
-    await writeLibraryDownloads(assetDb,[{key:'new-queued-asset',state:'queued',item:{tweetId:'new',url:'https://pbs.twimg.com/media/NewQueuedAsset.jpg?name=orig'}}]);
-    let queueStatus=await readDownloadAssetIndexStatus(assetDb);if(queueStatus.stateCounts.queued!==1||queueStatus.stateCounts.complete!==99)throw Error(`A new queue write did not increment checkpoint totals: ${JSON.stringify(queueStatus.stateCounts)}`);
-    const newAsset=await readExistingDownloadRowsByAssets(assetDb,['img:NewQueuedAsset']);
-    if(newAsset.rows.get('img:NewQueuedAsset')?.key!=='new-queued-asset'||newAsset.recordsRead!==1)throw Error('A normal queue write did not maintain the usable-asset index atomically');
-    const replacement=await replaceCompletedDownloadWithHistory(assetDb,{key:'legacy-050',state:'queued',item:{tweetId:'50',url:targetUrl}});if(!replacement.queued)throw Error('A completed row could not be replaced while retaining its history');
-    queueStatus=await readDownloadAssetIndexStatus(assetDb);if(queueStatus.stateCounts.complete!==99||queueStatus.stateCounts.queued!==2)throw Error(`Redownload history changed durable state totals incorrectly: ${JSON.stringify(queueStatus.stateCounts)}`);
-    await deleteLibraryDownloadsByState(assetDb,['queued']);queueStatus=await readDownloadAssetIndexStatus(assetDb);if(queueStatus.stateCounts.queued!==0||queueStatus.stateCounts.complete!==99)throw Error(`State-range clearing did not maintain durable totals: ${JSON.stringify(queueStatus.stateCounts)}`);
-    await deleteLibraryDownloads(assetDb,[replacement.historyKey]);queueStatus=await readDownloadAssetIndexStatus(assetDb);if(queueStatus.stateCounts.complete!==98)throw Error(`Direct history deletion did not decrement durable totals: ${JSON.stringify(queueStatus.stateCounts)}`);
-    await writeLibraryDownloads(assetDb,[{key:'auto-clear-row',state:'complete',verification:{state:'verified'},item:{tweetId:'auto-clear',url:'https://pbs.twimg.com/media/AutoClear.jpg'}}]);
-    const autoClear=await deleteCompletedDownloadIfEligible(assetDb,'auto-clear-row');queueStatus=await readDownloadAssetIndexStatus(assetDb);if(!autoClear.deleted||queueStatus.stateCounts.complete!==98)throw Error(`Verified cleanup did not update the checkpoint atomically: ${JSON.stringify({autoClear,stateCounts:queueStatus.stateCounts})}`);
-    await clearLibraryData(assetDb,['downloads']);queueStatus=await readDownloadAssetIndexStatus(assetDb);if(!queueStatus.complete||!queueStatus.countsComplete||Object.values(queueStatus.stateCounts).some(value=>value!==0))throw Error(`Clearing download history left stale queue totals: ${JSON.stringify(queueStatus)}`);
-    assetDb.close();indexedDB.deleteDatabase(`${name}-asset-index`);
-    output.textContent = JSON.stringify({ ok: true, elapsedMs: Number(elapsedMs.toFixed(2)), records: 6002, returned: page.recordsMaterialized, cursorOperations: page.cursorOperations, index: page.index, statePageRead: failedFirst.recordsRead + failedSecond.recordsRead, statePageRetained: failedFirst.rows.length + failedSecond.rows.length, stateIndex: failedFirst.index, browserIdIndex: byBrowserId.index, identityIndexOperations: identities.indexOperations, identityMaterialized: identities.recordsMaterialized, assetScanRead: assetMatches.recordsRead, assetScanRetained: assetMatches.recordsMaterialized, hashScanRead: hashMatch.recordsRead, hashMatched: hashMatch.found, assetReadLimit: limitedAssets.recordsRead, assetWasTruncated: limitedAssets.truncated, hashReadLimit: limitedHash.recordsRead, hashWasTruncated: limitedHash.truncated, cancellationChecks, cancellationRecordsRead: cancelledLookup.recordsRead, cancelled: cancelledLookup.cancelled, stalePatchSkipped: stalePatch.skipped, currentPatchUpdated: currentPatch.updated, assetIndexPages, assetIndexRead, assetIndexUpdated, indexedAssetRead: indexedAsset.recordsRead, indexedAssetIndex: indexedAsset.index, indexedMissRead: indexedMiss.recordsRead, assetIndexReady: assetIndexState.complete, stateCounters: migratedStatus.stateCounts, legacyScanned: page.legacyScanned, legacyScanLimit: page.legacyScanLimit, getAllCalls, countCalls, legacySchemaRows: legacy.recordsMaterialized, mixedLegacyRows: mixed.legacyScanned, mixedRecordsRead: mixed.recordsRead });
+    const targetAsset = 'img:AssetIndexTarget',
+      targetUrl = 'https://pbs.twimg.com/media/AssetIndexTarget.jpg?format=jpg&name=large';
+    await new Promise((resolve, reject) => {
+      const tx = assetDb.transaction(['downloads', 'checkpoints'], 'readwrite'),
+        store = tx.objectStore('downloads');
+      for (let index = 0; index < 100; index++) {
+        const key = `legacy-${String(index).padStart(3, '0')}`;
+        store.put({
+          key,
+          state: index === 51 ? 'failed' : 'complete',
+          item: {
+            tweetId: String(index),
+            url: index === 50 || index === 51 ? targetUrl : `https://pbs.twimg.com/media/legacy-${index}.jpg`,
+          },
+        });
+      }
+      tx.objectStore('checkpoints').put({
+        key: DOWNLOAD_ASSET_INDEX_CHECKPOINT,
+        complete: false,
+        countsComplete: false,
+        afterKey: null,
+        processed: 0,
+        stateCounts: {},
+      });
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Legacy asset index fixture failed'));
+    });
+    const beforeBackfill = await readExistingDownloadRowsByAssets(assetDb, [targetAsset]);
+    if (!beforeBackfill.incompleteIndex || !beforeBackfill.truncated || beforeBackfill.recordsRead !== 0)
+      throw Error(
+        `An incomplete index did not block a potentially unsafe negative lookup: ${JSON.stringify(beforeBackfill)}`
+      );
+    let assetIndexPages = 0,
+      assetIndexRead = 0,
+      assetIndexUpdated = 0,
+      assetIndexState;
+    do {
+      const migrated = await backfillDownloadAssetIndexPage(assetDb, { limit: 25 });
+      assetIndexPages++;
+      assetIndexRead += migrated.recordsRead;
+      assetIndexUpdated += migrated.recordsUpdated;
+      if (migrated.recordsRead > 25) throw Error('Asset index migration exceeded its page bound');
+      assetIndexState = migrated;
+      if (assetIndexPages > 8) throw Error('Asset index migration did not finish within expected bounded pages');
+    } while (!assetIndexState.complete);
+    if (assetIndexRead !== 100 || assetIndexUpdated !== 100 || !(await readDownloadAssetIndexStatus(assetDb)).complete)
+      throw Error(
+        `Legacy asset index migration did not complete its bounded cursor: ${JSON.stringify({ assetIndexRead, assetIndexUpdated, assetIndexPages, assetIndexState })}`
+      );
+    const indexedAsset = await readExistingDownloadRowsByAssets(assetDb, [targetAsset]);
+    if (
+      indexedAsset.rows.get(targetAsset)?.key !== 'legacy-050' ||
+      indexedAsset.index !== 'usableAssetKey' ||
+      indexedAsset.recordsRead !== 1 ||
+      indexedAsset.recordsMaterialized !== 1
+    )
+      throw Error(
+        `A migrated duplicate did not resolve through one matching index row: ${JSON.stringify({ ...indexedAsset, rows: [...indexedAsset.rows.keys()] })}`
+      );
+    const indexedMiss = await readExistingDownloadRowsByAssets(assetDb, ['img:not-in-archive']);
+    if (indexedMiss.recordsRead !== 0 || indexedMiss.truncated || !indexedMiss.assetIndexComplete)
+      throw Error(
+        `An indexed absence read unrelated download rows or appeared incomplete: ${JSON.stringify(indexedMiss)}`
+      );
+    const migratedStatus = await readDownloadAssetIndexStatus(assetDb);
+    if (
+      !migratedStatus.countsComplete ||
+      migratedStatus.stateCounts.complete !== 99 ||
+      migratedStatus.stateCounts.failed !== 1
+    )
+      throw Error(`Queue-state backfill totals were wrong: ${JSON.stringify(migratedStatus)}`);
+    await writeLibraryDownloads(assetDb, [
+      {
+        key: 'new-queued-asset',
+        state: 'queued',
+        item: { tweetId: 'new', url: 'https://pbs.twimg.com/media/NewQueuedAsset.jpg?name=orig' },
+      },
+    ]);
+    let queueStatus = await readDownloadAssetIndexStatus(assetDb);
+    if (queueStatus.stateCounts.queued !== 1 || queueStatus.stateCounts.complete !== 99)
+      throw Error(`A new queue write did not increment checkpoint totals: ${JSON.stringify(queueStatus.stateCounts)}`);
+    const newAsset = await readExistingDownloadRowsByAssets(assetDb, ['img:NewQueuedAsset']);
+    if (newAsset.rows.get('img:NewQueuedAsset')?.key !== 'new-queued-asset' || newAsset.recordsRead !== 1)
+      throw Error('A normal queue write did not maintain the usable-asset index atomically');
+    const replacement = await replaceCompletedDownloadWithHistory(assetDb, {
+      key: 'legacy-050',
+      state: 'queued',
+      item: { tweetId: '50', url: targetUrl },
+    });
+    if (!replacement.queued) throw Error('A completed row could not be replaced while retaining its history');
+    queueStatus = await readDownloadAssetIndexStatus(assetDb);
+    if (queueStatus.stateCounts.complete !== 99 || queueStatus.stateCounts.queued !== 2)
+      throw Error(
+        `Redownload history changed durable state totals incorrectly: ${JSON.stringify(queueStatus.stateCounts)}`
+      );
+    await deleteLibraryDownloadsByState(assetDb, ['queued']);
+    queueStatus = await readDownloadAssetIndexStatus(assetDb);
+    if (queueStatus.stateCounts.queued !== 0 || queueStatus.stateCounts.complete !== 99)
+      throw Error(`State-range clearing did not maintain durable totals: ${JSON.stringify(queueStatus.stateCounts)}`);
+    await deleteLibraryDownloads(assetDb, [replacement.historyKey]);
+    queueStatus = await readDownloadAssetIndexStatus(assetDb);
+    if (queueStatus.stateCounts.complete !== 98)
+      throw Error(
+        `Direct history deletion did not decrement durable totals: ${JSON.stringify(queueStatus.stateCounts)}`
+      );
+    await writeLibraryDownloads(assetDb, [
+      {
+        key: 'auto-clear-row',
+        state: 'complete',
+        verification: { state: 'verified' },
+        item: { tweetId: 'auto-clear', url: 'https://pbs.twimg.com/media/AutoClear.jpg' },
+      },
+    ]);
+    const autoClear = await deleteCompletedDownloadIfEligible(assetDb, 'auto-clear-row');
+    queueStatus = await readDownloadAssetIndexStatus(assetDb);
+    if (!autoClear.deleted || queueStatus.stateCounts.complete !== 98)
+      throw Error(
+        `Verified cleanup did not update the checkpoint atomically: ${JSON.stringify({ autoClear, stateCounts: queueStatus.stateCounts })}`
+      );
+    await clearLibraryData(assetDb, ['downloads']);
+    queueStatus = await readDownloadAssetIndexStatus(assetDb);
+    if (
+      !queueStatus.complete ||
+      !queueStatus.countsComplete ||
+      Object.values(queueStatus.stateCounts).some(value => value !== 0)
+    )
+      throw Error(`Clearing download history left stale queue totals: ${JSON.stringify(queueStatus)}`);
+    assetDb.close();
+    indexedDB.deleteDatabase(`${name}-asset-index`);
+    output.textContent = JSON.stringify({
+      ok: true,
+      elapsedMs: Number(elapsedMs.toFixed(2)),
+      records: 6002,
+      returned: page.recordsMaterialized,
+      cursorOperations: page.cursorOperations,
+      index: page.index,
+      statePageRead: failedFirst.recordsRead + failedSecond.recordsRead,
+      statePageRetained: failedFirst.rows.length + failedSecond.rows.length,
+      stateIndex: failedFirst.index,
+      browserIdIndex: byBrowserId.index,
+      identityIndexOperations: identities.indexOperations,
+      identityMaterialized: identities.recordsMaterialized,
+      assetScanRead: assetMatches.recordsRead,
+      assetScanRetained: assetMatches.recordsMaterialized,
+      hashScanRead: hashMatch.recordsRead,
+      hashMatched: hashMatch.found,
+      assetReadLimit: limitedAssets.recordsRead,
+      assetWasTruncated: limitedAssets.truncated,
+      hashReadLimit: limitedHash.recordsRead,
+      hashWasTruncated: limitedHash.truncated,
+      cancellationChecks,
+      cancellationRecordsRead: cancelledLookup.recordsRead,
+      cancelled: cancelledLookup.cancelled,
+      stalePatchSkipped: stalePatch.skipped,
+      currentPatchUpdated: currentPatch.updated,
+      assetIndexPages,
+      assetIndexRead,
+      assetIndexUpdated,
+      indexedAssetRead: indexedAsset.recordsRead,
+      indexedAssetIndex: indexedAsset.index,
+      indexedMissRead: indexedMiss.recordsRead,
+      assetIndexReady: assetIndexState.complete,
+      stateCounters: migratedStatus.stateCounts,
+      legacyScanned: page.legacyScanned,
+      legacyScanLimit: page.legacyScanLimit,
+      getAllCalls,
+      countCalls,
+      legacySchemaRows: legacy.recordsMaterialized,
+      mixedLegacyRows: mixed.legacyScanned,
+      mixedRecordsRead: mixed.recordsRead,
+    });
   } catch (error) {
     output.textContent = `FAIL: ${error.stack || error.message}`;
   }

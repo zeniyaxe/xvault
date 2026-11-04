@@ -1,13 +1,28 @@
 <!doctype html>
-<meta charset="utf-8">
+<meta charset="utf-8" />
 <title>Archive recovery storage invariants</title>
 <output id="result">Running</output>
 <script>
-  addEventListener('error', event => { document.querySelector('#result').textContent = `FAIL ${event.message}`; });
-  addEventListener('unhandledrejection', event => { document.querySelector('#result').textContent = `FAIL ${event.reason?.stack || event.reason}`; });
+  addEventListener('error', event => {
+    document.querySelector('#result').textContent = `FAIL ${event.message}`;
+  });
+  addEventListener('unhandledrejection', event => {
+    document.querySelector('#result').textContent = `FAIL ${event.reason?.stack || event.reason}`;
+  });
 </script>
 <script type="module">
-  import { beginArchiveImport, commitArchiveImportBatch, completeArchiveImport, findArchiveImportJob, getArchiveImportJob, previewArchiveImportBatch, readArchiveAssetReferences, readArchiveImportConflicts, readLibraryBackupPage, readLibraryRevision } from '../library-storage.mjs';
+  import {
+    beginArchiveImport,
+    commitArchiveImportBatch,
+    completeArchiveImport,
+    findArchiveImportJob,
+    getArchiveImportJob,
+    previewArchiveImportBatch,
+    readArchiveAssetReferences,
+    readArchiveImportConflicts,
+    readLibraryBackupPage,
+    readLibraryRevision,
+  } from '../library-storage.mjs';
   const output = document.querySelector('#result');
   const name = `xvault-recovery-${crypto.randomUUID()}`;
   const request = indexedDB.open(name, 1);
@@ -27,22 +42,34 @@
     imports.createIndex('importKindKey', ['importId', 'kind', 'id']);
     imports.createIndex('at', 'at');
   };
-  request.onerror = () => { output.textContent = `FAIL ${request.error}`; };
+  request.onerror = () => {
+    output.textContent = `FAIL ${request.error}`;
+  };
   request.onsuccess = async () => {
     const db = request.result;
-    const txWrite = (stores, write) => new Promise((resolve, reject) => {
-      const tx = db.transaction(stores, 'readwrite');
-      write(tx);
-      tx.oncomplete = resolve;
-      tx.onabort = () => reject(tx.error || new Error('Seed transaction aborted'));
-    });
-    const get = (store, key) => new Promise((resolve, reject) => {
-      const tx = db.transaction(store), req = tx.objectStore(store).get(key);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
+    const txWrite = (stores, write) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(stores, 'readwrite');
+        write(tx);
+        tx.oncomplete = resolve;
+        tx.onabort = () => reject(tx.error || new Error('Seed transaction aborted'));
+      });
+    const get = (store, key) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(store),
+          req = tx.objectStore(store).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
     try {
-      const older = { id: '100', text: 'local edit', archivedAt: 10, uniqueToken: 'reserved-token', userMeta: { note: 'keep this' }, media: [] };
+      const older = {
+        id: '100',
+        text: 'local edit',
+        archivedAt: 10,
+        uniqueToken: 'reserved-token',
+        userMeta: { note: 'keep this' },
+        media: [],
+      };
       const identical = { id: '200', text: 'same', archivedAt: 20, media: [] };
       const trashRow = { id: '300', text: 'removed elsewhere', archivedAt: 30, deletedAt: 40, media: [] };
       await txWrite(['tweets', 'trash', 'downloads', 'checkpoints'], tx => {
@@ -50,79 +77,355 @@
         tx.objectStore('tweets').put(identical);
         tx.objectStore('tweets').put({ id: '250', text: 'page continuation', archivedAt: 25, media: [] });
         tx.objectStore('trash').put(trashRow);
-        tx.objectStore('downloads').put({ key: 'download-local', state: 'complete', item: { tweetId: '600', mediaId: 'm600', url: 'https://pbs.twimg.com/private.jpg?token=secret' }, target: { filename: 'XVault\\Videos\\local.mp4', filepath: 'C:\\Secret\\XVault\\Videos\\local.mp4', mime: 'video/mp4' }, totalBytes: 4096, sha256: 'a'.repeat(64), verification: { state: 'verified' }, updatedAt: 60 });
+        tx.objectStore('downloads').put({
+          key: 'download-local',
+          state: 'complete',
+          item: { tweetId: '600', mediaId: 'm600', url: 'https://pbs.twimg.com/private.jpg?token=secret' },
+          target: {
+            filename: 'XVault\\Videos\\local.mp4',
+            filepath: 'C:\\Secret\\XVault\\Videos\\local.mp4',
+            mime: 'video/mp4',
+          },
+          totalBytes: 4096,
+          sha256: 'a'.repeat(64),
+          verification: { state: 'verified' },
+          updatedAt: 60,
+        });
         tx.objectStore('checkpoints').put({ key: 'library-query-revision', revision: 5 });
         tx.objectStore('checkpoints').put({ key: 'library-download-query-revision', revision: 3 });
       });
-      await beginArchiveImport(db, { jobId: 'job-atomic', importId: 'backup-atomic', fingerprint: 'xvr1-atomic', expectedRevision: 5, expectedDownloadRevision: 3, header: { archiveId: 'backup-atomic', archiveRevision: 1, downloadRevision: 1, exportedAt: new Date(0).toISOString() } });
+      await beginArchiveImport(db, {
+        jobId: 'job-atomic',
+        importId: 'backup-atomic',
+        fingerprint: 'xvr1-atomic',
+        expectedRevision: 5,
+        expectedDownloadRevision: 3,
+        header: {
+          archiveId: 'backup-atomic',
+          archiveRevision: 1,
+          downloadRevision: 1,
+          exportedAt: new Date(0).toISOString(),
+        },
+      });
       const atomicBatch = [
-        { type: 'record', store: 'tweets', key: '0500', value: { id: '0500', text: 'first add must roll back', archivedAt: 15, uniqueToken: 'free-token', media: [] } },
-        { type: 'record', store: 'tweets', key: '0501', value: { id: '0501', text: 'forces IndexedDB constraint abort', archivedAt: 16, uniqueToken: 'reserved-token', media: [] } }
+        {
+          type: 'record',
+          store: 'tweets',
+          key: '0500',
+          value: { id: '0500', text: 'first add must roll back', archivedAt: 15, uniqueToken: 'free-token', media: [] },
+        },
+        {
+          type: 'record',
+          store: 'tweets',
+          key: '0501',
+          value: {
+            id: '0501',
+            text: 'forces IndexedDB constraint abort',
+            archivedAt: 16,
+            uniqueToken: 'reserved-token',
+            media: [],
+          },
+        },
       ];
       let atomicAborted = false;
-      try { await commitArchiveImportBatch(db, { jobId: 'job-atomic', importId: 'backup-atomic', fingerprint: 'xvr1-atomic', store: 'tweets', records: atomicBatch, expectedRevision: 5, expectedDownloadRevision: 3 }); }
-      catch { atomicAborted = true; }
-      if (!atomicAborted || await get('tweets', '0500') || (await getArchiveImportJob(db, 'job-atomic')).recordCount !== 0) throw Error('An IndexedDB batch abort must roll back all earlier writes and its import checkpoint');
+      try {
+        await commitArchiveImportBatch(db, {
+          jobId: 'job-atomic',
+          importId: 'backup-atomic',
+          fingerprint: 'xvr1-atomic',
+          store: 'tweets',
+          records: atomicBatch,
+          expectedRevision: 5,
+          expectedDownloadRevision: 3,
+        });
+      } catch {
+        atomicAborted = true;
+      }
+      if (
+        !atomicAborted ||
+        (await get('tweets', '0500')) ||
+        (await getArchiveImportJob(db, 'job-atomic')).recordCount !== 0
+      )
+        throw Error('An IndexedDB batch abort must roll back all earlier writes and its import checkpoint');
       const incoming = [
         { type: 'record', store: 'tweets', key: '100', value: { ...older, text: 'backup copy' } },
         { type: 'record', store: 'tweets', key: '200', value: structuredClone(identical) },
         { type: 'record', store: 'tweets', key: '300', value: { ...trashRow, deletedAt: undefined } },
-        { type: 'record', store: 'tweets', key: '400', value: { id: '400', text: 'recover me', archivedAt: 40, media: [] } }
+        {
+          type: 'record',
+          store: 'tweets',
+          key: '400',
+          value: { id: '400', text: 'recover me', archivedAt: 40, media: [] },
+        },
       ];
       const page = await readLibraryBackupPage(db, 'tweets', null, 2);
-      if (page.rows.length !== 2 || page.rows[0].id !== '100' || page.nextKey !== '200' || !page.hasMore || page.recordsRead > 3) throw Error(`Recovery export page must use bounded primary-key cursor reads: ${JSON.stringify(page)}`);
-      const assetPage = await readLibraryBackupPage(db, 'assets', null, 10, { archiveRevision: 5, downloadRevision: 3 });
-      if (assetPage.rows.length !== 1 || assetPage.rows[0].filename !== 'local.mp4' || JSON.stringify(assetPage.rows[0]).includes('secret') || JSON.stringify(assetPage.rows[0]).includes('C:\\\\')) throw Error('File-manifest export must preserve file identity while excluding signed URLs and machine-local paths');
+      if (
+        page.rows.length !== 2 ||
+        page.rows[0].id !== '100' ||
+        page.nextKey !== '200' ||
+        !page.hasMore ||
+        page.recordsRead > 3
+      )
+        throw Error(`Recovery export page must use bounded primary-key cursor reads: ${JSON.stringify(page)}`);
+      const assetPage = await readLibraryBackupPage(db, 'assets', null, 10, {
+        archiveRevision: 5,
+        downloadRevision: 3,
+      });
+      if (
+        assetPage.rows.length !== 1 ||
+        assetPage.rows[0].filename !== 'local.mp4' ||
+        JSON.stringify(assetPage.rows[0]).includes('secret') ||
+        JSON.stringify(assetPage.rows[0]).includes('C:\\\\')
+      )
+        throw Error(
+          'File-manifest export must preserve file identity while excluding signed URLs and machine-local paths'
+        );
       const preview = await previewArchiveImportBatch(db, incoming, 5);
-      if (preview.stale || preview.counts.missing !== 1 || preview.counts.identical !== 1 || preview.counts.conflict !== 2 || preview.conflictSamples.length !== 2 || preview.conflictSamples.some(sample => !sample.existing || !sample.incoming)) throw Error(`Import preview classified conflicts incorrectly: ${JSON.stringify(preview)}`);
-      const started = await beginArchiveImport(db, { jobId: 'job-a', importId: 'backup-a', fingerprint: 'xvr1-12345678', expectedRevision: 5, expectedDownloadRevision: 3, header: { archiveId: 'backup-a', archiveRevision: 7, downloadRevision: 3, exportedAt: new Date(0).toISOString() } });
+      if (
+        preview.stale ||
+        preview.counts.missing !== 1 ||
+        preview.counts.identical !== 1 ||
+        preview.counts.conflict !== 2 ||
+        preview.conflictSamples.length !== 2 ||
+        preview.conflictSamples.some(sample => !sample.existing || !sample.incoming)
+      )
+        throw Error(`Import preview classified conflicts incorrectly: ${JSON.stringify(preview)}`);
+      const started = await beginArchiveImport(db, {
+        jobId: 'job-a',
+        importId: 'backup-a',
+        fingerprint: 'xvr1-12345678',
+        expectedRevision: 5,
+        expectedDownloadRevision: 3,
+        header: {
+          archiveId: 'backup-a',
+          archiveRevision: 7,
+          downloadRevision: 3,
+          exportedAt: new Date(0).toISOString(),
+        },
+      });
       if (!started.ok || started.resumed) throw Error('First archive import should create a recoverable job');
-      const committed = await commitArchiveImportBatch(db, { jobId: 'job-a', importId: 'backup-a', fingerprint: 'xvr1-12345678', store: 'tweets', records: incoming, expectedRevision: 5, expectedDownloadRevision: 3 });
-      if (!committed.ok || committed.imported !== 1 || committed.identical !== 1 || committed.conflicts !== 2 || committed.revision !== 6) throw Error(`Safe additive batch commit failed: ${JSON.stringify(committed)}`);
-      if ((await get('tweets', '100')).text !== 'local edit' || (await get('tweets', '100')).userMeta.note !== 'keep this' || (await get('tweets', '300')) || !(await get('tweets', '400'))) throw Error('Import changed local evidence, resurrected Trash, or failed to add a missing post');
+      const committed = await commitArchiveImportBatch(db, {
+        jobId: 'job-a',
+        importId: 'backup-a',
+        fingerprint: 'xvr1-12345678',
+        store: 'tweets',
+        records: incoming,
+        expectedRevision: 5,
+        expectedDownloadRevision: 3,
+      });
+      if (
+        !committed.ok ||
+        committed.imported !== 1 ||
+        committed.identical !== 1 ||
+        committed.conflicts !== 2 ||
+        committed.revision !== 6
+      )
+        throw Error(`Safe additive batch commit failed: ${JSON.stringify(committed)}`);
+      if (
+        (await get('tweets', '100')).text !== 'local edit' ||
+        (await get('tweets', '100')).userMeta.note !== 'keep this' ||
+        (await get('tweets', '300')) ||
+        !(await get('tweets', '400'))
+      )
+        throw Error('Import changed local evidence, resurrected Trash, or failed to add a missing post');
       const job = await getArchiveImportJob(db, 'job-a');
-      if (job.lastKey !== '400' || job.expectedRevision !== 6 || job.importedCount !== 1 || job.conflictCount !== 2) throw Error('Committed progress was not checkpointed with the archive revision');
+      if (job.lastKey !== '400' || job.expectedRevision !== 6 || job.importedCount !== 1 || job.conflictCount !== 2)
+        throw Error('Committed progress was not checkpointed with the archive revision');
       const conflicts = await readArchiveImportConflicts(db, 'backup-a', null, 10);
-      if (conflicts.rows.length !== 2 || conflicts.rows.some(row => !row.incoming || !row.existing)) throw Error('Both versions of each divergent record must remain recoverable');
+      if (conflicts.rows.length !== 2 || conflicts.rows.some(row => !row.incoming || !row.existing))
+        throw Error('Both versions of each divergent record must remain recoverable');
       const conflictPage = await readArchiveImportConflicts(db, 'backup-a', null, 1);
       const conflictNext = await readArchiveImportConflicts(db, 'backup-a', conflictPage.nextKey, 1);
-      if (conflictPage.rows.length !== 1 || !conflictPage.hasMore || conflictPage.recordsRead !== 2 || conflictNext.rows.length !== 1 || conflictNext.hasMore) throw Error('Conflict evidence pages must seek by the import/kind/key index with one-row lookahead');
-      const resumed = await beginArchiveImport(db, { jobId: 'job-a', importId: 'backup-a', fingerprint: 'xvr1-12345678', expectedRevision: 6, expectedDownloadRevision: 3, header: { archiveId: 'backup-a', exportedAt: new Date(0).toISOString() } });
-      if (!resumed.ok || !resumed.resumed || resumed.job.lastKey !== '400') throw Error('An interrupted additive import must resume from its atomic checkpoint');
-      if ((await findArchiveImportJob(db, 'backup-a', 'xvr1-12345678'))?.jobId !== 'job-a') throw Error('A resumed file must find its prior atomic checkpoint after a window reload');
-      const falseFooter = await completeArchiveImport(db, 'job-a', 'xvr1-12345678', 6, 3, { type: 'end', recordCount: 3, archiveRevision: 7, downloadRevision: 3 });
-      if (falseFooter.ok || (await getArchiveImportJob(db, 'job-a')).status === 'complete') throw Error('A truncated or mismatched recovery footer must leave the import resumable');
-      const finished = await completeArchiveImport(db, 'job-a', 'xvr1-12345678', 6, 3, { type: 'end', recordCount: 4, archiveRevision: 7, downloadRevision: 3 });
-      if (!finished.ok || finished.job.status !== 'complete') throw Error('A checked, fully committed recovery file should finalize its journal');
-      const stale = await commitArchiveImportBatch(db, { jobId: 'job-a', importId: 'backup-a', fingerprint: 'xvr1-12345678', store: 'trash', records: [{ type: 'record', store: 'trash', key: '500', value: { id: '500', text: 'restore to Trash', deletedAt: 50 } }], expectedRevision: 5, expectedDownloadRevision: 3 });
-      if (!stale.stale || await get('trash', '500')) throw Error('A stale archive revision must not commit a batch');
-      const asset = { type: 'record', store: 'assets', key: 'download-recovered', value: { id: 'download-recovered', postId: '700', mediaId: 'm700', filename: 'recovered.mp4', size: 8192, mime: 'video/mp4', mediaType: 'video', sha256: 'b'.repeat(64), verification: 'verified', completedAt: 70 } };
+      if (
+        conflictPage.rows.length !== 1 ||
+        !conflictPage.hasMore ||
+        conflictPage.recordsRead !== 2 ||
+        conflictNext.rows.length !== 1 ||
+        conflictNext.hasMore
+      )
+        throw Error('Conflict evidence pages must seek by the import/kind/key index with one-row lookahead');
+      const resumed = await beginArchiveImport(db, {
+        jobId: 'job-a',
+        importId: 'backup-a',
+        fingerprint: 'xvr1-12345678',
+        expectedRevision: 6,
+        expectedDownloadRevision: 3,
+        header: { archiveId: 'backup-a', exportedAt: new Date(0).toISOString() },
+      });
+      if (!resumed.ok || !resumed.resumed || resumed.job.lastKey !== '400')
+        throw Error('An interrupted additive import must resume from its atomic checkpoint');
+      if ((await findArchiveImportJob(db, 'backup-a', 'xvr1-12345678'))?.jobId !== 'job-a')
+        throw Error('A resumed file must find its prior atomic checkpoint after a window reload');
+      const falseFooter = await completeArchiveImport(db, 'job-a', 'xvr1-12345678', 6, 3, {
+        type: 'end',
+        recordCount: 3,
+        archiveRevision: 7,
+        downloadRevision: 3,
+      });
+      if (falseFooter.ok || (await getArchiveImportJob(db, 'job-a')).status === 'complete')
+        throw Error('A truncated or mismatched recovery footer must leave the import resumable');
+      const finished = await completeArchiveImport(db, 'job-a', 'xvr1-12345678', 6, 3, {
+        type: 'end',
+        recordCount: 4,
+        archiveRevision: 7,
+        downloadRevision: 3,
+      });
+      if (!finished.ok || finished.job.status !== 'complete')
+        throw Error('A checked, fully committed recovery file should finalize its journal');
+      const stale = await commitArchiveImportBatch(db, {
+        jobId: 'job-a',
+        importId: 'backup-a',
+        fingerprint: 'xvr1-12345678',
+        store: 'trash',
+        records: [
+          { type: 'record', store: 'trash', key: '500', value: { id: '500', text: 'restore to Trash', deletedAt: 50 } },
+        ],
+        expectedRevision: 5,
+        expectedDownloadRevision: 3,
+      });
+      if (!stale.stale || (await get('trash', '500'))) throw Error('A stale archive revision must not commit a batch');
+      const asset = {
+        type: 'record',
+        store: 'assets',
+        key: 'download-recovered',
+        value: {
+          id: 'download-recovered',
+          postId: '700',
+          mediaId: 'm700',
+          filename: 'recovered.mp4',
+          size: 8192,
+          mime: 'video/mp4',
+          mediaType: 'video',
+          sha256: 'b'.repeat(64),
+          verification: 'verified',
+          completedAt: 70,
+        },
+      };
       const assetPreview = await previewArchiveImportBatch(db, [asset], 6, 3, 'backup-assets');
-      if (assetPreview.counts.missing !== 1) throw Error('Missing local file-manifest evidence was not detected before restore');
-      const assetStarted = await beginArchiveImport(db, { jobId: 'job-assets', importId: 'backup-assets', fingerprint: 'xvr1-assets', expectedRevision: 6, expectedDownloadRevision: 3, header: { archiveId: 'backup-assets', archiveRevision: 6, downloadRevision: 3, exportedAt: new Date(0).toISOString() } });
-      const assetCommitted = await commitArchiveImportBatch(db, { jobId: 'job-assets', importId: 'backup-assets', fingerprint: 'xvr1-assets', store: 'assets', records: [asset], expectedRevision: 6, expectedDownloadRevision: 3 });
-      if (!assetStarted.ok || !assetCommitted.ok || assetCommitted.imported !== 1 || assetCommitted.revision !== 6 || await get('downloads', 'download-recovered')) throw Error('Portable file references must be retained as inert evidence, never re-queued as completed downloads');
+      if (assetPreview.counts.missing !== 1)
+        throw Error('Missing local file-manifest evidence was not detected before restore');
+      const assetStarted = await beginArchiveImport(db, {
+        jobId: 'job-assets',
+        importId: 'backup-assets',
+        fingerprint: 'xvr1-assets',
+        expectedRevision: 6,
+        expectedDownloadRevision: 3,
+        header: {
+          archiveId: 'backup-assets',
+          archiveRevision: 6,
+          downloadRevision: 3,
+          exportedAt: new Date(0).toISOString(),
+        },
+      });
+      const assetCommitted = await commitArchiveImportBatch(db, {
+        jobId: 'job-assets',
+        importId: 'backup-assets',
+        fingerprint: 'xvr1-assets',
+        store: 'assets',
+        records: [asset],
+        expectedRevision: 6,
+        expectedDownloadRevision: 3,
+      });
+      if (
+        !assetStarted.ok ||
+        !assetCommitted.ok ||
+        assetCommitted.imported !== 1 ||
+        assetCommitted.revision !== 6 ||
+        (await get('downloads', 'download-recovered'))
+      )
+        throw Error(
+          'Portable file references must be retained as inert evidence, never re-queued as completed downloads'
+        );
       const restoredAssets = await readArchiveAssetReferences(db, 'backup-assets', null, 10);
-      if (restoredAssets.rows.length !== 1 || restoredAssets.rows[0].filename !== 'recovered.mp4') throw Error('Recovered local-file references were not exportable after restore');
+      if (restoredAssets.rows.length !== 1 || restoredAssets.rows[0].filename !== 'recovered.mp4')
+        throw Error('Recovered local-file references were not exportable after restore');
       const assetReferencesPage = await readArchiveAssetReferences(db, 'backup-assets', null, 1);
-      if (assetReferencesPage.rows.length !== 1 || assetReferencesPage.hasMore || assetReferencesPage.recordsRead !== 1) throw Error('File-reference pages should read only their matching indexed evidence');
-      const secondArchiveAsset = { ...asset, value: { ...asset.value, filename: 'different-copy.mp4', sha256: 'c'.repeat(64) } };
-      await beginArchiveImport(db, { jobId: 'job-assets-second', importId: 'backup-assets-second', fingerprint: 'xvr1-assets-second', expectedRevision: 6, expectedDownloadRevision: 3, header: { archiveId: 'backup-assets-second', archiveRevision: 6, downloadRevision: 3, exportedAt: new Date(0).toISOString() } });
+      if (assetReferencesPage.rows.length !== 1 || assetReferencesPage.hasMore || assetReferencesPage.recordsRead !== 1)
+        throw Error('File-reference pages should read only their matching indexed evidence');
+      const secondArchiveAsset = {
+        ...asset,
+        value: { ...asset.value, filename: 'different-copy.mp4', sha256: 'c'.repeat(64) },
+      };
+      await beginArchiveImport(db, {
+        jobId: 'job-assets-second',
+        importId: 'backup-assets-second',
+        fingerprint: 'xvr1-assets-second',
+        expectedRevision: 6,
+        expectedDownloadRevision: 3,
+        header: {
+          archiveId: 'backup-assets-second',
+          archiveRevision: 6,
+          downloadRevision: 3,
+          exportedAt: new Date(0).toISOString(),
+        },
+      });
       const secondPreview = await previewArchiveImportBatch(db, [secondArchiveAsset], 6, 3, 'backup-assets-second');
-      const secondCommit = await commitArchiveImportBatch(db, { jobId: 'job-assets-second', importId: 'backup-assets-second', fingerprint: 'xvr1-assets-second', store: 'assets', records: [secondArchiveAsset], expectedRevision: 6, expectedDownloadRevision: 3 });
-      if (secondPreview.counts.missing !== 1 || !secondCommit.ok || (await readArchiveAssetReferences(db, 'backup-assets', null, 10)).rows[0].filename !== 'recovered.mp4' || (await readArchiveAssetReferences(db, 'backup-assets-second', null, 10)).rows[0].filename !== 'different-copy.mp4') throw Error('Importing another backup must preserve each archive’s distinct file evidence');
-      const staleAsset = { ...asset, key: 'download-stale', value: { ...asset.value, id: 'download-stale', filename: 'stale.mp4' } };
-      await beginArchiveImport(db, { jobId: 'job-assets-stale', importId: 'backup-assets-stale', fingerprint: 'xvr1-assets-stale', expectedRevision: 6, expectedDownloadRevision: 3, header: { archiveId: 'backup-assets-stale', exportedAt: new Date(0).toISOString() } });
-      await txWrite('checkpoints', tx => tx.objectStore('checkpoints').put({ key: 'library-download-query-revision', revision: 4 }));
-      const changedFiles = await commitArchiveImportBatch(db, { jobId: 'job-assets-stale', importId: 'backup-assets-stale', fingerprint: 'xvr1-assets-stale', store: 'assets', records: [staleAsset], expectedRevision: 6, expectedDownloadRevision: 3 });
-      if (!changedFiles.stale || await get('archiveImports', 'asset:backup-assets-stale:download-stale')) throw Error('A changed local download manifest must invalidate its restore preview');
-      await txWrite('checkpoints', tx => tx.objectStore('checkpoints').put({ key: 'library-query-revision', revision: 7 }));
-      const rejectedResume = await beginArchiveImport(db, { jobId: 'job-a', importId: 'backup-a', fingerprint: 'xvr1-12345678', expectedRevision: 6, expectedDownloadRevision: 4, header: { archiveId: 'backup-a', exportedAt: new Date(0).toISOString() } });
+      const secondCommit = await commitArchiveImportBatch(db, {
+        jobId: 'job-assets-second',
+        importId: 'backup-assets-second',
+        fingerprint: 'xvr1-assets-second',
+        store: 'assets',
+        records: [secondArchiveAsset],
+        expectedRevision: 6,
+        expectedDownloadRevision: 3,
+      });
+      if (
+        secondPreview.counts.missing !== 1 ||
+        !secondCommit.ok ||
+        (await readArchiveAssetReferences(db, 'backup-assets', null, 10)).rows[0].filename !== 'recovered.mp4' ||
+        (await readArchiveAssetReferences(db, 'backup-assets-second', null, 10)).rows[0].filename !==
+          'different-copy.mp4'
+      )
+        throw Error('Importing another backup must preserve each archive’s distinct file evidence');
+      const staleAsset = {
+        ...asset,
+        key: 'download-stale',
+        value: { ...asset.value, id: 'download-stale', filename: 'stale.mp4' },
+      };
+      await beginArchiveImport(db, {
+        jobId: 'job-assets-stale',
+        importId: 'backup-assets-stale',
+        fingerprint: 'xvr1-assets-stale',
+        expectedRevision: 6,
+        expectedDownloadRevision: 3,
+        header: { archiveId: 'backup-assets-stale', exportedAt: new Date(0).toISOString() },
+      });
+      await txWrite('checkpoints', tx =>
+        tx.objectStore('checkpoints').put({ key: 'library-download-query-revision', revision: 4 })
+      );
+      const changedFiles = await commitArchiveImportBatch(db, {
+        jobId: 'job-assets-stale',
+        importId: 'backup-assets-stale',
+        fingerprint: 'xvr1-assets-stale',
+        store: 'assets',
+        records: [staleAsset],
+        expectedRevision: 6,
+        expectedDownloadRevision: 3,
+      });
+      if (!changedFiles.stale || (await get('archiveImports', 'asset:backup-assets-stale:download-stale')))
+        throw Error('A changed local download manifest must invalidate its restore preview');
+      await txWrite('checkpoints', tx =>
+        tx.objectStore('checkpoints').put({ key: 'library-query-revision', revision: 7 })
+      );
+      const rejectedResume = await beginArchiveImport(db, {
+        jobId: 'job-a',
+        importId: 'backup-a',
+        fingerprint: 'xvr1-12345678',
+        expectedRevision: 6,
+        expectedDownloadRevision: 4,
+        header: { archiveId: 'backup-a', exportedAt: new Date(0).toISOString() },
+      });
       if (!rejectedResume.stale) throw Error('A changed archive must require a fresh conflict preview before resuming');
       const stalePage = await readLibraryBackupPage(db, 'tweets', '200', 2, 6);
-      if (!stalePage.stale || await readLibraryRevision(db) !== 7) throw Error('A revision-changed export cursor must not continue silently');
-      output.textContent = 'PASS bounded cursor export, conflict preview, add-only transactional recovery, Trash guard, retained conflict evidence, atomic resume and stale-revision refusal';
-    } catch (error) { output.textContent = `FAIL ${error.stack || error}`; }
-    finally { db.close(); indexedDB.deleteDatabase(name); }
+      if (!stalePage.stale || (await readLibraryRevision(db)) !== 7)
+        throw Error('A revision-changed export cursor must not continue silently');
+      output.textContent =
+        'PASS bounded cursor export, conflict preview, add-only transactional recovery, Trash guard, retained conflict evidence, atomic resume and stale-revision refusal';
+    } catch (error) {
+      output.textContent = `FAIL ${error.stack || error}`;
+    } finally {
+      db.close();
+      indexedDB.deleteDatabase(name);
+    }
   };
 </script>

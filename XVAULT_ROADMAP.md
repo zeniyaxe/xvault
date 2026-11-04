@@ -1,7 +1,56 @@
 # XVault overhaul roadmap
 
-Branch: `overhaul/v17` (from `main` @ 21e6d74, "Publish XVault v16.0.0 extension build"). Version 17.0.0.
 This file is the hand-off document: another session should be able to resume from here.
+
+## v18 "Atlas" pass
+
+Branch: `xvault-18-atlas` (from `main` @ 424b2fb, "Publish current XVault v17.0.0 source"). Version 18.0.0.
+
+| Area | Change |
+| --- | --- |
+| Capture | Parser records `quotedPostId`, `retweetedPostId`, `replyToHandle` and expanded `links`/`hashtags`/`mentions` (note-tweet entities included). `message-boundary.mjs` validates them (digit ids, http(s) links, bounded arrays). Recapture adds structural fields to older rows without touching archived text. |
+| Search | `on:`/`year:`/`within:` (+ `archived-*`), `#tag`, `@user`, `domain:`/`site:`, `is:reply\|quote\|repost\|thread\|original\|media\|text\|favorite\|sensitive`, `lang:`, `media:>N`, `thread:ID`, `quotes:ID` in `library-search-core.js`. `xv-search-assist.js` adds an ARIA combobox with key/value/date/recent suggestions. |
+| Insights | `vault-insights.mjs` is pure: one streaming accumulator → totals, UTC day/month series, streaks, rhythm, people, languages, hashtags, mentions, domains, sources, tags, media mix, relationships, shared media ids, top-liked, on-this-day; plus `orderThread`, `readerPost`, `threadMarkdown`. |
+| Worker | Schema 16: `tweets.conversationId` index. Messages: `GET_VAULT_INSIGHTS` (cache key = library revision + row count, 15 min TTL, `force` to recompute), `GET_THREAD` (ancestors via `replyToId`, conversation members via the new index, quoted posts), `GET_AUTHOR_DETAIL`, `GET_MEDIA_FINGERPRINT_PAGE`. |
+| Atlas | `xv-atlas.js`/`.css`, page `#page-atlas`: Overview, Calendar, People, Duplicate Lab. Look-alike scan: 64-bit dHash of `name=thumb` renditions in the dashboard, cached in IndexedDB `xvault-derived`/`phash`, 4 concurrent fetches, BK-tree clustering with a Hamming threshold slider. |
+| Reader | `xv-reader.js`/`.css`: `window.XVaultReader.open(id)`; spine vs. replies, media, quoted cards with back stack, Markdown copy/save, keyboard map; entry points in the drawer, `t`, Quick Look and Atlas. |
+| Motion | `xv-motion.js` 2.0 (spring easing via CSS `linear()`, interruptible `play`, `flip`, `stagger`, `countUp`, `transition`) + `xv-motion.css`. Preference gates unchanged. |
+| Tests | `tests/source-text.mjs` gives structural tests compact/collapsed source views (the source was Prettier-formatted after those tests were written); `tests/vault-insights.test.mjs`. `npm test` 75/75. |
+| Tooling | ESLint models page globals for browser-driven harnesses (`tests/*-browser.mjs`, `*-ui.mjs`, `library-profile.mjs`) and Node globals for `tools/`; tests and tools formatted once with Prettier. `npm run verify` exits 0. |
+
+### Decisions (v18)
+
+- **Insights are computed in the worker, rendered in the page.** One cursor pass over `tweets`; the dashboard never
+  materializes the archive. The cache is invalidated by the existing library revision counter.
+- **Look-alike detection runs in the dashboard**, not the service worker: it needs image decoding (canvas) and must
+  stop when the user leaves. Hashes are cached so later scans only fetch new media.
+- **Calendar and streaks use UTC days** so counts agree with `on:`/`archived-on:` searches.
+- **Atlas, Reader and suggestions are additive modules** loaded after the Library and reached through small globals
+  (`XVaultAtlas`, `XVaultReader`, `XVaultInsights`, `XVaultExtraCommands`), so they can be removed without touching
+  the Library.
+
+### Verification log (v18)
+
+- `npm run verify` exits 0: integrity OK, ESLint 0 errors (10 pre-existing warnings), 75/75 tests,
+  Prettier clean. `python -m unittest discover -s tests/python` 8/8. `npm run e2e` scripts pass against Chromium 153
+  (`CHROMIUM_PATH`): dashboard at four viewports with no console errors, seeded Library filters and exports 9/9.
+- Local Playwright smoke (not committed): unpacked extension in Chromium 153, 47 synthetic posts through the real
+  message API, X image CDN mocked. Atlas overview/growth/calendar keys/people/author sheet, shared-media and
+  look-alike groups, Reader spine/replies/Escape and Markdown module load, suggestions, `thread:` filter, `t` and `g t`; no page
+  errors. Atlas views and the Reader re-checked at 820px and 390px for horizontal overflow.
+- **Not verified:** live X capture of the new fields, real `pbs.twimg.com` thumbnails (CORS/rate limits) for the
+  look-alike scan, archives beyond synthetic size, screen readers.
+
+### Next (v18 follow-ups)
+
+1. Run the look-alike scan in an offscreen document so it continues when the dashboard closes.
+2. Group threads in Markdown/HTML exports using the Reader's `orderThread`.
+3. Scheduled Bookmarks sync / saved-search alerts (`chrome.alarms`) — still not implemented.
+4. Axe-core pass over Atlas and the Reader in the e2e job.
+
+## v17 overhaul
+
+Branch: `overhaul/v17` (from `main` @ 21e6d74, "Publish XVault v16.0.0 extension build"). Version 17.0.0.
 
 ## State of the codebase (assessment, pass 1)
 

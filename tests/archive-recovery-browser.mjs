@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const pw = require(process.argv[2] || 'playwright');
-const browser = await pw.chromium.launch({ headless: true, ...(process.argv[3] ? { executablePath: process.argv[3] } : {}) });
+const browser = await pw.chromium.launch({
+  headless: true,
+  ...(process.argv[3] ? { executablePath: process.argv[3] } : {}),
+});
 try {
   const page = await browser.newPage();
   page.setDefaultTimeout(30000);
@@ -14,4 +17,6 @@ try {
   assert.match(result, /^PASS /, result);
   assert.deepEqual(errors, []);
   console.log(result);
-} finally { await browser.close(); }
+} finally {
+  await browser.close();
+}
