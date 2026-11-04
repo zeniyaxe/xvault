@@ -75,21 +75,35 @@
     return { ok: true, text: tidy(data.text), confidence: Math.round(Number(data.confidence) || 0), words };
   }
 
-  chrome.runtime.onMessage.addListener((message, sender, reply) => {
-    // Ignore everything not addressed to the OCR host so other extension pages keep working.
-    if (message?.target !== TARGET || sender.id !== chrome.runtime.id) return;
-    (async () => {
-      if (message.type === 'OCR_PING') {
+  async function handle(message) {
+    try {
+      if (message?.type === 'OCR_PING') {
         const response = await fetch(`${base}engine.json`).catch(() => null);
         if (!response?.ok)
           return { ok: false, error: 'OCR engine not installed (vendor/ocr is missing from this build)' };
         return { ok: true, engine: await response.json() };
       }
-      if (message.type === 'OCR_RECOGNIZE') return recognize(String(message.url || ''));
+      if (message?.type === 'OCR_RECOGNIZE') return await recognize(String(message.url || ''));
       return { ok: false, error: 'Unknown OCR request' };
-    })()
-      .then(reply)
-      .catch(error => reply({ ok: false, error: error?.message || String(error), status: error?.status || 0 }));
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error), status: error?.status || 0 };
+    }
+  }
+  async function release() {
+    clearTimeout(idleTimer);
+    const current = engine;
+    engine = null;
+    try {
+      await (await current)?.terminate();
+    } catch {}
+  }
+  // Firefox runs the engine inside its background page (sw/ocr.mjs createInlineHost) and calls it directly.
+  globalThis.XVaultOcrEngine = { handle, release };
+
+  chrome.runtime.onMessage.addListener((message, sender, reply) => {
+    // Ignore everything not addressed to the OCR host so other extension pages keep working.
+    if (message?.target !== TARGET || sender.id !== chrome.runtime.id) return;
+    handle(message).then(reply);
     return true;
   });
 })();

@@ -1,7 +1,8 @@
 // Per-browser manifest transforms for scripts/build.mjs (XVault 20).
 // Chrome is the reference build. Edge runs the same Chromium MV3 code; only the store listing differs.
 // Firefox support is EXPERIMENTAL: Firefox MV3 has no extension service workers (background scripts run as
-// an event page), no chrome.offscreen (local OCR is unavailable), no chrome.sidePanel (sidebar_action is
+// an event page), no chrome.offscreen (since XVault 21 local OCR runs inside the event page, which has a
+// DOM — sw/ocr.mjs createInlineHost), no chrome.sidePanel (sidebar_action is
 // used instead) and no "power" permission. Capture, Library, search, downloads and exports are expected
 // to work; every Firefox-only gap is listed in the build output.
 export const TARGETS = {
@@ -38,7 +39,14 @@ export function manifestFor(base, target) {
     delete manifest.side_panel;
     notes.push('side panel → sidebar_action');
   }
-  manifest.browser_specific_settings = { gecko: { id: 'xvault@zeniyaxe.github.io', strict_min_version: '128.0' } };
-  notes.push('background service worker → event page; local OCR (offscreen document) unavailable');
+  manifest.browser_specific_settings = {
+    gecko: {
+      id: 'xvault@zeniyaxe.github.io',
+      strict_min_version: '128.0',
+      // XVault is local-first: nothing is collected or transmitted to the developer (AMO data consent).
+      data_collection_permissions: { required: ['none'] },
+    },
+  };
+  notes.push('background service worker → event page; local OCR runs in the event page (no offscreen document)');
   return { manifest, notes };
 }

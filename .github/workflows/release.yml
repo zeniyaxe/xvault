@@ -1,6 +1,7 @@
 name: Release
-# Publishes a versioned extension ZIP when a version tag (v19.0.0, v19.1.0-beta.1, …) is pushed.
-# The tag must match manifest.json/package.json; the full verification suite runs before packaging.
+# Publishes versioned Chrome, Edge and (experimental) Firefox ZIPs with SHA-256 checksums when a version tag
+# (v21.0.0, v21.1.0-beta.1, …) is pushed. The tag must match manifest.json/package.json, the full
+# verification suite runs before packaging, and the notes are this version's CHANGELOG section.
 on:
   push:
     tags: ['v*']
@@ -45,25 +46,33 @@ jobs:
         run: |
           python -m py_compile FFmpeg_Helper/*.py
           python -m unittest discover -s tests/python -v
-      - name: Build extension ZIP (includes the local OCR engine)
-        run: npm run build
-      - name: Validate package
+      - name: Build Chrome, Edge and Firefox ZIPs (each includes the local OCR engine)
+        run: npm run build:all
+      - name: Validate packages and write checksums
         run: |
-          zip="dist/XVault-$(node -p "require('./manifest.json').version").zip"
-          test -f "$zip"
-          unzip -l "$zip" | grep -q ' manifest.json$'
-          unzip -l "$zip" | grep -q ' background.js$'
-          unzip -l "$zip" | grep -q 'vendor/ocr/worker.min.js$'
-          unzip -l "$zip" | grep -q 'vendor/ocr/lang/eng.traineddata.gz$'
-          if unzip -l "$zip" | grep -E ' (node_modules|tests|scripts|\.github)/' ; then echo "::error::dev files leaked into the ZIP"; exit 1; fi
-          unzip -p "$zip" manifest.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const m=JSON.parse(s);if(m.manifest_version!==3)process.exit(1);console.log('manifest ok',m.version)})"
-          sha256sum "$zip" > "$zip.sha256"
-          cat "$zip.sha256"
+          version=$(node -p "require('./manifest.json').version")
+          for zip in "dist/XVault-$version.zip" "dist/XVault-$version-edge.zip" "dist/XVault-$version-firefox.zip"; do
+            test -f "$zip"
+            unzip -l "$zip" | grep -q ' manifest.json$'
+            unzip -l "$zip" | grep -q ' background.js$'
+            unzip -l "$zip" | grep -q 'vendor/ocr/worker.min.js$'
+            unzip -l "$zip" | grep -q 'vendor/ocr/lang/eng.traineddata.gz$'
+            if unzip -l "$zip" | grep -E ' (node_modules|tests|scripts|\.github)/' ; then echo "::error::dev files leaked into $zip"; exit 1; fi
+            unzip -p "$zip" manifest.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const m=JSON.parse(s);if(m.manifest_version!==3||m.version!=='$version')process.exit(1);console.log('manifest ok',m.version)})"
+            sha256sum "$zip" > "$zip.sha256"
+          done
+          (cd dist && sha256sum XVault-*.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - name: Firefox package passes web-ext lint
+        run: |
+          mkdir -p output/firefox && unzip -q dist/XVault-*-firefox.zip -d output/firefox
+          npx --yes web-ext@8 lint --source-dir output/firefox --output json > web-ext-lint.json || true
+          node -e "const r=require('./web-ext-lint.json');console.log(r.summary);if(r.errors.length){for(const e of r.errors)console.log(e.code,e.message);process.exit(1)}"
       - name: Release notes from CHANGELOG
         run: |
           version="${TAG#v}"
           awk -v v="$version" 'BEGIN{p=0} /^## /{ if(p) exit; if(index($0,v)) p=1 } p' CHANGELOG.md > release-notes.md
           [ -s release-notes.md ] || echo "XVault $TAG" > release-notes.md
+          { echo; echo '### Downloads'; echo; echo '- `XVault-'"$version"'.zip` — Chrome (reference build)'; echo '- `XVault-'"$version"'-edge.zip` — Microsoft Edge'; echo '- `XVault-'"$version"'-firefox.zip` — Firefox (experimental)'; echo; echo '### SHA-256'; echo; echo '```'; cat dist/SHA256SUMS.txt; echo '```'; } >> release-notes.md
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -71,7 +80,7 @@ jobs:
           prerelease=""
           case "$TAG" in *-*) prerelease="--prerelease";; esac
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.zip dist/*.zip.sha256 --clobber
+            gh release upload "$TAG" dist/*.zip dist/*.zip.sha256 dist/SHA256SUMS.txt --clobber
           else
-            gh release create "$TAG" dist/*.zip dist/*.zip.sha256 --title "XVault $TAG" --notes-file release-notes.md $prerelease
+            gh release create "$TAG" dist/*.zip dist/*.zip.sha256 dist/SHA256SUMS.txt --title "XVault $TAG" --notes-file release-notes.md $prerelease
           fi
