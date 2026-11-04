@@ -1,5 +1,5 @@
 <!doctype html>
-<meta charset="utf-8">
+<meta charset="utf-8" />
 <title>Library cursor integration</title>
 <output id="result">Running</output>
 <script type="module">
@@ -34,10 +34,15 @@
     const first = await readLibraryPage(database, undefined, 2);
     const second = await readLibraryPage(database, first.nextKey, 2);
     const third = await readLibraryPage(database, second.nextKey, 2);
-    if (JSON.stringify([first.rows.map(x => x.id), second.rows.map(x => x.id), third.rows.map(x => x.id)]) !== JSON.stringify([['1','2'],['3','4'],['5']])) throw Error('Incorrect page order or duplicate row');
+    if (
+      JSON.stringify([first.rows.map(x => x.id), second.rows.map(x => x.id), third.rows.map(x => x.id)]) !==
+      JSON.stringify([['1', '2'], ['3', '4'], ['5']])
+    )
+      throw Error('Incorrect page order or duplicate row');
     if (first.done || second.done || !third.done) throw Error('Incorrect completion state');
     const selected = await readDownloadRows(database, ['2', '5']);
-    if (JSON.stringify(selected.map(row => row.key)) !== JSON.stringify(['a', 'c'])) throw Error('Download scan included wrong posts');
+    if (JSON.stringify(selected.map(row => row.key)) !== JSON.stringify(['a', 'c']))
+      throw Error('Download scan included wrong posts');
     database.close();
     indexedDB.deleteDatabase(name);
     result.textContent = 'PASS';

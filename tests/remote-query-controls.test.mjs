@@ -20,7 +20,11 @@ assert.equal(controls.get('device:tab-a'), pageA, 'one completed page must not u
 releaseRemoteQuery(controls, 'device:tab-a', pageB);
 assert.equal(controls.has('device:tab-a'), false, 'idle controls should be released');
 
-const wrongPlan = beginRemoteQuery(controls, 'device:tab-b', { query: 'cats', sort: 'new', cursorPlanId: 'expired-plan' });
+const wrongPlan = beginRemoteQuery(controls, 'device:tab-b', {
+  query: 'cats',
+  sort: 'new',
+  cursorPlanId: 'expired-plan',
+});
 assert.equal(secondTab.cancelled, true, 'a continuation cannot inherit another plan’s control');
 assert.notEqual(wrongPlan, secondTab);
 cancelRemoteQueries(controls);

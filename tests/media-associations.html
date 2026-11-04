@@ -1,26 +1,143 @@
-<!doctype html><meta charset="utf-8"><title>Shared-file IndexedDB regression</title><pre id="result">Running</pre><script type="module">
-import{linkSharedFile,readSharedFiles}from'../media-associations.mjs';
-import{readDownloadRows,replaceCompletedDownloadWithHistory,reserveLibraryDownload,writeLibraryDownloads,moveLibraryToTrash,restoreLibraryFromTrash}from'../library-storage.mjs';
-const check=(ok,message)=>{if(!ok)throw Error(message)};
-try{
- const opened=indexedDB.open('xvault-association-test-'+crypto.randomUUID(),1);opened.onupgradeneeded=()=>{const db=opened.result,downloads=db.createObjectStore('downloads',{keyPath:'key'});downloads.createIndex('tweetId','item.tweetId');downloads.createIndex('state','state');downloads.createIndex('stateKey',['state','key']);downloads.createIndex('downloadId','downloadId');const links=db.createObjectStore('mediaAssociations',{keyPath:'id'});links.createIndex('tweetId','tweetId');links.createIndex('downloadKey','downloadKey');db.createObjectStore('checkpoints',{keyPath:'key'});db.createObjectStore('tweets',{keyPath:'id'});const trash=db.createObjectStore('trash',{keyPath:'id'});trash.createIndex('deletedAt','deletedAt')};
- const db=await new Promise((resolve,reject)=>{opened.onsuccess=()=>resolve(opened.result);opened.onerror=()=>reject(opened.error)});
- const owner={key:'1|img:shared',state:'complete',downloadId:100,sourceGeneration:'generation-A',item:{tweetId:'1',url:'https://pbs.twimg.com/media/shared.jpg'},target:{filename:'original-A.jpg'},verificationState:'verified'};
- await new Promise((resolve,reject)=>{const tx=db.transaction('downloads','readwrite');tx.objectStore('downloads').put(owner);tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error)});
- check(!(await reserveLibraryDownload(db,{...owner,state:'queued'})).queued,'stale preparation cannot overwrite a committed original');
- const request={tweetId:'2',mediaId:'post-two-media',url:'https://pbs.twimg.com/media/shared?format=jpg&name=small'};
- check((await linkSharedFile(db,request,owner.key)).linked,'Save Once writes its durable association');
- const synced=await writeLibraryDownloads(db,[{...owner,state:'failed'}]);check(synced.changedIds.includes('2'),'shared post IDs receive targeted completion/state synchronization');await writeLibraryDownloads(db,[owner]);
- let rows=await readDownloadRows(db,['2']);check(rows.length===1&&rows[0].association.ownerPostId==='1'&&rows[0].target.filename==='original-A.jpg','shared post resolves the real owner file');
- await new Promise(resolve=>{const tx=db.transaction('tweets','readwrite');tx.objectStore('tweets').put({id:'2',text:'Shared post',media:[],archivedAt:1});tx.oncomplete=resolve});await moveLibraryToTrash(db,['2']);check((await readSharedFiles(db,['2']))[0].target.filename==='original-A.jpg','Trash preserves the physical association');await restoreLibraryFromTrash(db,['2']);check((await readSharedFiles(db,['2']))[0].association.ownerPostId==='1','restore retains the same owner rather than fabricating a copy');
- const replacement={...owner,sourceGeneration:'generation-B',state:'queued',downloadId:null,target:{filename:'original-B.jpg'}};
- const changed=await replaceCompletedDownloadWithHistory(db,replacement,{expectedDownloadId:100});check(changed.queued,'replacement committed');
- rows=await readSharedFiles(db,['2']);check(rows[0].target.filename==='original-A.jpg'&&rows[0].association.downloadKey===changed.historyKey,'redownload preserves the exact generation already shared');
- check((await linkSharedFile(db,request,owner.key)).conflict,'implicit relinking to a different source is refused');
- await new Promise(resolve=>{const tx=db.transaction('downloads','readwrite');tx.objectStore('downloads').delete(changed.historyKey);tx.oncomplete=resolve});
- rows=await readSharedFiles(db,['2']);check(rows[0].state==='missing'&&rows[0].association.unavailable,'removed history leaves explicit unresolved association evidence');
- const bounded=await readSharedFiles(db,['2'],{limit:0});check(bounded.length===0&&bounded.truncated,'association reads obey zero remaining budget');
- const legacy={key:'legacy-key',state:'complete',item:{tweetId:'3',url:'https://pbs.twimg.com/media/legacy.jpg'},target:{filename:'legacy-original.jpg'}};await new Promise(resolve=>{const tx=db.transaction('downloads','readwrite');tx.objectStore('downloads').put(legacy);tx.oncomplete=resolve});await linkSharedFile(db,{tweetId:'4',url:legacy.item.url},legacy.key);await replaceCompletedDownloadWithHistory(db,{...legacy,state:'queued',sourceGeneration:'new-legacy-source'},{expectedDownloadId:null});check((await readSharedFiles(db,['4']))[0].target.filename==='legacy-original.jpg','legacy sources gain opaque generations and survive key replacement');
- db.close();window.testResult={passed:11};document.querySelector('#result').textContent='PASS 11 shared-file transaction/generation/bounds assertions';
-}catch(error){window.testResult={error:String(error.stack||error)};document.querySelector('#result').textContent=window.testResult.error}
+<!doctype html><meta charset="utf-8" /><title>Shared-file IndexedDB regression</title>
+<pre id="result">Running</pre>
+<script type="module">
+  import { linkSharedFile, readSharedFiles } from '../media-associations.mjs';
+  import {
+    readDownloadRows,
+    replaceCompletedDownloadWithHistory,
+    reserveLibraryDownload,
+    writeLibraryDownloads,
+    moveLibraryToTrash,
+    restoreLibraryFromTrash,
+  } from '../library-storage.mjs';
+  const check = (ok, message) => {
+    if (!ok) throw Error(message);
+  };
+  try {
+    const opened = indexedDB.open('xvault-association-test-' + crypto.randomUUID(), 1);
+    opened.onupgradeneeded = () => {
+      const db = opened.result,
+        downloads = db.createObjectStore('downloads', { keyPath: 'key' });
+      downloads.createIndex('tweetId', 'item.tweetId');
+      downloads.createIndex('state', 'state');
+      downloads.createIndex('stateKey', ['state', 'key']);
+      downloads.createIndex('downloadId', 'downloadId');
+      const links = db.createObjectStore('mediaAssociations', { keyPath: 'id' });
+      links.createIndex('tweetId', 'tweetId');
+      links.createIndex('downloadKey', 'downloadKey');
+      db.createObjectStore('checkpoints', { keyPath: 'key' });
+      db.createObjectStore('tweets', { keyPath: 'id' });
+      const trash = db.createObjectStore('trash', { keyPath: 'id' });
+      trash.createIndex('deletedAt', 'deletedAt');
+    };
+    const db = await new Promise((resolve, reject) => {
+      opened.onsuccess = () => resolve(opened.result);
+      opened.onerror = () => reject(opened.error);
+    });
+    const owner = {
+      key: '1|img:shared',
+      state: 'complete',
+      downloadId: 100,
+      sourceGeneration: 'generation-A',
+      item: { tweetId: '1', url: 'https://pbs.twimg.com/media/shared.jpg' },
+      target: { filename: 'original-A.jpg' },
+      verificationState: 'verified',
+    };
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('downloads', 'readwrite');
+      tx.objectStore('downloads').put(owner);
+      tx.oncomplete = resolve;
+      tx.onabort = () => reject(tx.error);
+    });
+    check(
+      !(await reserveLibraryDownload(db, { ...owner, state: 'queued' })).queued,
+      'stale preparation cannot overwrite a committed original'
+    );
+    const request = {
+      tweetId: '2',
+      mediaId: 'post-two-media',
+      url: 'https://pbs.twimg.com/media/shared?format=jpg&name=small',
+    };
+    check((await linkSharedFile(db, request, owner.key)).linked, 'Save Once writes its durable association');
+    const synced = await writeLibraryDownloads(db, [{ ...owner, state: 'failed' }]);
+    check(synced.changedIds.includes('2'), 'shared post IDs receive targeted completion/state synchronization');
+    await writeLibraryDownloads(db, [owner]);
+    let rows = await readDownloadRows(db, ['2']);
+    check(
+      rows.length === 1 && rows[0].association.ownerPostId === '1' && rows[0].target.filename === 'original-A.jpg',
+      'shared post resolves the real owner file'
+    );
+    await new Promise(resolve => {
+      const tx = db.transaction('tweets', 'readwrite');
+      tx.objectStore('tweets').put({ id: '2', text: 'Shared post', media: [], archivedAt: 1 });
+      tx.oncomplete = resolve;
+    });
+    await moveLibraryToTrash(db, ['2']);
+    check(
+      (await readSharedFiles(db, ['2']))[0].target.filename === 'original-A.jpg',
+      'Trash preserves the physical association'
+    );
+    await restoreLibraryFromTrash(db, ['2']);
+    check(
+      (await readSharedFiles(db, ['2']))[0].association.ownerPostId === '1',
+      'restore retains the same owner rather than fabricating a copy'
+    );
+    const replacement = {
+      ...owner,
+      sourceGeneration: 'generation-B',
+      state: 'queued',
+      downloadId: null,
+      target: { filename: 'original-B.jpg' },
+    };
+    const changed = await replaceCompletedDownloadWithHistory(db, replacement, { expectedDownloadId: 100 });
+    check(changed.queued, 'replacement committed');
+    rows = await readSharedFiles(db, ['2']);
+    check(
+      rows[0].target.filename === 'original-A.jpg' && rows[0].association.downloadKey === changed.historyKey,
+      'redownload preserves the exact generation already shared'
+    );
+    check(
+      (await linkSharedFile(db, request, owner.key)).conflict,
+      'implicit relinking to a different source is refused'
+    );
+    await new Promise(resolve => {
+      const tx = db.transaction('downloads', 'readwrite');
+      tx.objectStore('downloads').delete(changed.historyKey);
+      tx.oncomplete = resolve;
+    });
+    rows = await readSharedFiles(db, ['2']);
+    check(
+      rows[0].state === 'missing' && rows[0].association.unavailable,
+      'removed history leaves explicit unresolved association evidence'
+    );
+    const bounded = await readSharedFiles(db, ['2'], { limit: 0 });
+    check(bounded.length === 0 && bounded.truncated, 'association reads obey zero remaining budget');
+    const legacy = {
+      key: 'legacy-key',
+      state: 'complete',
+      item: { tweetId: '3', url: 'https://pbs.twimg.com/media/legacy.jpg' },
+      target: { filename: 'legacy-original.jpg' },
+    };
+    await new Promise(resolve => {
+      const tx = db.transaction('downloads', 'readwrite');
+      tx.objectStore('downloads').put(legacy);
+      tx.oncomplete = resolve;
+    });
+    await linkSharedFile(db, { tweetId: '4', url: legacy.item.url }, legacy.key);
+    await replaceCompletedDownloadWithHistory(
+      db,
+      { ...legacy, state: 'queued', sourceGeneration: 'new-legacy-source' },
+      { expectedDownloadId: null }
+    );
+    check(
+      (await readSharedFiles(db, ['4']))[0].target.filename === 'legacy-original.jpg',
+      'legacy sources gain opaque generations and survive key replacement'
+    );
+    db.close();
+    window.testResult = { passed: 11 };
+    document.querySelector('#result').textContent = 'PASS 11 shared-file transaction/generation/bounds assertions';
+  } catch (error) {
+    window.testResult = { error: String(error.stack || error) };
+    document.querySelector('#result').textContent = window.testResult.error;
+  }
 </script>

@@ -6,7 +6,10 @@ const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
 const target = targets.find(row => row.url === `chrome-extension://${extensionId}/dashboard.html`);
 if (!target) throw Error('Dashboard target not found');
 const socket = new WebSocket(target.webSocketDebuggerUrl);
-await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
+await new Promise((resolve, reject) => {
+  socket.onopen = resolve;
+  socket.onerror = reject;
+});
 let id = 0;
 const pending = new Map();
 const errors = [];
@@ -17,7 +20,8 @@ socket.onmessage = event => {
     pending.delete(message.id);
   }
   if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.text);
-  if (message.method === 'Log.entryAdded' && message.params.entry.level === 'error') errors.push(message.params.entry.text);
+  if (message.method === 'Log.entryAdded' && message.params.entry.level === 'error')
+    errors.push(message.params.entry.text);
 };
 function send(method, params = {}) {
   const requestId = ++id;
@@ -78,12 +82,27 @@ const evaluation = await send('Runtime.evaluate', {
     };
   })()`,
   awaitPromise: true,
-  returnByValue: true
+  returnByValue: true,
 });
 const result = evaluation.result?.result?.value;
 socket.close();
 if (evaluation.error || evaluation.result?.exceptionDetails) throw Error(JSON.stringify(evaluation));
-if (!result || result.posts !== 0 || result.libraryRows !== 0 || !result.libraryVisible || result.motion !== 'normal' || result.navIcons < 10 || result.inserted !== 1 || !result.loaded || !result.searched || result.searchWorker !== null || !result.queryPlan || result.queryReadCount > 10 || !result.firstPageIds.includes('smoke-archive-1') || errors.length) {
+if (
+  !result ||
+  result.posts !== 0 ||
+  result.libraryRows !== 0 ||
+  !result.libraryVisible ||
+  result.motion !== 'normal' ||
+  result.navIcons < 10 ||
+  result.inserted !== 1 ||
+  !result.loaded ||
+  !result.searched ||
+  result.searchWorker !== null ||
+  !result.queryPlan ||
+  result.queryReadCount > 10 ||
+  !result.firstPageIds.includes('smoke-archive-1') ||
+  errors.length
+) {
   throw Error(JSON.stringify({ result, errors }));
 }
 console.log(JSON.stringify({ result, errors }));

@@ -1,8 +1,12 @@
 <!doctype html>
-<meta charset="utf-8">
+<meta charset="utf-8" />
 <title>XVault navigation icons</title>
 <script defer src="../app-icons.js"></script>
-<aside class="rail"><nav><button class="nav" data-page="library">▦ <span>Library</span></button></nav></aside>
+<aside class="rail">
+  <nav>
+    <button class="nav" data-page="library">▦ <span>Library</span></button>
+  </nav>
+</aside>
 <output id="result">Running</output>
 <script>
   addEventListener('DOMContentLoaded', async () => {
@@ -10,7 +14,12 @@
     nav.insertAdjacentHTML('beforeend', '<button class="nav" data-page="explore">◌ <span>Explore</span></button>');
     await new Promise(resolve => setTimeout(resolve, 0));
     const buttons = [...nav.querySelectorAll('button')];
-    const valid = buttons.every(button => button.querySelector('svg[aria-hidden="true"]') && button.getAttribute('aria-label') === button.querySelector('span').textContent && button.firstChild.nodeType === Node.ELEMENT_NODE);
+    const valid = buttons.every(
+      button =>
+        button.querySelector('svg[aria-hidden="true"]') &&
+        button.getAttribute('aria-label') === button.querySelector('span').textContent &&
+        button.firstChild.nodeType === Node.ELEMENT_NODE
+    );
     document.querySelector('#result').textContent = valid ? 'PASS' : 'FAIL: navigation icon or name missing';
   });
 </script>
