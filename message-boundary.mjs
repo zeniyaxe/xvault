@@ -154,6 +154,28 @@ export function authorizeMessage(message, sender, extensionId) {
         (row.media != null && (!Array.isArray(row.media) || row.media.length > 32))
       )
         throw Error('Invalid captured post');
+      for (const field of ['quotedPostId', 'retweetedPostId', 'replyToId', 'conversationId'])
+        if (row[field] != null && !/^\d{1,32}$/.test(String(row[field]))) throw Error('Invalid post relationship');
+      if (row.replyToHandle != null && !/^[a-z0-9_]{1,30}$/i.test(String(row.replyToHandle)))
+        throw Error('Invalid reply handle');
+      if (
+        row.links != null &&
+        (!Array.isArray(row.links) ||
+          row.links.length > 20 ||
+          row.links.some(link => typeof link !== 'string' || link.length > 2048 || !/^https?:\/\//i.test(link)))
+      )
+        throw Error('Invalid post links');
+      for (const [field, limit, pattern] of [
+        ['hashtags', 30, /^[^\s]{1,140}$/u],
+        ['mentions', 50, /^[a-z0-9_]{1,30}$/i],
+      ])
+        if (
+          row[field] != null &&
+          (!Array.isArray(row[field]) ||
+            row[field].length > limit ||
+            row[field].some(value => typeof value !== 'string' || !pattern.test(value)))
+        )
+          throw Error(`Invalid post ${field}`);
       for (const media of row.media || []) {
         if (!plain(media) || (media.variants != null && (!Array.isArray(media.variants) || media.variants.length > 32)))
           throw Error('Invalid captured media');

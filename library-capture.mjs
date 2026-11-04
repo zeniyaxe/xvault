@@ -149,6 +149,22 @@ export function mergeCapturedRecord(current, incoming, now = Date.now()) {
       if (Object.hasOwn(prior, field)) next[field] = prior[field];
     }
   }
+  // Structural fields learned by newer capture versions fill gaps in older records without
+  // overriding content that is already archived.
+  if (prior && !contentIsNewer)
+    for (const field of [
+      'quotedPostId',
+      'retweetedPostId',
+      'replyToHandle',
+      'links',
+      'hashtags',
+      'mentions',
+      'language',
+      'conversationId',
+      'replyToId',
+    ])
+      if ((next[field] == null || (Array.isArray(next[field]) && !next[field].length)) && rowFields[field] != null)
+        next[field] = rowFields[field];
   next.author = profileIsNewer
     ? { ...(prior?.author || {}), ...nonNull(incoming.author || {}) }
     : { ...(incoming.author || {}), ...(prior?.author || {}) };
