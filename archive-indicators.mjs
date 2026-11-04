@@ -31,12 +31,20 @@ export function buildArchiveIndicators(
     if (!rowsByPost.has(id)) rowsByPost.set(id, []);
     rowsByPost.get(id).push(row);
   }
+  // XVault 21: two booleans for the optional x.com badges — never text, notes or file paths.
+  const extra = post => {
+    const out = {};
+    if (Number(post.textRevisionCount) > 0) out.edited = true;
+    const availability = post.availability?.state;
+    if (availability && availability !== 'available') out.gone = true;
+    return out;
+  };
   return [...new Set((ids || []).map(String))].slice(0, 50).map(id => {
     const post = postById.get(id);
     if (!post) return { id, status: 'not-archived' };
-    if (truncated) return { id, status: 'unknown' };
+    if (truncated) return { id, status: 'unknown', ...extra(post) };
     const media = Array.isArray(post.media) ? post.media : [];
-    if (!media.length) return { id, status: 'archived' };
+    if (!media.length) return { id, status: 'archived', ...extra(post) };
     const downloads = rowsByPost.get(id) || [];
     const savedCount = media.reduce(
       (count, item) => count + (downloads.some(row => verified(row) && matches(item, row)) ? 1 : 0),
@@ -49,6 +57,6 @@ export function buildArchiveIndicators(
     else if (downloads.some(row => ACTIVE_STATES.has(row.state))) status = 'downloading';
     else if (downloads.some(row => row.state === 'failed')) status = 'failed';
     else status = 'missing';
-    return { id, status };
+    return { id, status, ...extra(post) };
   });
 }

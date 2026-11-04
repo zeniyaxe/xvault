@@ -84,7 +84,7 @@ try {
       await storeCaptureTemplates([...templates.values()]);
       updateWidget();
     } else if (m.type === 'GRAPHQL_RESPONSE' && settings.captureWhileBrowsing !== false) {
-      ingest(m.data, { source: 'passive', operation: m.meta?.operation });
+      ingest(m.data, { source: 'passive', operation: m.meta?.operation, variables: m.meta?.variables });
     } else if (m.type === 'DIRECT_DEBUG') {
       debug(m.runId, m);
       signal(m.runId, 'debug', m);
@@ -391,9 +391,10 @@ try {
     if (dead) return { tweets: 0, media: 0 };
     const ctx = meta.context || archiveContext || currentContext(),
       enriched = { ...meta, context: ctx };
-    const { tweets, users } = normalize(root, enriched);
+    const { tweets, users, unavailable } = normalize(root, enriched);
     for (const t of tweets) cache.set(t.id, merge(cache.get(t.id), t));
     await send({ type: 'STORE_RECORDS', tweets, users, context: ctx });
+    if (unavailable.length) send({ type: 'STORE_AVAILABILITY', entries: unavailable.slice(0, 500) });
     await send({
       type: 'STORE_CAPTURE',
       capture: {
@@ -421,7 +422,8 @@ try {
     const ts = new Map(),
       us = new Map(),
       q = [root],
-      seen = new WeakSet();
+      seen = new WeakSet(),
+      unavailable = new Map();
     let budget = 500000;
     while (q.length && --budget) {
       const n = q.pop();
@@ -429,11 +431,16 @@ try {
       seen.add(n);
       const t = parseTweet(n, meta);
       if (t) ts.set(t.id, merge(ts.get(t.id), t));
+      const gone = globalThis.XVaultPostExtras?.tombstoneOf(n);
+      if (gone) unavailable.set(gone.id, gone);
       const u = parseUser(n);
       if (u) us.set(u.id, { ...us.get(u.id), ...u });
       for (const v of Array.isArray(n) ? n : Object.values(n)) if (v && typeof v === 'object') q.push(v);
     }
-    return { tweets: [...ts.values()], users: [...us.values()] };
+    const focal = globalThis.XVaultPostExtras?.focalUnavailable(root, meta);
+    if (focal && !ts.has(focal.id)) unavailable.set(focal.id, focal);
+    for (const id of ts.keys()) unavailable.delete(id);
+    return { tweets: [...ts.values()], users: [...us.values()], unavailable: [...unavailable.values()] };
   }
   function unwrap(x) {
     for (let i = 0; i < 5; i++) {
@@ -489,6 +496,7 @@ try {
         width: m.original_info?.width || null,
         height: m.original_info?.height || null,
         variants: vars,
+        ...(globalThis.XVaultPostExtras?.parseMediaExtras(m) || {}),
       };
     });
     return {
@@ -513,6 +521,8 @@ try {
       retweetedPostId: relatedPostId(null, l.retweeted_status_result || x?.retweeted_status_result),
       ...postEntities(l, x),
       language: l.lang || null,
+      // XVault 21: polls, link cards, Spaces, Community Notes and edit history (x-post-extras.js).
+      ...(globalThis.XVaultPostExtras?.parseTweetExtras(x) || {}),
       sensitive: Boolean(l.possibly_sensitive || l.possibly_sensitive_editable || x?.possibly_sensitive),
       sourceFlags: [meta.source, meta.operation].filter(Boolean),
       archiveSources: [meta?.context?.scope, meta.source].filter(Boolean),
@@ -845,6 +855,9 @@ try {
       });
       if (j.idle >= maxIdle) break;
       if (settings.incrementalSync && knownStreak >= 3 && j.rounds > 5) break;
+      // Watch lists (XVault 21) read only the newest few screens.
+      if (Number(o.maxRounds) > 0 && j.rounds >= Number(o.maxRounds)) break;
+      if ((o.stopWhenKnown || o.watch) && knownStreak >= 2) break;
       window.scrollBy({ top: Math.max(420, innerHeight * (settings.scrollStep || 0.82)), behavior: 'smooth' });
       await sleep(delay);
     }
@@ -986,16 +999,25 @@ try {
       failed: 'Download failed',
       unknown: 'Archive status unavailable',
     };
-    const states = new Map((result.rows || []).map(row => [String(row.id), row.status]));
+    const states = new Map((result.rows || []).map(row => [String(row.id), row]));
     for (const { article, tweet } of entries) {
       if (domTweet(article)?.id !== tweet.id) continue;
       const button = article.querySelector('.xvault-download');
       if (!button) continue;
-      const status = states.get(tweet.id);
+      const row = states.get(tweet.id);
+      let status = row?.status;
       if (!status) continue;
+      // XVault 21 badges (Settings › X.com): "media not downloaded" can be hidden, "edited" can be shown.
+      if (settings.xBadgeMissingMedia === false && (status === 'missing' || status === 'partial')) status = 'archived';
+      const edited = settings.xBadgeEdits !== false && !!row.edited;
       button.dataset.archiveState = status;
-      button.setAttribute('aria-label', 'XVault - ' + labels[status]);
-      button.title = labels[status] + ' · Download media with XVault';
+      if (edited) button.dataset.archiveEdited = '1';
+      else delete button.dataset.archiveEdited;
+      if (row.gone) button.dataset.archiveGone = '1';
+      else delete button.dataset.archiveGone;
+      const extra = `${edited ? ' · Edited since archived' : ''}${row.gone ? ' · Archived copy kept (no longer fully available on X)' : ''}`;
+      button.setAttribute('aria-label', 'XVault - ' + labels[status] + extra);
+      button.title = labels[status] + extra + ' · Download media with XVault';
     }
   }
   async function updateWidget() {
@@ -1167,7 +1189,12 @@ try {
           }
           if (m.type === 'XV_SCROLL_START') {
             archiveContext = m.context || currentContext();
-            return adaptiveScroll({ runId: m.runId || crypto.randomUUID(), context: archiveContext });
+            return adaptiveScroll({
+              runId: m.runId || crypto.randomUUID(),
+              context: archiveContext,
+              maxRounds: Math.max(0, Math.min(200, Number(m.maxRounds) || 0)),
+              watch: !!m.watch,
+            });
           }
           if (m.type === 'XV_SCROLL_STOP') {
             if (scrollJob) scrollJob.cancelled = true;

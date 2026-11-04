@@ -9,7 +9,7 @@ import {
 import { createInsightsAccumulator, orderThread, compactPost, previewUrl, mediaKind } from './vault-insights.mjs';
 import { createDerivedService } from './sw/derived-service.mjs';
 import { createSemanticService } from './sw/semantic-service.mjs';
-import { createMessageRouter } from './sw/router.mjs';
+import { createMessageRouter, DESKTOP, CONTENT } from './sw/router.mjs';
 import { createConcurrencyGovernor } from './sw/adaptive-concurrency.mjs';
 import { sanitizeBoards, sanitizeAutoTagRules, planRules, rulePatch } from './sw/organize.mjs';
 import { createSyncScheduler } from './sw/sync-scheduler.mjs';
@@ -59,6 +59,8 @@ import {
   withDownloadAssetLookup,
   emptyDownloadStateCounts,
   DOWNLOAD_ASSET_INDEX_CHECKPOINT,
+  patchLibrarySystemFields,
+  readRevisionCounters,
 } from './library-storage.mjs';
 import { mergeCapturedRecord } from './library-capture.mjs';
 import { mediaIdentity, assetIdentity, decideEnqueue } from './download-identity.mjs';
@@ -69,7 +71,7 @@ import { linkSharedFile } from './media-associations.mjs';
 import './workspace-model.js';
 import { createWorkspaceService } from './workspace-service.mjs';
 import { replaceCompletedDownloadWithHistory, reserveLibraryDownload } from './library-storage.mjs';
-import { authorizeMessage } from './message-boundary.mjs';
+import { authorizeMessage, isContentAction } from './message-boundary.mjs';
 import { buildArchiveIndicators } from './archive-indicators.mjs';
 import './library-collections.js';
 import { createSmartCollectionService } from './smart-collection-service.mjs';
@@ -106,6 +108,8 @@ function announceLibraryChanges(ids, kind = 'metadata', forceTruncated = false) 
 const privateStorageReady = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 // Explicit capture/UI preferences; helper credentials, saved views and local paths stay private.
 const contentSettingKeys = [
+  'xBadgeEdits',
+  'xBadgeMissingMedia',
   'safeMode',
   'reducedMotion',
   'animations',
@@ -228,6 +232,21 @@ import { readStoredLibraryPlan, writeStoredLibraryPlan, deleteStoredLibraryPlan 
 import './link-utils.js';
 import './bulk-download-model.js';
 import './library-search-core.js';
+import { FORGE_DEFAULTS, normalizeForgeSettings, parseVideoQualityRules } from './sw/forge-settings.mjs';
+import { createStatusVisitor } from './sw/status-visitor.mjs';
+import { createArchiveQualityService } from './sw/archive-quality-service.mjs';
+import { createLinkSnapshots } from './sw/link-snapshots.mjs';
+import { createWatchLists } from './sw/watch-lists.mjs';
+import { createSearchInsights } from './sw/search-insights.mjs';
+import {
+  applyVideoQuality,
+  holdReason,
+  createBandwidthGovernor,
+  hostHealth,
+  duplicateReport,
+  integrityDue,
+} from './sw/download-policy.mjs';
+import './filename-template.js';
 const DB = 'xvault-db',
   VER = 16,
   STORES = [
@@ -533,6 +552,8 @@ const defaults = {
   portableExportMediaLinks: true,
   remoteEnabled: false,
   remotePort: 18765,
+  // XVault 21 "Forge" (sw/forge-settings.mjs).
+  ...FORGE_DEFAULTS,
 };
 const queue = [],
   queuedKeys = new Set(),
@@ -1123,7 +1144,15 @@ function normalizeSettings(raw = {}) {
             .slice(0, 80)
         )
       : {};
-  return out;
+  return normalizeForgeSettings(out);
+}
+// Synonyms and diacritic folding change how queries compile; both the worker and pages apply them.
+function applySearchOptions(settings) {
+  const search = globalThis.XVaultLibrarySearch;
+  search?.setSearchOptions?.({
+    synonyms: search.parseSynonyms(settings.searchSynonyms),
+    fold: settings.searchFoldDiacritics !== false,
+  });
 }
 async function getSettings() {
   const stored = await chrome.storage.local.get('settings'),
@@ -1131,6 +1160,7 @@ async function getSettings() {
       stored.settings && typeof stored.settings === 'object' && !Array.isArray(stored.settings) ? stored.settings : {},
     out = normalizeSettings(raw);
   globalThis.XVaultLibrarySearch?.setCalendarTimeZone?.(out.calendarTimeZone);
+  applySearchOptions(out);
   if (JSON.stringify(raw) !== JSON.stringify(out)) await chrome.storage.local.set({ settings: out });
   return out;
 }
@@ -1150,6 +1180,14 @@ async function writeSettingsPatch(p) {
   if (next.crossPostDuplicates === 'skip') void runDownloadAssetIndexBackfill();
   if (['syncEnabled', 'syncBookmarksMinutes', 'syncLikesMinutes'].some(key => key in p))
     queueMicrotask(() => syncScheduler.schedule().catch(() => {}));
+  if ('watchLists' in p) queueMicrotask(() => watchLists.schedule().catch(() => {}));
+  if ('integrityScheduleDays' in p) queueMicrotask(() => scheduleIntegrity().catch(() => {}));
+  if (
+    ['downloadWindowEnabled', 'downloadWindowStart', 'downloadWindowEnd', 'downloadRespectSaveData'].some(
+      key => key in p
+    )
+  )
+    queueMicrotask(() => void pump());
   return next;
 }
 const updateSmartCollections = createSmartCollectionService({
@@ -1199,6 +1237,7 @@ async function mergeTweetRows(rows = []) {
   }
   if (changed.length) announceLibraryChanges(changed, 'capture');
   if (created.length) void applyCaptureRules(created);
+  if (created.length) void snapshotNewCaptures(created).catch(() => {});
   return n;
 }
 const activeLibraryQueries = new Map();
@@ -1233,6 +1272,36 @@ function boardNamesOf(settings) {
     (Array.isArray(settings?.boards) ? settings.boards : []).map(board => [String(board.id), String(board.name || '')])
   );
 }
+// XVault 21 joins: archived-id set (has:gap / has:missing-quote) and link-snapshot ids (has:snapshot).
+let archivedIdCache = { revision: -1, ids: null };
+async function archivedIdSet(database) {
+  const revision = await readLibraryRevision(database);
+  if (archivedIdCache.revision === revision && archivedIdCache.ids) return archivedIdCache.ids;
+  const keys = await new Promise((resolve, reject) => {
+    const request = database.transaction('tweets', 'readonly').objectStore('tweets').getAllKeys();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+  archivedIdCache = { revision, ids: new Set(keys.map(String)) };
+  return archivedIdCache.ids;
+}
+async function queryJoinsFor(database, compiled, sort = '') {
+  const needs = globalThis.XVaultLibrarySearch.queryNeeds(compiled, sort),
+    joins = { sort: needs.sortValue ? sort : '' };
+  if (needs.archivedIds) joins.archivedIds = await archivedIdSet(database);
+  if (needs.snapshotIds) {
+    try {
+      joins.snapshotIds = await linkSnapshots.postIds();
+    } catch {
+      joins.snapshotIds = new Set();
+    }
+  }
+  if (needs.clusterIds) joins.clusterIds = await clusterIdMap().catch(() => new Map());
+  return joins;
+}
+function searchIdentity(settings) {
+  return [settings.searchSynonyms || '', settings.searchFoldDiacritics !== false, Number(settings.searchHybridWeight)];
+}
 const semanticScoresFor = (semanticScores, id) => (semanticScores.scores ? semanticScores.scores.get(id) || {} : null);
 function stableRandomOrder(id, seed) {
   let value = 2166136261;
@@ -1254,7 +1323,9 @@ async function scanSortedLibraryPage(database, message, settings, control) {
     compiled = globalThis.XVaultLibrarySearch.compileQuery(query),
     needsDownloads = globalThis.XVaultLibrarySearch.usesRuleKind(compiled, ['downloaded', 'missing', 'size']),
     ocrText = await ocrTextFor(compiled),
-    semanticScores = await semanticFor(compiled);
+    semanticScores = await semanticFor(compiled),
+    joins = await queryJoinsFor(database, compiled, sort),
+    hybridWeight = Number(settings.searchHybridWeight ?? 0.35);
   const revision = await readLibraryRevision(database),
     downloadRevision = needsDownloads ? await readLibraryDownloadRevision(database) : null;
   if (
@@ -1277,6 +1348,8 @@ async function scanSortedLibraryPage(database, message, settings, control) {
     inboxSince,
     ocrText.revision,
     semanticScores.revision,
+    joins.snapshotIds ? joins.snapshotIds.size : -1,
+    ...searchIdentity(settings),
   ]);
   let downloadsByTweet = new Map(),
     cursorOperations = 0,
@@ -1321,9 +1394,11 @@ async function scanSortedLibraryPage(database, message, settings, control) {
             ocrText: ocrText.map?.get(String(post.id)),
             semanticScores: semanticScoresFor(semanticScores, String(post.id)),
             boardNames: boardNamesOf(settings),
+            ...joins,
           })
         : globalThis.XVaultLibrarySearch.projectRankPost(post, index, {
             randomOrder: stableRandomOrder(String(post.id), randomSeed),
+            sort: joins.sort,
           }),
     matches: projection =>
       !compiled.length || globalThis.XVaultLibrarySearch.matchesCompiledQuery(projection, compiled),
@@ -1331,13 +1406,21 @@ async function scanSortedLibraryPage(database, message, settings, control) {
       index,
       id: post.id,
       metrics: Object.fromEntries(
-        ['likes', 'views', 'bookmarks', 'reposts', 'replies'].map(key => [key, Number(projection.metrics?.[key] || 0)])
+        ['likes', 'views', 'bookmarks', 'reposts', 'replies', 'quotes'].map(key => [
+          key,
+          Number(projection.metrics?.[key] || 0),
+        ])
       ),
       archivedAt: projection.archivedAt,
       mediaCount: projection.mediaCount,
       handle: projection.handle,
       randomOrder: projection.randomOrder,
       semanticScore: Number(projection.semanticScore || 0),
+      sortValue: Number(projection.sortValue || 0),
+      relevance:
+        sort === 'relevance' && compiled.length
+          ? globalThis.XVaultLibrarySearch.relevanceScore(projection, compiled, hybridWeight)
+          : undefined,
     }),
     compare: (a, b) => compareLibraryRank(a, b, sort),
     cancelled: () => control.cancelled,
@@ -1510,6 +1593,7 @@ async function executeLibraryPage(message = {}, control = { cancelled: false }) 
       ocrText = await ocrTextFor(compiled),
       semanticScores = await semanticFor(compiled),
       boardNames = boardNamesOf(settings),
+      joins = ['new', 'old'].includes(sort) ? await queryJoinsFor(database, compiled) : null,
       queryPlanningMs = performance.now() - planStarted;
     if (!['new', 'old'].includes(sort)) {
       const pageReadStarted = performance.now(),
@@ -1547,6 +1631,7 @@ async function executeLibraryPage(message = {}, control = { cancelled: false }) 
           ocrText: ocrText.map?.get(String(post.id)),
           semanticScores: semanticScoresFor(semanticScores, String(post.id)),
           boardNames,
+          ...joins,
         });
         if (download) {
           projection.downloaded = download.downloaded;
@@ -2818,7 +2903,7 @@ async function handleRemoteBridgeRequest(message) {
   }
   throw Error('This Remote operation is not available');
 }
-chrome.runtime.onConnectNative.addListener(port => {
+chrome.runtime.onConnectNative?.addListener(port => {
   if (port.name !== 'com.xvault.remote') port.disconnect();
 });
 async function restoreRemoteCompanion() {
@@ -3315,6 +3400,434 @@ router.mount(syncScheduler, { denied: 'Scheduled sync is managed from XVault pag
 router.mount(derived, { denied: 'Derived-data jobs are managed from XVault pages' });
 router.mount(semantic, { denied: 'Meaning search runs from XVault pages' });
 
+// ───────────── XVault 21 "Forge": archive quality, change tracking, watch lists, search insights ─────────────
+async function readPostsById(ids) {
+  return withLibraryDatabase(database => readLibraryRecords(database, ids.slice(0, 1000)));
+}
+async function readOnePost(id) {
+  return (await store('tweets', 'readonly', os => req(os.get(String(id)))).catch(() => null)) || null;
+}
+const patchSystemFields = (entries, updater) =>
+  withLibraryDatabase(database => patchLibrarySystemFields(database, entries, updater));
+const visitor = createStatusVisitor({
+  activeXTab,
+  readPost: readOnePost,
+  caps: async () => {
+    const settings = await getSettings();
+    return { repair: settings.repairDailyCap, gaps: settings.repairDailyCap, check: settings.availabilityDailyCap };
+  },
+  markChecked: (kind, id, outcome, startedAt) => archiveQuality.markVisited(kind, id, outcome, startedAt),
+  // Quote chains: after a missing post arrives, its own missing quote joins the queue (up to quoteChainDepth).
+  onFound: async (kind, id) => {
+    if (kind !== 'gaps') return [];
+    const post = await readOnePost(id),
+      next = [post?.quotedPostId, post?.replyToId].filter(value => /^\d{1,32}$/.test(String(value || '')));
+    const missing = [];
+    for (const value of next) if (!(await readOnePost(value))) missing.push(String(value));
+    return missing;
+  },
+  log: job =>
+    action('quality', `${job.label}: ${job.status}`, {
+      kind: job.kind,
+      visited: job.done,
+      ...job.results,
+    }),
+});
+visitor.recover().catch(() => {});
+const archiveQuality = createArchiveQualityService({
+  forEachPost: visit => scanLibraryRows(row => void visit(row)),
+  archivedIds: () => withLibraryDatabase(database => archivedIdSet(database)),
+  patchSystemFields,
+  readRevisions: id =>
+    withLibraryDatabase(
+      database =>
+        new Promise((resolve, reject) => {
+          if (!database.objectStoreNames.contains('revisions')) return resolve([]);
+          const request = database
+            .transaction('revisions', 'readonly')
+            .objectStore('revisions')
+            .index('tweetId')
+            .getAll(String(id), 200);
+          request.onsuccess = () =>
+            resolve((request.result || []).sort((a, b) => (a.observedAt || 0) - (b.observedAt || 0)));
+          request.onerror = () => reject(request.error);
+        })
+    ),
+  getSettings,
+  visitor,
+  announce: (ids, kind) => announceLibraryChanges(ids, kind),
+});
+router.mount(archiveQuality, { denied: 'Archive quality tools run from XVault pages' });
+router.mount(visitor, { denied: 'Visit queues are managed from XVault pages' });
+router.register('STORE_AVAILABILITY', m => archiveQuality.storeAvailability(m), {
+  allow: ['content', 'desktop'],
+  denied: 'Availability reports come from X pages',
+});
+// One-time backfill (XVault 21): revision counters on posts, so is:edited / sort:edited work for history
+// recorded before this version.
+async function backfillRevisionCounters() {
+  const flag = (await chrome.storage.local.get('xvRevisionCountersV21')).xvRevisionCountersV21;
+  if (flag) return;
+  const counters = await withLibraryDatabase(database => readRevisionCounters(database));
+  const entries = [...counters].map(([id, patch]) => ({ id, patch }));
+  for (let at = 0; at < entries.length; at += 500)
+    await patchSystemFields(entries.slice(at, at + 500), (post, entry) =>
+      Number(post.revisionCount || 0) >= entry.patch.revisionCount ? null : entry.patch
+    );
+  await chrome.storage.local.set({ xvRevisionCountersV21: { at: Date.now(), posts: entries.length } });
+}
+privateStorageReady.then(() => backfillRevisionCounters()).catch(error => console.warn('Revision backfill', error));
+
+const linkSnapshots = createLinkSnapshots({
+  store: derived.store,
+  readPosts: readPostsById,
+  getSettings,
+  hasPermission: () =>
+    chrome.permissions
+      .contains({ origins: ['https://*/*', 'http://*/*'] })
+      .then(Boolean)
+      .catch(() => false),
+  announce: (ids, kind) => announceLibraryChanges(ids, kind),
+});
+router.mount(linkSnapshots, { denied: 'Link snapshots are managed from XVault pages' });
+async function snapshotNewCaptures(ids) {
+  const settings = await getSettings();
+  if (!settings.linkSnapshots || !ids.length) return;
+  await linkSnapshots.enqueue(ids.slice(0, 50)).catch(() => {});
+}
+
+const watchLists = createWatchLists({
+  getSettings,
+  activeXTab,
+  sendToX,
+  postsArchivedSince,
+  matchesQuery: (post, query) =>
+    globalThis.XVaultLibrarySearch.matchesQuery(globalThis.XVaultLibrarySearch.projectPost(post, 0, {}), query),
+  notify: async (title, message) => {
+    try {
+      await chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon128.png', title, message, priority: 0 });
+    } catch {}
+  },
+});
+watchLists.schedule().catch(() => {});
+router.mount(watchLists, { denied: 'Watch lists are managed from XVault pages' });
+
+let clusterIdCache = { builtAt: -1, map: null };
+async function clusterIdMap() {
+  const value = (await derived.store.getMany('meta', ['clusters:last'])).get('clusters:last')?.value;
+  if (!value) return new Map();
+  if (clusterIdCache.builtAt === value.builtAt && clusterIdCache.renamed === value.renamedAt && clusterIdCache.map)
+    return clusterIdCache.map;
+  const map = new Map();
+  for (const cluster of value.clusters || []) {
+    const key = `${cluster.id}|${globalThis.XVaultLibrarySearch.foldText(
+      String(cluster.name || '').toLowerCase()
+    )}|${(cluster.terms || []).join(' ')}`;
+    for (const id of cluster.ids || []) map.set(String(id), key);
+  }
+  clusterIdCache = { builtAt: value.builtAt, renamed: value.renamedAt, map };
+  return map;
+}
+const searchInsights = createSearchInsights({
+  semanticIndex: () => semantic.ensure(),
+  editDistance: (a, b, limit) => globalThis.XVaultLibrarySearch.editDistance(a, b, limit),
+  readRecords: async ids => {
+    const out = [];
+    for (let at = 0; at < ids.length; at += 1000) out.push(...(await readPostsById(ids.slice(at, at + 1000))));
+    return out;
+  },
+  postsArchivedSince,
+  matcherFor: async query => {
+    try {
+      return await ruleMatcher({ query }, await getSettings());
+    } catch {
+      return () => false;
+    }
+  },
+  getSettings,
+  collectionId: (view, index) => globalThis.XVaultCollections.normalizeDefinition(view, index).id,
+  meta: {
+    get: async key => (await derived.store.getMany('meta', [key])).get(key)?.value || null,
+    set: async (key, value) => {
+      await derived.store.putMany('meta', [{ key, value: { ...value, renamedAt: Date.now() } }]);
+      clusterIdCache = { builtAt: -1, map: null };
+    },
+  },
+});
+router.mount(searchInsights, { denied: 'Search insights run from XVault pages' });
+privateStorageReady.then(() => searchInsights.initVisits()).catch(() => {});
+
+// Downloads: host health, duplicate report and space reclaim, scheduled integrity re-verification.
+router.register('DOWNLOAD_HOST_HEALTH', async () => ({
+  ok: true,
+  hosts: hostHealth(await all('downloads')),
+  hold: holdReason(await getSettings()),
+  lastHold: queueHold,
+  bandwidth: bandwidthGovernor.status(),
+}));
+router.register('DUPLICATE_REPORT', async () => ({
+  ok: true,
+  ...duplicateReport(await all('downloads'), {
+    assetOf: row => assetIdentity(row.item?.url).asset,
+  }),
+}));
+router.register('DUPLICATE_RECLAIM', async m => {
+  const keys = new Set((Array.isArray(m.keys) ? m.keys : []).map(String).slice(0, 2000));
+  if (!keys.size) return { ok: true, removed: 0, bytes: 0 };
+  const report = duplicateReport(await all('downloads'), { assetOf: row => assetIdentity(row.item?.url).asset });
+  // Only files the current report lists as extra copies can be removed; the kept copy never is.
+  const allowed = new Map(report.groups.flatMap(group => group.remove.map(entry => [entry.key, entry])));
+  const allowedKeep = new Map(report.groups.flatMap(group => group.remove.map(entry => [entry.key, group.keep.key])));
+  let removed = 0,
+    bytes = 0;
+  const failed = [];
+  for (const key of keys) {
+    const entry = allowed.get(key);
+    if (!entry) continue;
+    try {
+      await chrome.downloads.removeFile(Number(entry.downloadId));
+      const row = await store('downloads', 'readonly', os => req(os.get(key)));
+      if (row) {
+        // The row stays 'complete' (the archive still owns the kept copy); reclaimedAt makes
+        // verification, re-verification and future duplicate reports skip it.
+        row.reclaimedAt = Date.now();
+        row.reclaimedAs = 'duplicate';
+        row.reclaimedFor = allowedKeep.get(key) || null;
+        await putMany('downloads', [row]);
+      }
+      removed++;
+      bytes += entry.bytes;
+    } catch (error) {
+      failed.push({ key, error: String(error?.message || error) });
+    }
+  }
+  if (removed) void action('downloads', `Reclaimed ${removed} duplicate files`, { bytes }).catch(() => {});
+  return { ok: true, removed, bytes, failed };
+});
+// Safe rename: Chrome cannot move a finished download, so XVault plans the moves (collision-checked),
+// the dashboard exports a script that never overwrites, and RENAME_RECORD re-points the records afterwards.
+function renameRowsFrom(rows) {
+  return rows
+    .filter(row => row.state === 'complete' && !row.reclaimedAt && row.target?.filename)
+    .map(row => {
+      const path = String(row.target.filename),
+        ext = (path.match(/\.([a-z0-9]{2,5})$/i) || [])[1] || row.target?.ext || 'bin';
+      return {
+        key: row.key,
+        path,
+        ext,
+        item: {
+          ...(row.item || {}),
+          author: row.item?.author || row.item?.handle || '',
+          mediaType: row.item?.sourceMediaType || row.item?.mediaType || row.target?.kind || '',
+        },
+      };
+    });
+}
+async function renamePlan(m) {
+  const fileTemplate = String(m.fileTemplate || '').slice(0, 300),
+    folderTemplate = String(m.folderTemplate || '').slice(0, 300);
+  if (!fileTemplate.trim()) return { ok: false, error: 'Choose a filename template first' };
+  const check = globalThis.XVaultFilenameTemplate.render(fileTemplate, globalThis.XVaultFilenameTemplate.SAMPLE);
+  const blocking = check.issues.filter(issue => !/^Add \{/.test(issue));
+  if (blocking.length) return { ok: false, error: blocking[0], issues: check.issues };
+  const downloads = await all('downloads'),
+    rows = renameRowsFrom(downloads);
+  const plan = globalThis.XVaultFilenameTemplate.planRenames(rows, fileTemplate, folderTemplate);
+  // The download folder, derived from one completed file (absolute path minus its relative path).
+  let base = '';
+  for (const row of downloads) {
+    const absolute = String(row.filename || '').replace(/\\/g, '/'),
+      relative = String(row.target?.filename || '');
+    if (row.state === 'complete' && relative && absolute.endsWith(relative)) {
+      base = String(row.filename)
+        .slice(0, absolute.length - relative.length)
+        .replace(/[\\/]+$/, '');
+      break;
+    }
+  }
+  return { ok: true, ...plan, base, files: rows.length, issues: check.issues };
+}
+router.register('RENAME_PLAN', async m => {
+  const plan = await renamePlan(m);
+  if (!plan.ok) return plan;
+  const limit = Math.max(1, Math.min(20000, Number(m.limit) || 5000));
+  return { ...plan, total: plan.moves.length, moves: plan.moves.slice(0, limit), truncated: plan.moves.length > limit };
+});
+router.register('RENAME_RECORD', async m => {
+  const plan = await renamePlan(m);
+  if (!plan.ok) return plan;
+  const wanted = new Set((Array.isArray(m.keys) ? m.keys : []).map(String));
+  const moves = plan.moves.filter(move => !wanted.size || wanted.has(String(move.key)));
+  let updated = 0;
+  for (let at = 0; at < moves.length; at += 200) {
+    const batch = moves.slice(at, at + 200),
+      rows = [];
+    await store('downloads', 'readonly', async os => {
+      for (const move of batch) {
+        const row = await req(os.get(move.key));
+        if (!row || String(row.target?.filename || '') !== move.from) continue;
+        const absolute = String(row.filename || '');
+        row.renamedFrom = move.from;
+        row.renamedAt = Date.now();
+        row.target = { ...row.target, filename: move.to };
+        if (absolute) {
+          const normalized = absolute.replace(/\\/g, '/');
+          const index = normalized.lastIndexOf(move.from);
+          if (index >= 0) {
+            const next = normalized.slice(0, index) + move.to;
+            row.filename = absolute.includes('\\') ? next.replace(/\//g, '\\') : next;
+          }
+        }
+        rows.push(row);
+      }
+    });
+    if (rows.length) await putMany('downloads', rows);
+    updated += rows.length;
+  }
+  if (updated)
+    void action('downloads', `Recorded ${updated} renamed files`, { template: m.fileTemplate }).catch(() => {});
+  return { ok: true, updated };
+});
+const INTEGRITY_ALARM = 'xv-integrity-reverify';
+async function reverifyCompletedDownloads({ limit = 400 } = {}) {
+  const settings = await getSettings(),
+    rows = (await all('downloads'))
+      .filter(row => row.state === 'complete' && Number(row.downloadId) > 0 && !row.reclaimedAt)
+      .sort((a, b) => Number(a.verifiedAt || 0) - Number(b.verifiedAt || 0))
+      .slice(0, limit);
+  const result = { checked: 0, problems: 0, requeued: 0 };
+  for (const row of rows) {
+    // Scheduled checks may re-queue a file once more when auto re-download is enabled, even if
+    // an earlier completion check already used its single verification retry.
+    if (settings.integrityAutoRedownload && row.verifyRetried) {
+      row.verifyRetried = false;
+      await putMany('downloads', [row]).catch(() => {});
+    }
+    const out = await verifyCompletedDownload(row.downloadId).catch(() => null);
+    result.checked++;
+    const state = out?.verification?.state;
+    if (state && ['missing', 'corrupt', 'mismatch'].includes(state)) {
+      result.problems++;
+      if (settings.integrityAutoRedownload && !out.ok) result.requeued++;
+    }
+  }
+  await chrome.storage.local.set({ xvIntegrityReverify: { at: Date.now(), ...result } });
+  if (result.problems)
+    void action('integrity', `Re-verification found ${result.problems} problem files`, result).catch(() => {});
+  return result;
+}
+async function scheduleIntegrity() {
+  const settings = await getSettings();
+  if (Number(settings.integrityScheduleDays) > 0)
+    await chrome.alarms.create(INTEGRITY_ALARM, { periodInMinutes: 360, delayInMinutes: 15 }).catch(() => {});
+  else await chrome.alarms.clear(INTEGRITY_ALARM).catch(() => {});
+}
+scheduleIntegrity().catch(() => {});
+router.register('INTEGRITY_REVERIFY', async m => ({
+  ok: true,
+  ...(await reverifyCompletedDownloads({ limit: Math.max(1, Math.min(5000, Number(m.limit) || 400)) })),
+}));
+router.register('INTEGRITY_REVERIFY_STATUS', async () => ({
+  ok: true,
+  last: (await chrome.storage.local.get('xvIntegrityReverify')).xvIntegrityReverify || null,
+}));
+router.register('DOWNLOAD_KEYS_STATE', async m => {
+  const keys = (Array.isArray(m.keys) ? m.keys : []).map(String).slice(0, 500),
+    states = {};
+  await store('downloads', 'readonly', async os => {
+    for (const key of keys) states[key] = (await req(os.get(key)))?.state || null;
+  });
+  return { ok: true, states };
+});
+// Bandwidth cap (downloadMaxMBps): duty-cycles active Chrome downloads; sampled while downloads run.
+const bandwidthGovernor = createBandwidthGovernor({
+  activeIds: () => [...active.values()].map(row => Number(row.downloadId)).filter(id => id > 0),
+  getCap: async () => Number((await getSettings()).downloadMaxMBps) || 0,
+});
+let bandwidthTimer = 0;
+function ensureBandwidthSampling() {
+  if (bandwidthTimer) return;
+  bandwidthTimer = setInterval(async () => {
+    if (!active.size) {
+      clearInterval(bandwidthTimer);
+      bandwidthTimer = 0;
+      await bandwidthGovernor.resumeAll().catch(() => {});
+      return;
+    }
+    await bandwidthGovernor.sample().catch(() => {});
+  }, 2000);
+}
+let queueHoldTimer = 0,
+  queueHold = null;
+function queueHeld(settings) {
+  const hold = holdReason(settings);
+  queueHold = hold;
+  if (hold && !queueHoldTimer)
+    queueHoldTimer = setTimeout(
+      () => {
+        queueHoldTimer = 0;
+        void pump();
+      },
+      Math.max(30000, Math.min(hold.retryInMs || 60000, 30 * 60000))
+    );
+  return hold;
+}
+async function videoQualityItems(items, settings) {
+  const { rules } = parseVideoQualityRules(settings.videoQualityRules);
+  if ((!settings.videoQuality || settings.videoQuality === 'highest') && !rules.length) return items;
+  const videoIds = [
+    ...new Set(
+      items
+        .filter(item => String(item?.sourceMediaType || item?.mediaType || '') === 'video' && item?.tweetId)
+        .map(item => String(item.tweetId))
+    ),
+  ];
+  if (!videoIds.length) return items;
+  const posts = new Map((await readPostsById(videoIds)).map(post => [String(post.id), post]));
+  const mediaFor = item => {
+    const media = posts.get(String(item.tweetId))?.media || [];
+    return (
+      media.find(entry => item.mediaId && String(entry.id) === String(item.mediaId)) ||
+      media.filter(entry => entry.type === 'video')[Math.max(0, Number(item.index || 1) - 1)] ||
+      null
+    );
+  };
+  // Per-rule quality ("source:likes => 720"): the first rule whose search matches the post wins;
+  // rules that cannot be evaluated (download filters, typos) are skipped, never fatal.
+  const matchers = [];
+  for (const rule of rules)
+    try {
+      matchers.push({ quality: rule.quality, matches: await ruleMatcher(rule, settings) });
+    } catch {}
+  const qualityFor = item => {
+    const post = posts.get(String(item.tweetId));
+    if (post)
+      for (const rule of matchers)
+        try {
+          if (rule.matches(post)) return rule.quality;
+        } catch {}
+    return settings.videoQuality || 'highest';
+  };
+  const groups = new Map();
+  items.forEach((item, index) => {
+    const quality = String(item?.sourceMediaType || item?.mediaType || '') === 'video' ? qualityFor(item) : 'highest';
+    if (!groups.has(quality)) groups.set(quality, []);
+    groups.get(quality).push(index);
+  });
+  const out = [...items];
+  for (const [quality, indexes] of groups) {
+    if (quality === 'highest') continue;
+    const chosen = applyVideoQuality(
+      indexes.map(index => items[index]),
+      mediaFor,
+      quality
+    );
+    indexes.forEach((index, position) => (out[index] = chosen[position]));
+  }
+  return out;
+}
+
 // ---- Auto-tag rules and boards (sw/organize.mjs) ----
 async function ruleMatcher(rule, settings) {
   const search = globalThis.XVaultLibrarySearch,
@@ -3537,9 +4050,850 @@ router.register('X_ARCHIVE_IMPORT_BATCH', async m => {
   });
   const stored = await mergeTweetRows(rows);
   const created = rows.filter(row => !existing.has(row.id)).length;
+  // deleted-tweets.js: posts you deleted are archived with availability "deleted" (unless seen live since).
+  const deleted = rows.filter(row => row.archiveDeletedAt);
+  if (deleted.length)
+    await patchSystemFields(
+      deleted.map(row => ({ id: row.id, at: Date.parse(row.archiveDeletedAt) || Date.now() })),
+      (post, entry) =>
+        post.availability && Number(post.availability.checkedAt || 0) > entry.at
+          ? null
+          : { availability: { state: 'deleted', checkedAt: entry.at, source: 'x-archive', since: entry.at } }
+    );
   if (m.final)
     void action('import', `Imported X data archive (${m.label || 'posts'})`, { created, stored }).catch(() => {});
   return { ok: true, stored, created, updated: stored - created, skipped: (m.tweets || []).length - rows.length };
+});
+
+// XVault 21: the onMessage `if (m.type === …)` chain is now router routes (sw/router.mjs). Each handler
+// below keeps its original body. Sender policy is unchanged: content scripts reach only CONTENT_ACTIONS
+// types (authorizeMessage rejects the rest first), and the route allow-list now states the same rule.
+const unknownMessage = () => ({ ok: false, error: 'Unknown message' });
+function route(types, handler) {
+  for (const type of [].concat(types))
+    router.register(
+      type,
+      async (m, s, messageCapability) => {
+        const value = await handler(m, s, messageCapability);
+        return value === undefined ? unknownMessage() : value;
+      },
+      { allow: isContentAction(type) ? [DESKTOP, CONTENT] : [DESKTOP] }
+    );
+}
+route('REMOTE_COMMAND', async m => {
+  const allowed = new Set([
+    'remote.start',
+    'remote.stop',
+    'remote.status',
+    'pairing.start',
+    'pairing.regenerate',
+    'pairing.pending',
+    'pairing.approve',
+    'pairing.deny',
+    'devices.list',
+    'device.permissions',
+    'device.revoke',
+  ]);
+  const name = String(m.name || '');
+  if (!allowed.has(name)) throw Error('Unsupported Remote command');
+  const payload = m.payload && typeof m.payload === 'object' ? m.payload : {};
+  const result = await remoteHostCommand(name, payload);
+  return result;
+});
+route('INJECT_HOOK', async (m, s) => {
+  if (!s.tab?.id) throw Error('No tab');
+  await chrome.scripting.executeScript({ target: { tabId: s.tab.id }, files: ['page-hook.js'], world: 'MAIN' });
+  return { ok: true };
+});
+route('STORE_RECORDS', async m => {
+  const incoming = m.tweets || [],
+    tweets = await mergeTweetRows(incoming),
+    users = m.users || [];
+  await putMany('users', users);
+  await storeProfileSnapshots(users, m.context || {});
+  for (const id of [...new Set(incoming.map(t => t?.observedRunId).filter(Boolean))]) {
+    const run = await store('archiveRuns', 'readonly', os => req(os.get(id))).catch(() => null);
+    if (run?.diff || run?.state === 'settling')
+      scheduleRunReconciliation(id, {
+        scope: run.source || 'timeline',
+        profileHandle: run.profileHandle || null,
+        state: run.finalState || run.state,
+      });
+  }
+  return { ok: true, tweets };
+});
+route('HAS_TWEETS', async m => {
+  const ids = m.ids || [];
+  const found = [];
+  await store('tweets', 'readonly', async os => {
+    for (const id of ids) if (await req(os.get(String(id)))) found.push(String(id));
+  });
+  return { ok: true, found };
+});
+route('GET_ARCHIVE_INDICATORS', async (m, s, messageCapability) => {
+  if (messageCapability !== 'content') throw Error('Archive status is available only to X widgets');
+  return await archiveIndicators(m.ids);
+});
+route('GET_TWEET_IDS', async m => {
+  const rows = await all('tweets');
+  return { ok: true, ids: rows.map(x => String(x.id)) };
+});
+route('STORE_CAPTURE', async m => {
+  await putMany('captures', [{ ...m.capture, key: m.capture.key || crypto.randomUUID() }]);
+  return { ok: true };
+});
+route('STORE_JOB', async m => {
+  await putMany('jobs', [m.job]);
+  if (m.job?.id && m.job?.context) {
+    if (['initializing', 'running'].includes(m.job.state)) await beginArchiveRun(m.job);
+    const prev = await store('sessions', 'readonly', os => req(os.get(m.job.id))).catch(() => null);
+    await putMany('sessions', [
+      {
+        ...(prev || {}),
+        id: m.job.id,
+        source: m.job.context.scope || 'timeline',
+        profileHandle: m.job.context.profileHandle || null,
+        startedAt: prev?.startedAt || Date.now(),
+        updatedAt: Date.now(),
+        state: m.job.state,
+        phase: m.job.phase,
+        page: m.job.page || 0,
+        posts: m.job.posts || prev?.posts || 0,
+        error: m.job.error || null,
+      },
+    ]);
+    if (['complete', 'error'].includes(m.job.state)) {
+      await markArchiveSettling(m.job);
+      scheduleRunReconciliation(m.job.id, {
+        scope: m.job.context.scope || 'timeline',
+        profileHandle: m.job.context.profileHandle || null,
+        state: m.job.state,
+      });
+    }
+  }
+  await updateBadge();
+  return { ok: true };
+});
+route('STORE_ACTION', async m => {
+  return { ok: true, row: await action(m.actionType || 'info', m.text || '', m.meta || {}) };
+});
+route('STORE_CHECKPOINT', async m => {
+  await putMany('checkpoints', [m.checkpoint]);
+  return { ok: true };
+});
+route('GET_CHECKPOINT', async m => {
+  return { ok: true, checkpoint: await store('checkpoints', 'readonly', os => req(os.get(m.key))) };
+});
+route('CLEAR_CHECKPOINT', async m => {
+  await store('checkpoints', 'readwrite', os => req(os.delete(m.key)));
+  return { ok: true };
+});
+route('GET_SETTINGS', async (m, s, messageCapability) => {
+  const value = await getSettings();
+  return messageCapability === 'content'
+    ? { ok: true, settings: contentSettings(value) }
+    : { ok: true, settings: value, defaults: structuredClone(defaults) };
+});
+route('UPDATE_SMART_COLLECTIONS', async m => {
+  return await updateSmartCollections(m.change);
+});
+route('UPDATE_WORKSPACE', async m => {
+  return await updateWorkspace(m.change);
+});
+route('GET_CAPTURE_TEMPLATES', async m => {
+  return { ok: true, templates: (await chrome.storage.local.get('graphqlTemplates')).graphqlTemplates || {} };
+});
+route('STORE_CAPTURE_TEMPLATES', async m => {
+  return await storeCaptureTemplates(m.templates);
+});
+route('SET_SETTINGS', async (m, s, messageCapability) => {
+  const value = await setSettings(m.settings || {});
+  return { ok: true, settings: messageCapability === 'content' ? contentSettings(value) : value };
+});
+route('RESET_SETTINGS', async m => {
+  await chrome.storage.local.set({ settings: { ...defaults } });
+  return { ok: true, settings: await getSettings() };
+});
+route('RESTORE_PREVIOUS_SETTINGS', async m => {
+  const h = (await chrome.storage.local.get('settingsHistory')).settingsHistory || [];
+  const prev = h.shift();
+  if (!prev) return { ok: false, error: 'No settings history' };
+  await chrome.storage.local.set({ settings: prev.settings, settingsHistory: h });
+  return { ok: true, settings: await getSettings() };
+});
+route('RESET_FLOATING_POSITION', async (m, s, messageCapability) => {
+  const value = await setSettings({ cornerRight: 18, cornerBottom: 18, cornerScale: 1, cornerOpacity: 1 });
+  return { ok: true, settings: messageCapability === 'content' ? contentSettings(value) : value };
+});
+route('RESET_SECTION', async m => {
+  const keys = m.keys || [];
+  const patch = {};
+  for (const k of keys) if (k in defaults) patch[k] = defaults[k];
+  return { ok: true, settings: await setSettings(patch) };
+});
+route('ACTIVE_X_TAB', async m => {
+  const t = await activeXTab();
+  return { ok: true, tab: t ? { id: t.id, url: t.url, title: t.title, status: t.status } : null };
+});
+route('NAVIGATE_X', async m => {
+  let t = await activeXTab();
+  if (t?.id) {
+    await chrome.tabs.update(t.id, { url: m.url, active: true });
+    return { ok: true, tabId: t.id };
+  }
+  t = await chrome.tabs.create({ url: m.url, active: true });
+  return { ok: true, tabId: t.id };
+});
+route('SEND_TO_TAB', async (m, s, messageCapability) => {
+  const t = messageCapability === 'content' ? s.tab : await activeXTab();
+  if (!t) throw Error('Open x.com first');
+  return { ok: true, reply: await sendToX(t.id, m.payload), tabId: t.id };
+});
+route('OPEN_DASHBOARD', async m => {
+  return await openDashboard(m.page || '');
+});
+route('OPEN_SIDE_PANEL', async (m, s) => {
+  const tabId = s.tab?.id || m.tabId || (await activeXTab())?.id;
+  if (!tabId || !chrome.sidePanel?.open) throw Error('Side panel unavailable');
+  await chrome.sidePanel.open({ tabId });
+  return { ok: true };
+});
+route('STATS', async () => {
+  const vals = await Promise.all(STORES.map(count)),
+    m = Object.fromEntries(STORES.map((k, i) => [k, vals[i]]));
+  const stored = await navigator.storage?.estimate?.().catch(() => null);
+  return { ok: true, ...m, stored, downloadQueue: await queueStats() };
+});
+route('GET_JOB', async m => {
+  const id = String(m.id || '');
+  if (!id || id.length > 128) throw Error('Invalid archive job ID');
+  return { ok: true, job: (await store('jobs', 'readonly', os => req(os.get(id)))) || null };
+});
+route('READ_RECOVERY_BACKUP_PAGE', async m => {
+  const database = await db();
+  try {
+    return {
+      ok: true,
+      ...(await readLibraryBackupPage(database, m.store, m.afterKey ?? null, m.limit, m.expectedRevision)),
+    };
+  } finally {
+    database.close();
+  }
+});
+route('PREVIEW_RECOVERY_BATCH', async m => {
+  const database = await db();
+  try {
+    return {
+      ok: true,
+      ...(await previewArchiveImportBatch(
+        database,
+        m.records,
+        m.expectedRevision,
+        m.expectedDownloadRevision,
+        m.importId
+      )),
+    };
+  } finally {
+    database.close();
+  }
+});
+route('BEGIN_RECOVERY_IMPORT', async m => {
+  const database = await db();
+  try {
+    return await beginArchiveImport(database, m.options || {});
+  } finally {
+    database.close();
+  }
+});
+route('COMMIT_RECOVERY_BATCH', async m => {
+  const database = await db();
+  try {
+    const result = await commitArchiveImportBatch(database, m.batch || {});
+    if (result.changedIds?.length) announceLibraryChanges(result.changedIds, 'restore');
+    return result;
+  } finally {
+    database.close();
+  }
+});
+route('COMPLETE_RECOVERY_IMPORT', async m => {
+  const database = await db();
+  try {
+    return await completeArchiveImport(
+      database,
+      m.jobId,
+      m.fingerprint,
+      m.expectedRevision,
+      m.expectedDownloadRevision,
+      m.footer
+    );
+  } finally {
+    database.close();
+  }
+});
+route('GET_RECOVERY_IMPORT_JOB', async m => {
+  const database = await db();
+  try {
+    return { ok: true, job: await getArchiveImportJob(database, m.jobId) };
+  } finally {
+    database.close();
+  }
+});
+route('FIND_RECOVERY_IMPORT_JOB', async m => {
+  const database = await db();
+  try {
+    return { ok: true, job: await findArchiveImportJob(database, m.importId, m.fingerprint) };
+  } finally {
+    database.close();
+  }
+});
+route('READ_RECOVERY_IMPORT_CONFLICTS', async m => {
+  const database = await db();
+  try {
+    return { ok: true, ...(await readArchiveImportConflicts(database, m.importId, m.afterKey ?? null, m.limit)) };
+  } finally {
+    database.close();
+  }
+});
+route('READ_RECOVERY_ASSET_REFERENCES', async m => {
+  const database = await db();
+  try {
+    return { ok: true, ...(await readArchiveAssetReferences(database, m.importId, m.afterKey ?? null, m.limit)) };
+  } finally {
+    database.close();
+  }
+});
+route('GET_LIBRARY_RECORDS', async m => {
+  const ids = m.ids || [];
+  if (!Array.isArray(ids) || ids.length > 1000) throw Error('Library record reads require at most 1,000 post IDs');
+  const database = await db();
+  try {
+    return { ok: true, rows: await readLibraryRecords(database, ids) };
+  } finally {
+    database.close();
+  }
+});
+route('QUERY_LIBRARY_PAGE', async m => {
+  return await queryLibraryPage(m);
+});
+route('GET_LIBRARY_QUERY_PROGRESS', async m => {
+  const queryId = String(m.queryId || '');
+  return { ok: true, progress: activeLibraryQueryProgress.get(queryId) || null };
+});
+route('CANCEL_LIBRARY_QUERY', async m => {
+  const query = activeLibraryQueries.get(String(m.queryId || ''));
+  if (query) query.cancelled = true;
+  return { ok: true, cancelled: !!query };
+});
+route('CANCEL_LIBRARY_PLAN', async m => {
+  const signal = libraryPlanSignals.get(String(m.requestId || ''));
+  if (signal) signal.aborted = true;
+  return { ok: true };
+});
+route('PLAN_LIBRARY_DOWNLOAD', async m => {
+  const id = String(m.requestId || crypto.randomUUID());
+  if (id.length > 80) throw Error('Invalid plan identity');
+  const previous = libraryPlanSignals.get(id);
+  if (previous) previous.aborted = true;
+  const signal = { aborted: false };
+  libraryPlanSignals.set(id, signal);
+  try {
+    return await libraryBulkPlan(m.options || {}, null, signal);
+  } finally {
+    if (libraryPlanSignals.get(id) === signal) libraryPlanSignals.delete(id);
+  }
+});
+route('START_LIBRARY_BULK_DOWNLOAD', async m => {
+  return await startLibraryBulk(m.options || {});
+});
+route('GET_RECENT_ACTIONS', async m => {
+  const rows = await all('actions');
+  rows.sort((a, b) => b.at - a.at);
+  return { ok: true, rows: rows.slice(0, m.limit || 100) };
+});
+route('CLEAR_LIBRARY', async m => {
+  const database = await db();
+  let result;
+  try {
+    result = await clearLibraryData(database);
+  } finally {
+    database.close();
+  }
+  announceLibraryChanges([], 'clear');
+  await action('clear', 'Local library and its historical metadata cleared').catch(() => {});
+  return result;
+});
+route(['QUEUE_DOWNLOADS', 'DOWNLOAD_URLS'], async (m, s, messageCapability) => {
+  return await enqueue(m.items || [], !!m.force, {
+    source: messageCapability === 'content' ? 'x.com' : 'dashboard',
+    tabId: messageCapability === 'content' ? s.tab?.id : null,
+  });
+});
+route('GET_DOWNLOAD_DECISIONS', async m => {
+  await decisionsReady;
+  return { ok: true, rows: downloadDecisions.slice(-Number(m.limit || 200)).reverse() };
+});
+route('DOWNLOAD_QUEUE_STATS', async m => {
+  return { ok: true, ...(await queueStats()), adaptive: downloadGovernor.status() };
+});
+route('GET_DOWNLOAD_HISTORY', async m => {
+  const database = await db();
+  try {
+    return { ok: true, ...(await readDownloadHistoryPage(database, m.limit || 60)) };
+  } finally {
+    database.close();
+  }
+});
+route('GET_DOWNLOADS_FOR_TWEETS', async m => {
+  const database = await db();
+  try {
+    const rows = await readDownloadRows(database, m.ids || [], {
+      perPostLimit: m.perPostLimit || 64,
+      totalLimit: m.totalLimit || 5000,
+    });
+    return { ok: true, rows, truncated: !!rows.truncated };
+  } finally {
+    database.close();
+  }
+});
+route('RETRY_FAILED', async m => {
+  return await retryFailed();
+});
+route('REBUILD_QUEUED_TARGETS', async m => {
+  return await rebuildTargets();
+});
+route('CLEAR_COMPLETED_DOWNLOADS', async m => {
+  return await clearState('complete');
+});
+route('CLEAR_FAILED_DOWNLOADS', async m => {
+  return await clearState('failed');
+});
+route('CANCEL_QUEUED_DOWNLOADS', async m => {
+  return await clearState('queued');
+});
+route('PAUSE_DOWNLOAD', async m => {
+  try {
+    await chrome.downloads.pause(m.downloadId);
+    await setDownloadStateById(m.downloadId, 'paused');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+route('RESUME_DOWNLOAD', async m => {
+  try {
+    await chrome.downloads.resume(m.downloadId);
+    await setDownloadStateById(m.downloadId, 'downloading');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+route('CANCEL_DOWNLOAD', async m => {
+  try {
+    await chrome.downloads.cancel(m.downloadId);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+route('PAUSE_ALL_DOWNLOADS', async m => {
+  let n = 0;
+  for (const r of active.values())
+    if (r.downloadId)
+      try {
+        await chrome.downloads.pause(r.downloadId);
+        await setDownloadStateById(r.downloadId, 'paused');
+        n++;
+      } catch {}
+  return { ok: true, paused: n };
+});
+route('RESUME_ALL_DOWNLOADS', async m => {
+  let n = 0;
+  for (const r of active.values())
+    if (r.downloadId)
+      try {
+        await chrome.downloads.resume(r.downloadId);
+        await setDownloadStateById(r.downloadId, 'downloading');
+        n++;
+      } catch {}
+  return { ok: true, resumed: n };
+});
+route('OPEN_DOWNLOAD_SOURCE', async m => {
+  const url = String(m.url || '');
+  if (!/^https:\/\/(x\.com|twitter\.com)\//i.test(url))
+    return { ok: false, error: 'Only X source posts can be opened' };
+  await chrome.tabs.create({ url, active: true });
+  return { ok: true };
+});
+route('OPEN_DOWNLOADS', async m => {
+  await chrome.tabs.create({ url: 'chrome://downloads' });
+  return { ok: true };
+});
+route('SHOW_DOWNLOAD', async m => {
+  try {
+    await chrome.downloads.show(Number(m.downloadId));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+route('OPEN_DOWNLOAD_FILE', async m => {
+  try {
+    await chrome.downloads.open(Number(m.downloadId));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+route('FORCE_REDOWNLOAD', async m => {
+  const row = await store('downloads', 'readonly', os => req(os.get(m.key))).catch(() => null);
+  if (!row?.item) return { ok: false, error: 'Download record not found' };
+  return await enqueue([row.item], true, { source: 'redownload' });
+});
+route('TEST_DOWNLOAD', async m => {
+  return await testDownload();
+});
+route('HELPER_STATUS', async m => {
+  return await helperStatus();
+});
+route('GET_CONVERSION_STATUS', async m => {
+  return await conversionStatus(m.key || '');
+});
+route('REMOVE_CONVERSION_OUTPUT', async m => {
+  const format = String(m.format || '').toLowerCase();
+  if (!['gif', 'webp'].includes(format)) return { ok: false, error: 'Only GIF or WebP derivatives can be removed' };
+  const row = await store('conversions', 'readonly', os => req(os.get(String(m.key || '')))).catch(() => null);
+  if (!row?.jobId) return { ok: false, error: 'Conversion job not found' };
+  const removed = await helperPost('/conversions/remove-output', { jobId: row.jobId, format });
+  if (!removed.ok) return removed;
+  const helperRow = row.helper || {},
+    descriptor = helperRow[format] || {};
+  const nextHelper = {
+    ...helperRow,
+    [format]: {
+      ...descriptor,
+      state: removed.state || 'removed',
+      ...(Number(removed.size) > 0 ? { size: Number(removed.size) } : {}),
+    },
+  };
+  const oldVerification = row.verification || row.conversionVerification || {},
+    oldOutputs = Array.isArray(oldVerification.outputs) ? oldVerification.outputs : [];
+  const outputs = [
+    ...oldOutputs.filter(item => item.label !== format),
+    {
+      label: format,
+      state: removed.state || 'removed',
+      size: Number(removed.size) || Number(descriptor.size) || null,
+    },
+  ];
+  const verification = { ...oldVerification, state: 'verified-with-warning', outputs, at: Date.now() };
+  const next = { ...row, helper: nextHelper, verification, updatedAt: Date.now() };
+  await putMany('conversions', [next]);
+  const download = await store('downloads', 'readonly', os => req(os.get(row.downloadKey || row.id))).catch(() => null);
+  if (download)
+    await putMany('downloads', [
+      {
+        ...download,
+        conversionState: next.state,
+        conversionVerification: verification,
+        conversionUpdatedAt: Date.now(),
+      },
+    ]);
+  await action(
+    'conversion',
+    removed.state === 'removed'
+      ? `${format.toUpperCase()} derivative removed; original preserved`
+      : `${format.toUpperCase()} derivative is already missing`,
+    { jobId: row.jobId, format, originalPreserved: true }
+  );
+  return { ...removed, ok: true, key: String(m.key), conversion: next };
+});
+route('CANCEL_CONVERSION', async m => {
+  const row = await store('conversions', 'readonly', os => req(os.get(m.key))).catch(() => null);
+  if (!row?.jobId) return { ok: false, error: 'Conversion job not found' };
+  const out = await helperPost('/conversions/cancel', { jobId: row.jobId });
+  if (out.ok) {
+    await putMany('conversions', [
+      { ...row, state: 'cancel-requested', cancelRequestedAt: Date.now(), updatedAt: Date.now() },
+    ]);
+    const dl = await store('downloads', 'readonly', os => req(os.get(row.downloadKey || row.id))).catch(() => null);
+    if (dl)
+      await putMany('downloads', [{ ...dl, conversionState: 'cancel-requested', conversionUpdatedAt: Date.now() }]);
+  }
+  return out;
+});
+route('RETRY_CONVERSION', async m => {
+  const row = await store('conversions', 'readonly', os => req(os.get(m.key))).catch(() => null);
+  if (!row) return { ok: false, error: 'Conversion job not found' };
+  const next = { ...row, state: 'queued', retryAt: Date.now(), error: null, updatedAt: Date.now() };
+  await putMany('conversions', [next]);
+  const dl = await store('downloads', 'readonly', os => req(os.get(row.downloadKey || row.id))).catch(() => null);
+  if (dl)
+    await putMany('downloads', [
+      { ...dl, conversionState: 'queued', conversionVerification: null, conversionUpdatedAt: Date.now() },
+    ]);
+  try {
+    await chrome.alarms.create('xvault-helper-poll', { periodInMinutes: 0.25 });
+  } catch {}
+  await action('conversion', 'Derivative regeneration queued', { jobId: row.jobId });
+  return { ok: true, state: 'queued' };
+});
+route('ROTATE_HELPER_TOKEN', async m => {
+  const out = await helperPost('/auth/rotate', {});
+  if (out.ok && out.token) await chrome.storage.local.set({ helperAuthToken: out.token });
+  return out;
+});
+route('REPAIR_DOWNLOADS', async m => {
+  return await repairDownloads();
+});
+route('UPDATE_TWEET_META', async m => {
+  const database = await db();
+  try {
+    const result = await updateLibraryRecord(database, m.id, m.patch || {}, m.expectedNote);
+    if (result.ok) {
+      announceMetadata([m.id]);
+      announceLibraryChanges([m.id], 'metadata');
+    }
+    return result;
+  } finally {
+    database.close();
+  }
+});
+route('UPDATE_MEDIA_METADATA', async m => {
+  const database = await db();
+  try {
+    const result = await updateLibraryMediaMetadata(database, m.id, m.mediaKey, m.change || {});
+    if (result.ok && !result.unchanged) {
+      announceMetadata([m.id]);
+      announceLibraryChanges([m.id], 'metadata');
+    }
+    return result;
+  } finally {
+    database.close();
+  }
+});
+route('PREVIEW_MEDIA_SIDECAR', async m => {
+  const database = await db();
+  try {
+    return { ok: true, ...(await previewLibraryMediaSidecar(database, m.sidecar)) };
+  } finally {
+    database.close();
+  }
+});
+route('IMPORT_MEDIA_SIDECAR', async m => {
+  const database = await db();
+  try {
+    const result = await importLibraryMediaSidecar(
+      database,
+      m.sidecar,
+      Date.now(),
+      m.expectedRevision,
+      m.expectedPlanId
+    );
+    if (result.ok && result.action !== 'already-imported') {
+      const id = String(result.row?.id || m.sidecar?.post?.id || '');
+      announceMetadata([id]);
+      announceLibraryChanges([id], result.action === 'reconstructed' ? 'insert' : 'metadata');
+    }
+    return result;
+  } finally {
+    database.close();
+  }
+});
+route('BULK_UPDATE_TWEET_META', async m => {
+  const database = await db();
+  try {
+    const result = await updateLibraryMetadata(database, m.ids, m.patch || {});
+    announceMetadata(result.rows.map(row => row.id));
+    announceLibraryChanges(
+      result.rows.map(row => row.id),
+      'metadata'
+    );
+    await action('library', `Updated ${result.updated} selected posts`, { count: result.updated });
+    return { ok: true, ...result };
+  } finally {
+    database.close();
+  }
+});
+route('RESTORE_TWEET_META', async m => {
+  // Undo for bulk edits, rules and triage: puts back userMeta snapshots taken before the change.
+  const database = await db();
+  try {
+    const result = await restoreLibraryMetadata(database, m.entries);
+    const ids = result.rows.map(row => row.id);
+    announceMetadata(ids);
+    announceLibraryChanges(ids, 'metadata');
+    return { ok: true, restored: result.restored };
+  } finally {
+    database.close();
+  }
+});
+route('MOVE_TWEETS_TO_TRASH', async m => {
+  const database = await db();
+  try {
+    const result = await moveLibraryToTrash(database, m.ids);
+    announceLibraryChanges(result.ids, 'remove');
+    return { ok: true, ...result };
+  } finally {
+    database.close();
+  }
+});
+route('RESTORE_TWEETS_FROM_TRASH', async m => {
+  const database = await db();
+  try {
+    const result = await restoreLibraryFromTrash(database, m.ids);
+    announceLibraryChanges(result.ids, 'restore');
+    return { ok: true, ...result };
+  } finally {
+    database.close();
+  }
+});
+route('RESTORE_TRASH', async m => {
+  const database = await db();
+  try {
+    let restored = 0,
+      conflicts = [],
+      cursor = null;
+    const restoredIds = [];
+    for (;;) {
+      const page = await readTrashPage(database, cursor, 100);
+      const result = await restoreLibraryFromTrash(
+        database,
+        page.rows.map(row => String(row.id))
+      );
+      restored += result.restored;
+      restoredIds.push(...result.ids);
+      conflicts.push(...result.conflicts);
+      if (page.done) break;
+      cursor = page.nextKey;
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    announceLibraryChanges(restoredIds, 'restore');
+    return { ok: true, restored, restoredIds, conflicts };
+  } finally {
+    database.close();
+  }
+});
+route('GET_TRASH', async m => {
+  return { ok: true, rows: await all('trash') };
+});
+route('GET_LIBRARY_METADATA', async m => {
+  const database = await db();
+  try {
+    return { ok: true, rows: await readLibraryMetadata(database, m.ids) };
+  } finally {
+    database.close();
+  }
+});
+route('GET_TRASH_PAGE', async m => {
+  const database = await db();
+  try {
+    return { ok: true, ...(await readTrashPage(database, m.afterKey, m.limit, m.query)) };
+  } finally {
+    database.close();
+  }
+});
+route('MERGE_TRASH_METADATA', async m => {
+  const database = await db();
+  try {
+    const result = await mergeTrashMetadata(database, m.id, m.options);
+    if (result.ok) {
+      announceMetadata([m.id]);
+      announceLibraryChanges([m.id], 'metadata');
+    }
+    return result;
+  } finally {
+    database.close();
+  }
+});
+route('GET_TRASH_UNDO', async m => {
+  const database = await db();
+  try {
+    return { ok: true, ...(await readTrashUndo(database)) };
+  } finally {
+    database.close();
+  }
+});
+route('GET_TRASH_RECORD', async m => {
+  const id = String(m.id || '');
+  if (!id || id.length > 128) throw Error('Invalid post ID');
+  return { ok: true, row: await store('trash', 'readonly', os => req(os.get(id))) };
+});
+route('GET_SESSIONS', async m => {
+  const rows = await all('jobs');
+  rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return { ok: true, rows: rows.slice(0, m.limit || 40) };
+});
+route('GET_EXPLORER_DATA', async m => {
+  return { ok: true, data: await explorerData() };
+});
+route('GET_VAULT_INSIGHTS', async m => {
+  return { ok: true, insights: await vaultInsights(!!m.force) };
+});
+route('GET_THREAD', async m => {
+  return await threadFor(m.id);
+});
+route('GET_AUTHOR_DETAIL', async m => {
+  return await authorDetail(m.handle, m.raw);
+});
+route('GET_MEDIA_FINGERPRINT_PAGE', async m => {
+  return await mediaFingerprintPage(m.afterKey ?? null, m.limit);
+});
+route('GET_ARCHIVE_RUNS', async m => {
+  const rows = await all('archiveRuns');
+  rows.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+  return { ok: true, rows: rows.slice(0, m.limit || 100) };
+});
+route('GET_REVISIONS', async m => {
+  const rows = (await all('revisions')).filter(r => !m.tweetId || String(r.tweetId) === String(m.tweetId));
+  rows.sort((a, b) => (b.observedAt || 0) - (a.observedAt || 0));
+  return { ok: true, rows: rows.slice(0, m.limit || 100) };
+});
+route('OPEN_URL', async m => {
+  await chrome.tabs.create({ url: m.url });
+  return { ok: true };
+});
+route('INTEGRITY_SCAN', async m => {
+  return { ok: true, report: await integrityScan() };
+});
+route('INTEGRITY_REPAIR_PREVIEW', async m => {
+  return await integrityRepairPreview();
+});
+route('INTEGRITY_REPAIR_APPLY', async m => {
+  return await integrityRepairApply(m.ids || [], m.confirm === true);
+});
+route('GET_INTEGRITY', async m => {
+  return { ok: true, report: await store('integrity', 'readonly', os => req(os.get('latest'))).catch(() => null) };
+});
+route('GENERATE_MANIFEST', async m => {
+  return { ok: true, manifest: await makeManifest(m.scope || 'all') };
+});
+route('CREATE_SNAPSHOT', async m => {
+  return { ok: true, snapshot: await createSnapshot(m.source || 'all') };
+});
+route('GET_SNAPSHOTS', async m => {
+  const rows = await all('snapshots');
+  rows.sort((a, b) => b.createdAt - a.createdAt);
+  return { ok: true, rows: rows.slice(0, m.limit || 50) };
+});
+route('LIBRARY_SUMMARY', async m => {
+  return { ok: true, summary: await librarySummary() };
+});
+route('GET_MANIFESTS', async m => {
+  const rows = await all('manifests');
+  rows.sort((a, b) => b.createdAt - a.createdAt);
+  return { ok: true, rows: rows.slice(0, m.limit || 20) };
+});
+route('HEALTH_CHECK', async m => {
+  return await healthCheck();
+});
+route('NOTIFY', async m => {
+  await notify(m.title || 'XVault', m.message || '');
+  return { ok: true };
+});
+route('WAKE', async m => {
+  wake(!!m.on);
+  return { ok: true };
 });
 
 chrome.runtime.onMessage.addListener((m, s, reply) => {
@@ -3547,797 +4901,7 @@ chrome.runtime.onMessage.addListener((m, s, reply) => {
     const messageCapability = authorizeMessage(m, s, chrome.runtime.id);
     await privateStorageReady;
     const routed = await router.dispatch(m, messageCapability, s);
-    if (routed.handled) return routed.value;
-    if (m.type === 'REMOTE_COMMAND') {
-      const allowed = new Set([
-        'remote.start',
-        'remote.stop',
-        'remote.status',
-        'pairing.start',
-        'pairing.regenerate',
-        'pairing.pending',
-        'pairing.approve',
-        'pairing.deny',
-        'devices.list',
-        'device.permissions',
-        'device.revoke',
-      ]);
-      const name = String(m.name || '');
-      if (!allowed.has(name)) throw Error('Unsupported Remote command');
-      const payload = m.payload && typeof m.payload === 'object' ? m.payload : {};
-      const result = await remoteHostCommand(name, payload);
-      return result;
-    }
-    if (m.type === 'INJECT_HOOK') {
-      if (!s.tab?.id) throw Error('No tab');
-      await chrome.scripting.executeScript({ target: { tabId: s.tab.id }, files: ['page-hook.js'], world: 'MAIN' });
-      return { ok: true };
-    }
-    if (m.type === 'STORE_RECORDS') {
-      const incoming = m.tweets || [],
-        tweets = await mergeTweetRows(incoming),
-        users = m.users || [];
-      await putMany('users', users);
-      await storeProfileSnapshots(users, m.context || {});
-      for (const id of [...new Set(incoming.map(t => t?.observedRunId).filter(Boolean))]) {
-        const run = await store('archiveRuns', 'readonly', os => req(os.get(id))).catch(() => null);
-        if (run?.diff || run?.state === 'settling')
-          scheduleRunReconciliation(id, {
-            scope: run.source || 'timeline',
-            profileHandle: run.profileHandle || null,
-            state: run.finalState || run.state,
-          });
-      }
-      return { ok: true, tweets };
-    }
-    if (m.type === 'HAS_TWEETS') {
-      const ids = m.ids || [];
-      const found = [];
-      await store('tweets', 'readonly', async os => {
-        for (const id of ids) if (await req(os.get(String(id)))) found.push(String(id));
-      });
-      return { ok: true, found };
-    }
-    if (m.type === 'GET_ARCHIVE_INDICATORS') {
-      if (messageCapability !== 'content') throw Error('Archive status is available only to X widgets');
-      return await archiveIndicators(m.ids);
-    }
-    if (m.type === 'GET_TWEET_IDS') {
-      const rows = await all('tweets');
-      return { ok: true, ids: rows.map(x => String(x.id)) };
-    }
-    if (m.type === 'STORE_CAPTURE') {
-      await putMany('captures', [{ ...m.capture, key: m.capture.key || crypto.randomUUID() }]);
-      return { ok: true };
-    }
-    if (m.type === 'STORE_JOB') {
-      await putMany('jobs', [m.job]);
-      if (m.job?.id && m.job?.context) {
-        if (['initializing', 'running'].includes(m.job.state)) await beginArchiveRun(m.job);
-        const prev = await store('sessions', 'readonly', os => req(os.get(m.job.id))).catch(() => null);
-        await putMany('sessions', [
-          {
-            ...(prev || {}),
-            id: m.job.id,
-            source: m.job.context.scope || 'timeline',
-            profileHandle: m.job.context.profileHandle || null,
-            startedAt: prev?.startedAt || Date.now(),
-            updatedAt: Date.now(),
-            state: m.job.state,
-            phase: m.job.phase,
-            page: m.job.page || 0,
-            posts: m.job.posts || prev?.posts || 0,
-            error: m.job.error || null,
-          },
-        ]);
-        if (['complete', 'error'].includes(m.job.state)) {
-          await markArchiveSettling(m.job);
-          scheduleRunReconciliation(m.job.id, {
-            scope: m.job.context.scope || 'timeline',
-            profileHandle: m.job.context.profileHandle || null,
-            state: m.job.state,
-          });
-        }
-      }
-      await updateBadge();
-      return { ok: true };
-    }
-    if (m.type === 'STORE_ACTION') {
-      return { ok: true, row: await action(m.actionType || 'info', m.text || '', m.meta || {}) };
-    }
-    if (m.type === 'STORE_CHECKPOINT') {
-      await putMany('checkpoints', [m.checkpoint]);
-      return { ok: true };
-    }
-    if (m.type === 'GET_CHECKPOINT')
-      return { ok: true, checkpoint: await store('checkpoints', 'readonly', os => req(os.get(m.key))) };
-    if (m.type === 'CLEAR_CHECKPOINT') {
-      await store('checkpoints', 'readwrite', os => req(os.delete(m.key)));
-      return { ok: true };
-    }
-    if (m.type === 'GET_SETTINGS') {
-      const value = await getSettings();
-      return messageCapability === 'content'
-        ? { ok: true, settings: contentSettings(value) }
-        : { ok: true, settings: value, defaults: structuredClone(defaults) };
-    }
-    if (m.type === 'UPDATE_SMART_COLLECTIONS') return await updateSmartCollections(m.change);
-    if (m.type === 'UPDATE_WORKSPACE') return await updateWorkspace(m.change);
-    if (m.type === 'GET_CAPTURE_TEMPLATES')
-      return { ok: true, templates: (await chrome.storage.local.get('graphqlTemplates')).graphqlTemplates || {} };
-    if (m.type === 'STORE_CAPTURE_TEMPLATES') return await storeCaptureTemplates(m.templates);
-    if (m.type === 'SET_SETTINGS') {
-      const value = await setSettings(m.settings || {});
-      return { ok: true, settings: messageCapability === 'content' ? contentSettings(value) : value };
-    }
-    if (m.type === 'RESET_SETTINGS') {
-      await chrome.storage.local.set({ settings: { ...defaults } });
-      return { ok: true, settings: await getSettings() };
-    }
-    if (m.type === 'RESTORE_PREVIOUS_SETTINGS') {
-      const h = (await chrome.storage.local.get('settingsHistory')).settingsHistory || [];
-      const prev = h.shift();
-      if (!prev) return { ok: false, error: 'No settings history' };
-      await chrome.storage.local.set({ settings: prev.settings, settingsHistory: h });
-      return { ok: true, settings: await getSettings() };
-    }
-    if (m.type === 'RESET_FLOATING_POSITION') {
-      const value = await setSettings({ cornerRight: 18, cornerBottom: 18, cornerScale: 1, cornerOpacity: 1 });
-      return { ok: true, settings: messageCapability === 'content' ? contentSettings(value) : value };
-    }
-    if (m.type === 'RESET_SECTION') {
-      const keys = m.keys || [];
-      const patch = {};
-      for (const k of keys) if (k in defaults) patch[k] = defaults[k];
-      return { ok: true, settings: await setSettings(patch) };
-    }
-    if (m.type === 'ACTIVE_X_TAB') {
-      const t = await activeXTab();
-      return { ok: true, tab: t ? { id: t.id, url: t.url, title: t.title, status: t.status } : null };
-    }
-    if (m.type === 'NAVIGATE_X') {
-      let t = await activeXTab();
-      if (t?.id) {
-        await chrome.tabs.update(t.id, { url: m.url, active: true });
-        return { ok: true, tabId: t.id };
-      }
-      t = await chrome.tabs.create({ url: m.url, active: true });
-      return { ok: true, tabId: t.id };
-    }
-    if (m.type === 'SEND_TO_TAB') {
-      const t = messageCapability === 'content' ? s.tab : await activeXTab();
-      if (!t) throw Error('Open x.com first');
-      return { ok: true, reply: await sendToX(t.id, m.payload), tabId: t.id };
-    }
-    if (m.type === 'OPEN_DASHBOARD') return await openDashboard(m.page || '');
-    if (m.type === 'OPEN_SIDE_PANEL') {
-      const tabId = s.tab?.id || m.tabId || (await activeXTab())?.id;
-      if (!tabId || !chrome.sidePanel?.open) throw Error('Side panel unavailable');
-      await chrome.sidePanel.open({ tabId });
-      return { ok: true };
-    }
-    if (m.type === 'STATS') {
-      const vals = await Promise.all(STORES.map(count)),
-        m = Object.fromEntries(STORES.map((k, i) => [k, vals[i]]));
-      const stored = await navigator.storage?.estimate?.().catch(() => null);
-      return { ok: true, ...m, stored, downloadQueue: await queueStats() };
-    }
-    if (m.type === 'GET_JOB') {
-      const id = String(m.id || '');
-      if (!id || id.length > 128) throw Error('Invalid archive job ID');
-      return { ok: true, job: (await store('jobs', 'readonly', os => req(os.get(id)))) || null };
-    }
-    if (m.type === 'GET_ALL') {
-      const vals = await Promise.all(STORES.map(all));
-      return { ok: true, data: Object.fromEntries(STORES.map((k, i) => [k, vals[i]])) };
-    }
-    if (m.type === 'READ_RECOVERY_BACKUP_PAGE') {
-      const database = await db();
-      try {
-        return {
-          ok: true,
-          ...(await readLibraryBackupPage(database, m.store, m.afterKey ?? null, m.limit, m.expectedRevision)),
-        };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'PREVIEW_RECOVERY_BATCH') {
-      const database = await db();
-      try {
-        return {
-          ok: true,
-          ...(await previewArchiveImportBatch(
-            database,
-            m.records,
-            m.expectedRevision,
-            m.expectedDownloadRevision,
-            m.importId
-          )),
-        };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'BEGIN_RECOVERY_IMPORT') {
-      const database = await db();
-      try {
-        return await beginArchiveImport(database, m.options || {});
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'COMMIT_RECOVERY_BATCH') {
-      const database = await db();
-      try {
-        const result = await commitArchiveImportBatch(database, m.batch || {});
-        if (result.changedIds?.length) announceLibraryChanges(result.changedIds, 'restore');
-        return result;
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'COMPLETE_RECOVERY_IMPORT') {
-      const database = await db();
-      try {
-        return await completeArchiveImport(
-          database,
-          m.jobId,
-          m.fingerprint,
-          m.expectedRevision,
-          m.expectedDownloadRevision,
-          m.footer
-        );
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'GET_RECOVERY_IMPORT_JOB') {
-      const database = await db();
-      try {
-        return { ok: true, job: await getArchiveImportJob(database, m.jobId) };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'FIND_RECOVERY_IMPORT_JOB') {
-      const database = await db();
-      try {
-        return { ok: true, job: await findArchiveImportJob(database, m.importId, m.fingerprint) };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'READ_RECOVERY_IMPORT_CONFLICTS') {
-      const database = await db();
-      try {
-        return { ok: true, ...(await readArchiveImportConflicts(database, m.importId, m.afterKey ?? null, m.limit)) };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'READ_RECOVERY_ASSET_REFERENCES') {
-      const database = await db();
-      try {
-        return { ok: true, ...(await readArchiveAssetReferences(database, m.importId, m.afterKey ?? null, m.limit)) };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'GET_LIBRARY_ROWS') return { ok: true, rows: await all('tweets') };
-    if (m.type === 'GET_LIBRARY_RECORDS') {
-      const ids = m.ids || [];
-      if (!Array.isArray(ids) || ids.length > 1000) throw Error('Library record reads require at most 1,000 post IDs');
-      const database = await db();
-      try {
-        return { ok: true, rows: await readLibraryRecords(database, ids) };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'GET_LIBRARY_CHUNK') {
-      const database = await db();
-      try {
-        return {
-          ok: true,
-          ...(await readLibraryPage(database, m.afterKey, Math.min(1000, Math.max(1, Number(m.limit) || 500)))),
-        };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'QUERY_LIBRARY_PAGE') return await queryLibraryPage(m);
-    if (m.type === 'GET_LIBRARY_QUERY_PROGRESS') {
-      const queryId = String(m.queryId || '');
-      return { ok: true, progress: activeLibraryQueryProgress.get(queryId) || null };
-    }
-    if (m.type === 'CANCEL_LIBRARY_QUERY') {
-      const query = activeLibraryQueries.get(String(m.queryId || ''));
-      if (query) query.cancelled = true;
-      return { ok: true, cancelled: !!query };
-    }
-    if (m.type === 'CANCEL_LIBRARY_PLAN') {
-      const signal = libraryPlanSignals.get(String(m.requestId || ''));
-      if (signal) signal.aborted = true;
-      return { ok: true };
-    }
-    if (m.type === 'PLAN_LIBRARY_DOWNLOAD') {
-      const id = String(m.requestId || crypto.randomUUID());
-      if (id.length > 80) throw Error('Invalid plan identity');
-      const previous = libraryPlanSignals.get(id);
-      if (previous) previous.aborted = true;
-      const signal = { aborted: false };
-      libraryPlanSignals.set(id, signal);
-      try {
-        return await libraryBulkPlan(m.options || {}, null, signal);
-      } finally {
-        if (libraryPlanSignals.get(id) === signal) libraryPlanSignals.delete(id);
-      }
-    }
-    if (m.type === 'START_LIBRARY_BULK_DOWNLOAD') return await startLibraryBulk(m.options || {});
-    if (m.type === 'GET_RECENT_ACTIONS') {
-      const rows = await all('actions');
-      rows.sort((a, b) => b.at - a.at);
-      return { ok: true, rows: rows.slice(0, m.limit || 100) };
-    }
-    if (m.type === 'CLEAR_LIBRARY') {
-      const database = await db();
-      let result;
-      try {
-        result = await clearLibraryData(database);
-      } finally {
-        database.close();
-      }
-      announceLibraryChanges([], 'clear');
-      await action('clear', 'Local library and its historical metadata cleared').catch(() => {});
-      return result;
-    }
-    if (m.type === 'CLEAR_ALL') {
-      clearQueueBuffer();
-      const database = await db();
-      let result;
-      try {
-        result = await clearLibraryData(database, [...STORES, 'libraryPlans']);
-      } finally {
-        database.close();
-      }
-      active.clear();
-      announceLibraryChanges([], 'clear');
-      return result;
-    }
-    if (m.type === 'QUEUE_DOWNLOADS' || m.type === 'DOWNLOAD_URLS')
-      return await enqueue(m.items || [], !!m.force, {
-        source: messageCapability === 'content' ? 'x.com' : 'dashboard',
-        tabId: messageCapability === 'content' ? s.tab?.id : null,
-      });
-    if (m.type === 'GET_DOWNLOAD_DECISIONS') {
-      await decisionsReady;
-      return { ok: true, rows: downloadDecisions.slice(-Number(m.limit || 200)).reverse() };
-    }
-    if (m.type === 'DOWNLOAD_QUEUE_STATS')
-      return { ok: true, ...(await queueStats()), adaptive: downloadGovernor.status() };
-    if (m.type === 'GET_DOWNLOAD_HISTORY') {
-      const database = await db();
-      try {
-        return { ok: true, ...(await readDownloadHistoryPage(database, m.limit || 60)) };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'GET_DOWNLOADS_FOR_TWEETS') {
-      const database = await db();
-      try {
-        const rows = await readDownloadRows(database, m.ids || [], {
-          perPostLimit: m.perPostLimit || 64,
-          totalLimit: m.totalLimit || 5000,
-        });
-        return { ok: true, rows, truncated: !!rows.truncated };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'RETRY_FAILED') return await retryFailed();
-    if (m.type === 'REBUILD_QUEUED_TARGETS') return await rebuildTargets();
-    if (m.type === 'CLEAR_COMPLETED_DOWNLOADS') return await clearState('complete');
-    if (m.type === 'CLEAR_FAILED_DOWNLOADS') return await clearState('failed');
-    if (m.type === 'CANCEL_QUEUED_DOWNLOADS') return await clearState('queued');
-    if (m.type === 'PAUSE_DOWNLOAD') {
-      try {
-        await chrome.downloads.pause(m.downloadId);
-        await setDownloadStateById(m.downloadId, 'paused');
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, error: String(e) };
-      }
-    }
-    if (m.type === 'RESUME_DOWNLOAD') {
-      try {
-        await chrome.downloads.resume(m.downloadId);
-        await setDownloadStateById(m.downloadId, 'downloading');
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, error: String(e) };
-      }
-    }
-    if (m.type === 'CANCEL_DOWNLOAD') {
-      try {
-        await chrome.downloads.cancel(m.downloadId);
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, error: String(e) };
-      }
-    }
-    if (m.type === 'PAUSE_ALL_DOWNLOADS') {
-      let n = 0;
-      for (const r of active.values())
-        if (r.downloadId)
-          try {
-            await chrome.downloads.pause(r.downloadId);
-            await setDownloadStateById(r.downloadId, 'paused');
-            n++;
-          } catch {}
-      return { ok: true, paused: n };
-    }
-    if (m.type === 'RESUME_ALL_DOWNLOADS') {
-      let n = 0;
-      for (const r of active.values())
-        if (r.downloadId)
-          try {
-            await chrome.downloads.resume(r.downloadId);
-            await setDownloadStateById(r.downloadId, 'downloading');
-            n++;
-          } catch {}
-      return { ok: true, resumed: n };
-    }
-    if (m.type === 'OPEN_DOWNLOAD_SOURCE') {
-      const url = String(m.url || '');
-      if (!/^https:\/\/(x\.com|twitter\.com)\//i.test(url))
-        return { ok: false, error: 'Only X source posts can be opened' };
-      await chrome.tabs.create({ url, active: true });
-      return { ok: true };
-    }
-    if (m.type === 'OPEN_DOWNLOADS') {
-      await chrome.tabs.create({ url: 'chrome://downloads' });
-      return { ok: true };
-    }
-    if (m.type === 'SHOW_DOWNLOAD') {
-      try {
-        await chrome.downloads.show(Number(m.downloadId));
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, error: String(e) };
-      }
-    }
-    if (m.type === 'OPEN_DOWNLOAD_FILE') {
-      try {
-        await chrome.downloads.open(Number(m.downloadId));
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, error: String(e) };
-      }
-    }
-    if (m.type === 'FORCE_REDOWNLOAD') {
-      const row = await store('downloads', 'readonly', os => req(os.get(m.key))).catch(() => null);
-      if (!row?.item) return { ok: false, error: 'Download record not found' };
-      return await enqueue([row.item], true, { source: 'redownload' });
-    }
-    if (m.type === 'TEST_DOWNLOAD') return await testDownload();
-    if (m.type === 'HELPER_STATUS') return await helperStatus();
-    if (m.type === 'GET_CONVERSION_STATUS') return await conversionStatus(m.key || '');
-    if (m.type === 'REMOVE_CONVERSION_OUTPUT') {
-      const format = String(m.format || '').toLowerCase();
-      if (!['gif', 'webp'].includes(format)) return { ok: false, error: 'Only GIF or WebP derivatives can be removed' };
-      const row = await store('conversions', 'readonly', os => req(os.get(String(m.key || '')))).catch(() => null);
-      if (!row?.jobId) return { ok: false, error: 'Conversion job not found' };
-      const removed = await helperPost('/conversions/remove-output', { jobId: row.jobId, format });
-      if (!removed.ok) return removed;
-      const helperRow = row.helper || {},
-        descriptor = helperRow[format] || {};
-      const nextHelper = {
-        ...helperRow,
-        [format]: {
-          ...descriptor,
-          state: removed.state || 'removed',
-          ...(Number(removed.size) > 0 ? { size: Number(removed.size) } : {}),
-        },
-      };
-      const oldVerification = row.verification || row.conversionVerification || {},
-        oldOutputs = Array.isArray(oldVerification.outputs) ? oldVerification.outputs : [];
-      const outputs = [
-        ...oldOutputs.filter(item => item.label !== format),
-        {
-          label: format,
-          state: removed.state || 'removed',
-          size: Number(removed.size) || Number(descriptor.size) || null,
-        },
-      ];
-      const verification = { ...oldVerification, state: 'verified-with-warning', outputs, at: Date.now() };
-      const next = { ...row, helper: nextHelper, verification, updatedAt: Date.now() };
-      await putMany('conversions', [next]);
-      const download = await store('downloads', 'readonly', os => req(os.get(row.downloadKey || row.id))).catch(
-        () => null
-      );
-      if (download)
-        await putMany('downloads', [
-          {
-            ...download,
-            conversionState: next.state,
-            conversionVerification: verification,
-            conversionUpdatedAt: Date.now(),
-          },
-        ]);
-      await action(
-        'conversion',
-        removed.state === 'removed'
-          ? `${format.toUpperCase()} derivative removed; original preserved`
-          : `${format.toUpperCase()} derivative is already missing`,
-        { jobId: row.jobId, format, originalPreserved: true }
-      );
-      return { ...removed, ok: true, key: String(m.key), conversion: next };
-    }
-    if (m.type === 'CANCEL_CONVERSION') {
-      const row = await store('conversions', 'readonly', os => req(os.get(m.key))).catch(() => null);
-      if (!row?.jobId) return { ok: false, error: 'Conversion job not found' };
-      const out = await helperPost('/conversions/cancel', { jobId: row.jobId });
-      if (out.ok) {
-        await putMany('conversions', [
-          { ...row, state: 'cancel-requested', cancelRequestedAt: Date.now(), updatedAt: Date.now() },
-        ]);
-        const dl = await store('downloads', 'readonly', os => req(os.get(row.downloadKey || row.id))).catch(() => null);
-        if (dl)
-          await putMany('downloads', [{ ...dl, conversionState: 'cancel-requested', conversionUpdatedAt: Date.now() }]);
-      }
-      return out;
-    }
-    if (m.type === 'RETRY_CONVERSION') {
-      const row = await store('conversions', 'readonly', os => req(os.get(m.key))).catch(() => null);
-      if (!row) return { ok: false, error: 'Conversion job not found' };
-      const next = { ...row, state: 'queued', retryAt: Date.now(), error: null, updatedAt: Date.now() };
-      await putMany('conversions', [next]);
-      const dl = await store('downloads', 'readonly', os => req(os.get(row.downloadKey || row.id))).catch(() => null);
-      if (dl)
-        await putMany('downloads', [
-          { ...dl, conversionState: 'queued', conversionVerification: null, conversionUpdatedAt: Date.now() },
-        ]);
-      try {
-        await chrome.alarms.create('xvault-helper-poll', { periodInMinutes: 0.25 });
-      } catch {}
-      await action('conversion', 'Derivative regeneration queued', { jobId: row.jobId });
-      return { ok: true, state: 'queued' };
-    }
-    if (m.type === 'ROTATE_HELPER_TOKEN') {
-      const out = await helperPost('/auth/rotate', {});
-      if (out.ok && out.token) await chrome.storage.local.set({ helperAuthToken: out.token });
-      return out;
-    }
-    if (m.type === 'REPAIR_DOWNLOADS') return await repairDownloads();
-
-    if (m.type === 'UPDATE_TWEET_META') {
-      const database = await db();
-      try {
-        const result = await updateLibraryRecord(database, m.id, m.patch || {}, m.expectedNote);
-        if (result.ok) {
-          announceMetadata([m.id]);
-          announceLibraryChanges([m.id], 'metadata');
-        }
-        return result;
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'UPDATE_MEDIA_METADATA') {
-      const database = await db();
-      try {
-        const result = await updateLibraryMediaMetadata(database, m.id, m.mediaKey, m.change || {});
-        if (result.ok && !result.unchanged) {
-          announceMetadata([m.id]);
-          announceLibraryChanges([m.id], 'metadata');
-        }
-        return result;
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'PREVIEW_MEDIA_SIDECAR') {
-      const database = await db();
-      try {
-        return { ok: true, ...(await previewLibraryMediaSidecar(database, m.sidecar)) };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'IMPORT_MEDIA_SIDECAR') {
-      const database = await db();
-      try {
-        const result = await importLibraryMediaSidecar(
-          database,
-          m.sidecar,
-          Date.now(),
-          m.expectedRevision,
-          m.expectedPlanId
-        );
-        if (result.ok && result.action !== 'already-imported') {
-          const id = String(result.row?.id || m.sidecar?.post?.id || '');
-          announceMetadata([id]);
-          announceLibraryChanges([id], result.action === 'reconstructed' ? 'insert' : 'metadata');
-        }
-        return result;
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'BULK_UPDATE_TWEET_META') {
-      const database = await db();
-      try {
-        const result = await updateLibraryMetadata(database, m.ids, m.patch || {});
-        announceMetadata(result.rows.map(row => row.id));
-        announceLibraryChanges(
-          result.rows.map(row => row.id),
-          'metadata'
-        );
-        await action('library', `Updated ${result.updated} selected posts`, { count: result.updated });
-        return { ok: true, ...result };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'RESTORE_TWEET_META') {
-      // Undo for bulk edits, rules and triage: puts back userMeta snapshots taken before the change.
-      const database = await db();
-      try {
-        const result = await restoreLibraryMetadata(database, m.entries);
-        const ids = result.rows.map(row => row.id);
-        announceMetadata(ids);
-        announceLibraryChanges(ids, 'metadata');
-        return { ok: true, restored: result.restored };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'MOVE_TWEETS_TO_TRASH') {
-      const database = await db();
-      try {
-        const result = await moveLibraryToTrash(database, m.ids);
-        announceLibraryChanges(result.ids, 'remove');
-        return { ok: true, ...result };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'RESTORE_TWEETS_FROM_TRASH') {
-      const database = await db();
-      try {
-        const result = await restoreLibraryFromTrash(database, m.ids);
-        announceLibraryChanges(result.ids, 'restore');
-        return { ok: true, ...result };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'RESTORE_TRASH') {
-      const database = await db();
-      try {
-        let restored = 0,
-          conflicts = [],
-          cursor = null;
-        const restoredIds = [];
-        for (;;) {
-          const page = await readTrashPage(database, cursor, 100);
-          const result = await restoreLibraryFromTrash(
-            database,
-            page.rows.map(row => String(row.id))
-          );
-          restored += result.restored;
-          restoredIds.push(...result.ids);
-          conflicts.push(...result.conflicts);
-          if (page.done) break;
-          cursor = page.nextKey;
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
-        announceLibraryChanges(restoredIds, 'restore');
-        return { ok: true, restored, restoredIds, conflicts };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'GET_TRASH') {
-      return { ok: true, rows: await all('trash') };
-    }
-    if (m.type === 'GET_LIBRARY_METADATA') {
-      const database = await db();
-      try {
-        return { ok: true, rows: await readLibraryMetadata(database, m.ids) };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'GET_TRASH_PAGE') {
-      const database = await db();
-      try {
-        return { ok: true, ...(await readTrashPage(database, m.afterKey, m.limit, m.query)) };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'MERGE_TRASH_METADATA') {
-      const database = await db();
-      try {
-        const result = await mergeTrashMetadata(database, m.id, m.options);
-        if (result.ok) {
-          announceMetadata([m.id]);
-          announceLibraryChanges([m.id], 'metadata');
-        }
-        return result;
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'GET_TRASH_UNDO') {
-      const database = await db();
-      try {
-        return { ok: true, ...(await readTrashUndo(database)) };
-      } finally {
-        database.close();
-      }
-    }
-    if (m.type === 'GET_TRASH_RECORD') {
-      const id = String(m.id || '');
-      if (!id || id.length > 128) throw Error('Invalid post ID');
-      return { ok: true, row: await store('trash', 'readonly', os => req(os.get(id))) };
-    }
-    if (m.type === 'GET_SESSIONS') {
-      const rows = await all('jobs');
-      rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-      return { ok: true, rows: rows.slice(0, m.limit || 40) };
-    }
-    if (m.type === 'GET_EXPLORER_DATA') return { ok: true, data: await explorerData() };
-    if (m.type === 'GET_VAULT_INSIGHTS') return { ok: true, insights: await vaultInsights(!!m.force) };
-    if (m.type === 'GET_THREAD') return await threadFor(m.id);
-    if (m.type === 'GET_AUTHOR_DETAIL') return await authorDetail(m.handle, m.raw);
-    if (m.type === 'GET_MEDIA_FINGERPRINT_PAGE') return await mediaFingerprintPage(m.afterKey ?? null, m.limit);
-    if (m.type === 'GET_ARCHIVE_RUNS') {
-      const rows = await all('archiveRuns');
-      rows.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
-      return { ok: true, rows: rows.slice(0, m.limit || 100) };
-    }
-    if (m.type === 'GET_REVISIONS') {
-      const rows = (await all('revisions')).filter(r => !m.tweetId || String(r.tweetId) === String(m.tweetId));
-      rows.sort((a, b) => (b.observedAt || 0) - (a.observedAt || 0));
-      return { ok: true, rows: rows.slice(0, m.limit || 100) };
-    }
-    if (m.type === 'OPEN_URL') {
-      await chrome.tabs.create({ url: m.url });
-      return { ok: true };
-    }
-
-    if (m.type === 'INTEGRITY_SCAN') return { ok: true, report: await integrityScan() };
-    if (m.type === 'INTEGRITY_REPAIR_PREVIEW') return await integrityRepairPreview();
-    if (m.type === 'INTEGRITY_REPAIR_APPLY') return await integrityRepairApply(m.ids || [], m.confirm === true);
-    if (m.type === 'GET_INTEGRITY')
-      return { ok: true, report: await store('integrity', 'readonly', os => req(os.get('latest'))).catch(() => null) };
-    if (m.type === 'GENERATE_MANIFEST') return { ok: true, manifest: await makeManifest(m.scope || 'all') };
-    if (m.type === 'CREATE_SNAPSHOT') return { ok: true, snapshot: await createSnapshot(m.source || 'all') };
-    if (m.type === 'GET_SNAPSHOTS') {
-      const rows = await all('snapshots');
-      rows.sort((a, b) => b.createdAt - a.createdAt);
-      return { ok: true, rows: rows.slice(0, m.limit || 50) };
-    }
-    if (m.type === 'LIBRARY_SUMMARY') return { ok: true, summary: await librarySummary() };
-    if (m.type === 'GET_MANIFESTS') {
-      const rows = await all('manifests');
-      rows.sort((a, b) => b.createdAt - a.createdAt);
-      return { ok: true, rows: rows.slice(0, m.limit || 20) };
-    }
-    if (m.type === 'HEALTH_CHECK') return await healthCheck();
-    if (m.type === 'NOTIFY') {
-      await notify(m.title || 'XVault', m.message || '');
-      return { ok: true };
-    }
-    if (m.type === 'WAKE') {
-      wake(!!m.on);
-      return { ok: true };
-    }
-    return { ok: false, error: 'Unknown message' };
+    return routed.handled ? routed.value : unknownMessage();
   })()
     .then(reply)
     .catch(e => reply({ ok: false, error: e?.message || String(e) }));
@@ -4424,11 +4988,14 @@ function baseName(x, i, s, ext) {
   else if (s.fileNaming === 'id') b = `${id}-${n}`;
   else if (s.fileNaming === 'author-id') b = `${h}-${id}`;
   else if (s.fileNaming === 'custom') {
-    b = (s.customFilenameTemplate || '{author}_{tweetId}_{index}')
-      .replaceAll('{author}', h)
-      .replaceAll('{tweetId}', id)
-      .replaceAll('{index}', n)
-      .replaceAll('{date}', date);
+    // XVault 21: shared template engine (filename-template.js) — same output as the Settings preview.
+    b = globalThis.XVaultFilenameTemplate.render(s.customFilenameTemplate || '{author}_{tweetId}_{index}', {
+      ...x,
+      author: h,
+      tweetId: id,
+      index: x.index || i,
+      createdAt: x.createdAt || date,
+    }).name;
     b = cleanSegment(b, 'media');
   } else b = `${h}-${id}-${n}`;
   return `${b}.${ext || 'bin'}`;
@@ -4685,6 +5252,7 @@ async function enqueueCore(items, force = false, context = {}) {
       installationIds: installation.ids,
     };
   }
+  items = await videoQualityItems(items, s).catch(() => items);
   const requested = items.filter(raw => raw?.url),
     keys = requested.map(item => keyFor(item)),
     assets = [...new Set(requested.map(item => assetIdentity(item.url).asset).filter(Boolean))];
@@ -4737,11 +5305,14 @@ async function enqueueCore(items, force = false, context = {}) {
     filtered = 0,
     conversionOnly = 0,
     lookupBlocked = 0;
+  const addedKeys = [];
   for (const raw of items) {
     if (!raw?.url) continue;
     const item = { ...raw, url: String(raw.url) },
-      key = keyFor(item),
-      existing = existingByIdentity.get(key) || null;
+      key = keyFor(item);
+    // Only XVault pages can hand over a local (ZIP-import) blob; x.com never can.
+    if (context.source === 'x.com' || typeof item.localSource !== 'string') delete item.localSource;
+    const existing = existingByIdentity.get(key) || null;
     const asset = assetIdentity(item.url).asset,
       sibling = existing ? null : byAsset.get(asset) || null,
       decision = decideEnqueue({
@@ -4932,6 +5503,7 @@ async function enqueueCore(items, force = false, context = {}) {
     byAsset.set(asset, row);
     queueRow(row);
     added++;
+    if (addedKeys.length < 2000) addedKeys.push(String(row.key));
     log({ outcome: 'queued' });
   }
   lookup.hashScanRecords = hashScanRecords;
@@ -4956,6 +5528,7 @@ async function enqueueCore(items, force = false, context = {}) {
   return {
     ok: true,
     added: added + conversionOnly,
+    addedKeys,
     skipped,
     filtered,
     conversionOnly,
@@ -5335,7 +5908,9 @@ async function pump() {
   try {
     s = await getSettings();
     const max = downloadGovernor.limit(s.maxConcurrentDownloads || 4, s.adaptiveDownloads !== false);
-    while (active.size < max) {
+    // XVault 21: schedule window / Data Saver hold new starts (active downloads continue).
+    const held = queueHeld(s);
+    while (!held && active.size < max) {
       if (!queue.length) {
         const filled = await fillQueueBuffer();
         moreQueued = filled.more;
@@ -5483,8 +6058,18 @@ async function startOne(row, s) {
         await reconcileDownloadChange({ id: row.downloadId, state: { current: 'complete' } }, row);
       return;
     }
+    // X-archive imports carry the file from the ZIP as a page-owned blob: URL; it is tried once, then
+    // retries fall back to X's CDN address (the row's identity) if the dashboard tab has gone away.
+    const local =
+      row.item.localSource &&
+      !row.localSourceTried &&
+      String(row.item.localSource).startsWith(`blob:chrome-extension://${chrome.runtime.id}/`)
+        ? String(row.item.localSource)
+        : '';
+    if (local) row.localSourceTried = true;
+    ensureBandwidthSampling();
     const id = await chrome.downloads.download({
-      url: row.item.url,
+      url: local || row.item.url,
       filename: row.target.filename,
       conflictAction: 'uniquify',
       saveAs: false,
@@ -6106,6 +6691,7 @@ chrome.downloads.onChanged.addListener(d => {
 async function verifyCompletedDownloadCore(downloadId) {
   const row = await readDownloadByBrowserId(downloadId).catch(() => null);
   if (!row || !['verifying', 'complete'].includes(row.state)) return { ok: false, reason: 'not-verifying' };
+  if (row.reclaimedAt) return { ok: true, reason: 'reclaimed-duplicate', verification: row.verification || null };
   let item;
   try {
     [item] = await chrome.downloads.search({ id: Number(downloadId) });
@@ -6118,7 +6704,8 @@ async function verifyCompletedDownloadCore(downloadId) {
   row.bytesReceived = received || row.bytesReceived;
   row.totalBytes = knownContentLength || row.totalBytes || expectedSize;
   row.verifiedAt = Date.now();
-  const local = pathToFileUrl(item?.filename || row.filename);
+  // Files moved by a recorded safe rename live at row.filename; Chrome still remembers the old path.
+  const local = pathToFileUrl(row.renamedAt ? row.filename : item?.filename || row.filename);
   // Chrome search() returns cached exists values before its asynchronous disk check.
   // Verify local evidence before treating a completed file as missing or retrying it.
   let exists = true,
@@ -6205,6 +6792,13 @@ async function verifyCompletedDownloadCore(downloadId) {
 chrome.alarms.onAlarm.addListener(async alarm => {
   if (derived.onAlarm(alarm?.name)) return;
   if (syncScheduler.onAlarm(alarm?.name)) return;
+  if (watchLists.onAlarm(alarm?.name)) return;
+  if (alarm?.name === INTEGRITY_ALARM) {
+    const settings = await getSettings(),
+      last = (await chrome.storage.local.get('xvIntegrityReverify')).xvIntegrityReverify;
+    if (integrityDue(settings, last?.at)) await reverifyCompletedDownloads().catch(() => {});
+    return;
+  }
   if (alarm?.name === DOWNLOAD_ASSET_INDEX_ALARM) {
     await runDownloadAssetIndexBackfill();
     return;

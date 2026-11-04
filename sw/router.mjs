@@ -1,6 +1,7 @@
 // Message router for the service worker (XVault 20). Feature services register the message types
 // they own together with the sender capabilities allowed to call them, replacing ad-hoc checks in
-// the big onMessage switch. Unknown types fall through to the legacy handlers in background.js.
+// the big onMessage switch. Since XVault 21 every message type is a route; unknown types are rejected.
+// Handlers receive (message, sender, capability).
 export const DESKTOP = 'desktop';
 export const CONTENT = 'content';
 
@@ -22,7 +23,7 @@ export function createMessageRouter() {
     const route = routes.get(message?.type);
     if (!route) return { handled: false };
     if (!route.allow.has(capability)) throw Error(route.denied);
-    return { handled: true, value: await route.handler(message, sender) };
+    return { handled: true, value: await route.handler(message, sender, capability) };
   }
   return {
     register,

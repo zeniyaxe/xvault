@@ -162,6 +162,11 @@ export function mergeCapturedRecord(current, incoming, now = Date.now()) {
       'language',
       'conversationId',
       'replyToId',
+      'poll',
+      'card',
+      'space',
+      'communityNote',
+      'edit',
     ])
       if ((next[field] == null || (Array.isArray(next[field]) && !next[field].length)) && rowFields[field] != null)
         next[field] = rowFields[field];
@@ -189,9 +194,17 @@ export function mergeCapturedRecord(current, incoming, now = Date.now()) {
     next.lastSeenRun = incoming.observedRunId || prior?.lastSeenRun || null;
   next.lastObservationAt = Math.max(stamp(prior, ['lastObservationAt'], 0), observedAt);
   next.updatedAt = now;
+  // A live observation (not an archive import stamped as old) proves the post is still on X.
+  if (prior?.availability && prior.availability.state !== 'available' && observedAt > 1e12)
+    next.availability = { state: 'available', checkedAt: observedAt, previous: prior.availability.state };
 
   let revision = null;
   if (prior && JSON.stringify(revisionView(prior)) !== JSON.stringify(revisionView(next))) {
+    // Denormalised change counters (XVault 21) power is:edited / has:revisions without a join.
+    next.revisionCount = Math.max(0, Number(prior.revisionCount) || 0) + 1;
+    next.lastRevisionAt = observedAt;
+    if ((prior.text || '') !== (next.text || ''))
+      next.textRevisionCount = Math.max(0, Number(prior.textRevisionCount) || 0) + 1;
     revision = {
       key: `${id}:${observedAt}:${globalThis.crypto?.randomUUID?.() || `${now}-${Math.random().toString(36).slice(2)}`}`,
       tweetId: id,
