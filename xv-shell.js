@@ -61,10 +61,11 @@
       window.XVaultMotion?.play(
         $(`#page-${shown}`),
         [
-          { opacity: 0.45, transform: `translateX(${direction * 10}px)` },
+          { opacity: 0.35, transform: `translateX(${direction * 14}px)` },
           { opacity: 1, transform: 'none' },
         ],
-        170
+        240,
+        { spring: 'snappy' }
       );
     }
     return result;
