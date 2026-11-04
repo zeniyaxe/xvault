@@ -7,6 +7,7 @@ import {
   matchRecoveryDownload,
 } from './reliability.mjs';
 import { createInsightsAccumulator, orderThread, compactPost, previewUrl, mediaKind } from './vault-insights.mjs';
+import { createDerivedService } from './sw/derived-service.mjs';
 import {
   readLibraryPage,
   readLibraryRecords,
@@ -3095,10 +3096,20 @@ async function librarySummary() {
     bytes: downloads.filter(x => x.state === 'complete').reduce((n, x) => n + Number(x.totalBytes || 0), 0),
   };
 }
+// Look-alike fingerprints and OCR run as resumable service-worker jobs (see sw/derived-jobs.mjs).
+const derived = createDerivedService({
+  listPage: async (cursor, limit) => mediaFingerprintPage(cursor, limit),
+});
+derived.resume().catch(() => {});
+
 chrome.runtime.onMessage.addListener((m, s, reply) => {
   (async () => {
     const messageCapability = authorizeMessage(m, s, chrome.runtime.id);
     await privateStorageReady;
+    if (derived.handles(m.type)) {
+      if (messageCapability === 'content') throw Error('Derived-data jobs are managed from XVault pages');
+      return await derived.handle(m);
+    }
     if (m.type === 'REMOTE_COMMAND') {
       const allowed = new Set([
         'remote.start',
@@ -5734,6 +5745,7 @@ async function verifyCompletedDownloadCore(downloadId) {
 // Completion verification is awaited by the primary download-state listener so cleanup cannot
 // remove a file before its metadata/magic-byte result is persisted.
 chrome.alarms.onAlarm.addListener(async alarm => {
+  if (derived.onAlarm(alarm?.name)) return;
   if (alarm?.name === DOWNLOAD_ASSET_INDEX_ALARM) {
     await runDownloadAssetIndexBackfill();
     return;

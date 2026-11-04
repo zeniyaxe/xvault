@@ -906,15 +906,10 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
 
   /* ───────── Duplicates ───────── */
   const scan = {
-    running: false,
-    done: false,
-    exhausted: false,
-    cursor: null,
+    job: null,
+    collecting: null,
     items: [],
-    queue: [],
-    seen: 0,
-    hashed: 0,
-    cached: 0,
+    pending: 0,
     failed: 0,
     flat: 0,
     groups: [],
@@ -926,14 +921,25 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
   };
   let derived = null;
 
+  // Same schema as sw/derived-store.mjs (v2: phash + ocr + meta). The service worker does the
+  // fetching and hashing; this page only reads fingerprints and groups them.
   function openDerived() {
     derived ||= new Promise((resolve, reject) => {
-      const request = indexedDB.open('xvault-derived', 1);
+      const request = indexedDB.open('xvault-derived', 2);
       request.onupgradeneeded = () => {
-        if (!request.result.objectStoreNames.contains('phash'))
-          request.result.createObjectStore('phash', { keyPath: 'key' });
+        const database = request.result;
+        if (!database.objectStoreNames.contains('phash')) database.createObjectStore('phash', { keyPath: 'key' });
+        if (!database.objectStoreNames.contains('ocr'))
+          database.createObjectStore('ocr', { keyPath: 'key' }).createIndex('postId', 'postId', { unique: false });
+        if (!database.objectStoreNames.contains('meta')) database.createObjectStore('meta', { keyPath: 'key' });
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        request.result.onversionchange = () => {
+          request.result.close();
+          derived = null;
+        };
+        resolve(request.result);
+      };
       request.onerror = () => reject(request.error);
     }).catch(error => {
       derived = null;
@@ -955,16 +961,6 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
       transaction.oncomplete = transaction.onerror = transaction.onabort = () => resolve(found);
     });
   }
-  async function saveHashes(rows) {
-    const database = await openDerived().catch(() => null);
-    if (!database || !rows.length) return;
-    await new Promise(resolve => {
-      const transaction = database.transaction('phash', 'readwrite'),
-        hashes = transaction.objectStore('phash');
-      rows.forEach(row => hashes.put(row));
-      transaction.oncomplete = transaction.onerror = transaction.onabort = () => resolve();
-    });
-  }
 
   const popcount = value => {
     value -= (value >>> 1) & 0x55555555;
@@ -972,112 +968,88 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
     return Math.imul((value + (value >>> 4)) & 0x0f0f0f0f, 0x01010101) >>> 24;
   };
   const distance = (a, b) => popcount((a.hi ^ b.hi) >>> 0) + popcount((a.lo ^ b.lo) >>> 0);
-  const hex = value => (value >>> 0).toString(16).padStart(8, '0');
+  const pDistance = (a, b) => popcount((a.phi ^ b.phi) >>> 0) + popcount((a.plo ^ b.plo) >>> 0);
+  const parseHex = (text, at) => parseInt(text.slice(at, at + 8), 16) >>> 0;
 
-  // Difference hash: 9×8 grayscale, one bit per horizontal neighbour comparison.
-  async function fingerprint(url) {
-    const response = await fetch(url, { credentials: 'omit', cache: 'force-cache' });
-    if (!response.ok) throw Error(`HTTP ${response.status}`);
-    const bitmap = await createImageBitmap(await response.blob(), {
-      resizeWidth: 9,
-      resizeHeight: 8,
-      resizeQuality: 'high',
-    });
-    const canvas = new OffscreenCanvas(9, 8),
-      context = canvas.getContext('2d', { willReadFrequently: true });
-    context.drawImage(bitmap, 0, 0, 9, 8);
-    bitmap.close?.();
-    const pixels = context.getImageData(0, 0, 9, 8).data,
-      gray = index => pixels[index] * 0.299 + pixels[index + 1] * 0.587 + pixels[index + 2] * 0.114;
-    let hi = 0,
-      lo = 0;
-    for (let row = 0; row < 8; row++)
-      for (let column = 0; column < 8; column++) {
-        const offset = (row * 9 + column) * 4,
-          bit = gray(offset) > gray(offset + 4) ? 1 : 0;
-        if (row < 4) hi = ((hi << 1) | bit) >>> 0;
-        else lo = ((lo << 1) | bit) >>> 0;
-      }
-    return [hi, lo];
-  }
-
-  async function listMore() {
-    const result = await call({ type: 'GET_MEDIA_FINGERPRINT_PAGE', afterKey: scan.cursor, limit: 400 });
-    if (!result?.ok) throw Error(result?.error || 'Media could not be listed');
-    scan.cursor = result.nextKey ?? null;
-    scan.exhausted = !!result.done || scan.cursor == null;
-    const cache = await cachedHashes(result.items.map(item => item.key));
-    for (const item of result.items) {
-      scan.seen++;
-      const hit = cache.get(item.key);
-      if (hit?.thumb === item.thumb && hit.h) {
-        item.hi = parseInt(hit.h.slice(0, 8), 16) >>> 0;
-        item.lo = parseInt(hit.h.slice(8, 16), 16) >>> 0;
-        scan.items.push(item);
-        scan.cached++;
-      } else if (hit?.thumb === item.thumb && !hit.h && Date.now() - Number(hit.at || 0) < 7 * DAY) scan.failed++;
-      else scan.queue.push(item);
-    }
-  }
-
-  async function hashSome() {
-    const batch = scan.queue.splice(0, 32),
-      saved = [];
-    let next = 0;
-    const worker = async () => {
-      while (scan.running && next < batch.length) {
-        const item = batch[next++];
-        try {
-          let pair;
-          try {
-            pair = await fingerprint(item.thumb);
-          } catch (error) {
-            if (!item.fallback || item.fallback === item.thumb) throw error;
-            pair = await fingerprint(item.fallback);
-          }
-          [item.hi, item.lo] = pair;
-          scan.items.push(item);
-          scan.hashed++;
-          saved.push({ key: item.key, thumb: item.thumb, h: hex(item.hi) + hex(item.lo), at: Date.now() });
-        } catch {
-          scan.failed++;
-          saved.push({ key: item.key, thumb: item.thumb, h: '', at: Date.now() });
+  // Reads every remembered fingerprint (no network). Uncached media is left to the background job.
+  async function collect() {
+    if (scan.collecting) return scan.collecting;
+    scan.collecting = (async () => {
+      const items = [];
+      let cursor = null,
+        pending = 0,
+        failed = 0;
+      for (;;) {
+        const result = await call({ type: 'GET_MEDIA_FINGERPRINT_PAGE', afterKey: cursor, limit: 800 });
+        if (!result?.ok) throw Error(result?.error || 'Media could not be listed');
+        const cache = await cachedHashes(result.items.map(item => item.key));
+        for (const item of result.items) {
+          const hit = cache.get(item.key);
+          if (hit?.thumb === item.thumb && hit.h) {
+            item.hi = parseHex(hit.h, 0);
+            item.lo = parseHex(hit.h, 8);
+            if (hit.p) {
+              item.phi = parseHex(hit.p, 0);
+              item.plo = parseHex(hit.p, 8);
+              item.hasP = true;
+            }
+            items.push(item);
+          } else if (hit?.thumb === item.thumb) failed++;
+          else pending++;
         }
+        cursor = result.nextKey ?? null;
+        if (result.done || cursor == null) break;
       }
-    };
-    await Promise.all(Array.from({ length: 4 }, worker));
-    if (next < batch.length) scan.queue.unshift(...batch.slice(next));
-    await saveHashes(saved);
-  }
-
-  async function runScan() {
-    if (scan.running) return;
-    scan.running = true;
-    scan.error = '';
-    paintLab();
-    try {
-      while (scan.running) {
-        if (!scan.queue.length) {
-          if (scan.exhausted) break;
-          await listMore();
-          paintLab();
-          continue;
-        }
-        await hashSome();
-        if (scan.items.length - scan.grouped > 600 && Date.now() - scan.lastGroupAt > 15000) await regroup();
+      scan.items = items;
+      scan.pending = pending;
+      scan.failed = failed;
+      await regroup();
+    })()
+      .catch(error => {
+        scan.error = error?.message || 'Fingerprints could not be read';
+      })
+      .finally(() => {
+        scan.collecting = null;
         paintLab();
-      }
-      if (scan.exhausted && !scan.queue.length) scan.done = true;
-    } catch (error) {
-      scan.error = error?.message || 'The scan stopped';
-    } finally {
-      scan.running = false;
-    }
-    await regroup();
-    paintLab();
-    if (scan.done)
-      toast(scan.groups.length ? `Found ${plural(scan.groups.length, 'look-alike group')}` : 'No look-alikes found');
+      });
+    return scan.collecting;
   }
+
+  const jobActive = () => ['running', 'waiting'].includes(scan.job?.state);
+  async function refreshJob() {
+    const result = await call({ type: 'DERIVED_JOB_STATUS' }).catch(() => null);
+    if (result?.ok) scan.job = result.jobs.phash;
+    return scan.job;
+  }
+  async function runScan({ restart = false } = {}) {
+    scan.error = '';
+    const result = await call({
+      type: 'DERIVED_JOB_START',
+      kind: 'phash',
+      restart,
+      total: Number(state.data?.media?.items || 0),
+    });
+    if (!result?.ok) scan.error = result?.error || 'The scan could not start';
+    else scan.job = result.job;
+    paintLab();
+  }
+  try {
+    new BroadcastChannel('xvault-derived-jobs').onmessage = event => {
+      const message = event.data || {};
+      if (message.type !== 'DERIVED_JOB' || message.kind !== 'phash') return;
+      const before = scan.job?.state;
+      scan.job = message.job;
+      if (message.job.state === 'done' && before !== 'done') {
+        collect().then(() => {
+          if (shown() && state.view === 'duplicates')
+            toast(
+              scan.groups.length ? `Found ${plural(scan.groups.length, 'look-alike group')}` : 'No look-alikes found'
+            );
+        });
+      } else if (jobActive() && Date.now() - scan.lastGroupAt > 45000 && !scan.collecting) collect();
+      paintLab();
+    };
+  } catch {}
 
   async function regroup() {
     const usable = scan.items.filter(item => {
@@ -1103,7 +1075,13 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
           const node = stack.pop(),
             other = usable[node.index],
             gap = distance(item, other);
-          if (gap <= threshold && other.postId !== item.postId && !(item.mediaId && item.mediaId === other.mediaId)) {
+          if (
+            gap <= threshold &&
+            other.postId !== item.postId &&
+            !(item.mediaId && item.mediaId === other.mediaId) &&
+            // When both images have a DCT fingerprint, require it to agree too (fewer false matches).
+            (!item.hasP || !other.hasP || pDistance(item, other) <= threshold + 6)
+          ) {
             const a = find(index),
               b = find(node.index);
             if (a !== b) parent[a] = b;
@@ -1146,26 +1124,6 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
     scan.lastGroupAt = Date.now();
   }
 
-  function resetScan() {
-    Object.assign(scan, {
-      running: false,
-      done: false,
-      exhausted: false,
-      cursor: null,
-      items: [],
-      queue: [],
-      seen: 0,
-      hashed: 0,
-      cached: 0,
-      failed: 0,
-      flat: 0,
-      groups: [],
-      shown: 30,
-      grouped: 0,
-      error: '',
-    });
-  }
-
   const thresholdLabel = value =>
     value <= 2 ? 'Near-identical' : value <= 5 ? 'Close' : value <= 8 ? 'Loose' : 'Very loose';
 
@@ -1178,7 +1136,7 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
 </section>
 <section class="xa-section xa-lab">
 <header class="xa-section-head"><h2>Look-alike images</h2></header>
-<p class="xa-note">Finds re-uploads, recompressed copies and light edits by comparing a 64-bit fingerprint of each thumbnail. Thumbnails are fetched from X's image CDN; fingerprints stay on this computer, so later scans are fast.</p>
+<p class="xa-note">Finds re-uploads, recompressed copies and light edits by comparing two 64-bit fingerprints (difference + DCT) of each image. XVault's background worker fetches images from X's CDN at a gentle pace and backs off when X asks it to; fingerprints stay on this computer, so later scans only look at new media.</p>
 <div class="xa-lab-controls">
   <button type="button" class="primary" data-act="scan" id="xaScanButton">Find look-alikes</button>
   <button type="button" class="quiet" data-act="scan-reset" id="xaScanReset" hidden>Start over</button>
@@ -1259,39 +1217,56 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
     const button = root.querySelector('#xaScanButton'),
       reset = root.querySelector('#xaScanReset'),
       meter = root.querySelector('#xaLabMeter');
-    const started = scan.seen > 0 || scan.items.length > 0;
-    button.textContent = scan.running
-      ? 'Pause'
-      : scan.done
-        ? 'Scan again for new media'
-        : started
-          ? 'Resume'
-          : 'Find look-alikes';
-    reset.hidden = !started || scan.running;
-    const expected = Math.max(1, Number(state.data?.media?.items || 0), scan.seen);
-    const progress = scan.done ? 1 : Math.min(0.99, (scan.items.length + scan.failed) / expected);
+    const job = scan.job || {},
+      active = jobActive(),
+      done = job.state === 'done',
+      started = Number(job.seen || 0) > 0 || scan.items.length > 0 || active;
+    if (!scan.job && !scan.jobRequested) {
+      scan.jobRequested = true;
+      refreshJob().then(current => {
+        if (current && (current.seen || current.processed) && !scan.grouped) collect();
+        paintLab();
+      });
+    }
+    button.textContent = active ? 'Pause' : done ? 'Scan again for new media' : started ? 'Resume' : 'Find look-alikes';
+    button.setAttribute('aria-pressed', String(active));
+    reset.hidden = !started || active;
+    const expected = Math.max(1, Number(job.total || 0), Number(state.data?.media?.items || 0), Number(job.seen || 0));
+    const progress = done ? 1 : Math.min(0.99, Number(job.seen || 0) / expected);
     meter.style.transform = `scaleX(${started ? progress : 0})`;
+    const unavailable = Number(job.failed || 0) + Number(job.skipped || 0);
     const parts = started
       ? [
-          scan.running ? 'Scanning' : scan.done ? 'Done' : 'Paused',
-          `${count(scan.items.length)} images fingerprinted${scan.cached ? ` (${count(scan.cached)} remembered)` : ''}`,
-          scan.queue.length ? `${count(scan.queue.length)} waiting` : '',
-          scan.failed ? `${count(scan.failed)} unavailable` : '',
+          job.state === 'waiting'
+            ? job.message || 'Waiting for X to allow more image requests'
+            : active
+              ? 'Scanning in the background — you can leave this page'
+              : done
+                ? 'Done'
+                : job.state === 'error'
+                  ? 'Stopped'
+                  : 'Paused',
+          `${count(Number(job.seen || 0))} of ~${count(expected)} images checked`,
+          job.processed ? `${count(job.processed)} newly fingerprinted` : '',
+          job.cached ? `${count(job.cached)} remembered` : '',
+          unavailable ? `${count(unavailable)} unavailable` : '',
+          scan.collecting ? 'grouping…' : '',
           scan.flat ? `${count(scan.flat)} blank or flat skipped` : '',
         ]
-      : ['Not scanned yet. The scan can be paused at any time.'];
-    status.textContent = parts.filter(Boolean).join(' · ') + (scan.error ? ` · ${scan.error}` : '');
+      : ['Not scanned yet. The scan runs in the background, survives closing this tab and can be paused at any time.'];
+    status.textContent =
+      parts.filter(Boolean).join(' · ') + (job.error ? ` · ${job.error}` : '') + (scan.error ? ` · ${scan.error}` : '');
     const results = root.querySelector('#xaLookalikes');
     if (!results) return;
     if (!scan.groups.length) {
       results.innerHTML =
-        started && !scan.running && scan.grouped
+        started && !active && scan.grouped
           ? `<p class="xa-quiet">No look-alikes at “${html(thresholdLabel(scan.threshold))}”. Try a looser match.</p>`
           : '';
       return;
     }
     const visibleGroups = scan.groups.slice(0, scan.shown);
-    results.innerHTML = `<p class="xa-note">${plural(scan.groups.length, 'group')}${scan.running ? ' so far' : ''}.</p>${visibleGroups
+    results.innerHTML = `<p class="xa-note">${plural(scan.groups.length, 'group')}${active ? ' so far' : ''}.</p>${visibleGroups
       .map(group => {
         const posts = [];
         const seen = new Set();
@@ -1414,24 +1389,16 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
       return paintLab();
     }
     if (act === 'scan') {
-      if (scan.running) {
-        scan.running = false;
-        return paintLab();
-      }
-      if (scan.done) {
-        // Keep fingerprints in memory; list again to pick up new media.
-        const keep = scan.threshold;
-        resetScan();
-        scan.threshold = keep;
-      }
-      return runScan();
+      if (jobActive())
+        return call({ type: 'DERIVED_JOB_PAUSE', kind: 'phash' }).then(result => {
+          if (result?.ok) scan.job = result.job;
+          paintLab();
+          collect();
+        });
+      // A finished scan restarts from the top but re-uses every remembered fingerprint.
+      return runScan({ restart: scan.job?.state === 'done' });
     }
-    if (act === 'scan-reset') {
-      const keep = scan.threshold;
-      resetScan();
-      scan.threshold = keep;
-      return paintLab();
-    }
+    if (act === 'scan-reset') return runScan({ restart: true });
   }
 
   function onInput(event) {
@@ -1446,7 +1413,7 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
       root.querySelector('#xaThresholdLabel').textContent = thresholdLabel(scan.threshold);
       clearTimeout(event.target.timer);
       event.target.timer = setTimeout(async () => {
-        if (!scan.items.length || scan.running) return;
+        if (!scan.items.length || scan.collecting) return;
         await regroup();
         scan.shown = 30;
         paintLab();
