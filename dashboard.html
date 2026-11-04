@@ -37,6 +37,7 @@
     <script defer src="xv-reader.js"></script>
     <script defer src="xv-atlas.js"></script>
     <script defer src="xv-search-assist.js"></script>
+    <script defer src="xv-background-jobs.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script>
   </head>
@@ -789,6 +790,24 @@
                     <div class="row">
                       <button id="inboxReviewed">Mark everything reviewed</button
                       ><button id="inboxAll">Put unreviewed posts back in Inbox</button>
+                    </div>
+                  </section>
+                  <section class="settinggroup" id="g-ocr">
+                    <h3>Text in images (local OCR)</h3>
+                    <p class="settingHint">
+                      Reads text inside archived images with the OCR engine bundled in XVault, so
+                      <code>ocr:receipt</code> and <code>has:ocr</code> work in search. Runs in the background, resumes
+                      after Chrome restarts and never sends images or text to any service.
+                    </p>
+                    <div class="xv-job" id="xvOcrPanel">
+                      <div class="xv-job-meter" aria-hidden="true"><i data-ocr-meter></i></div>
+                      <p class="xv-job-status" data-ocr-status role="status" aria-live="polite">Checking…</p>
+                      <div class="row">
+                        <button type="button" class="primary" data-ocr="start" aria-pressed="false">
+                          Read text in images</button
+                        ><button type="button" data-ocr="cancel" hidden>Cancel</button
+                        ><button type="button" class="quiet" data-ocr="clear">Forget image text</button>
+                      </div>
                     </div>
                   </section>
                   <section class="settinggroup" id="g-layout">

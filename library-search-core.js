@@ -152,9 +152,10 @@
       if (key === 'has' && (value === 'note' || value === 'notes')) return { kind: 'note', value: true };
       if (key === 'has' && (value === 'tag' || value === 'tags')) return { kind: 'untagged', value: false };
       if (key === 'has' && (value === 'download' || value === 'file')) return { kind: 'downloaded', value: true };
+      if (key === 'has' && (value === 'ocr' || value === 'text-in-image')) return { kind: 'ocr' };
       return {
         kind: 'never',
-        issue: `${key}: use video, gif, image, media${key === 'has' ? ', note, tag or download' : ''}`,
+        issue: `${key}: use video, gif, image, media${key === 'has' ? ', note, tag, download or ocr' : ''}`,
       };
     }
     if (key === 'source') return { kind: 'source', value };
@@ -168,6 +169,7 @@
     }
     if (key === 'id') return { kind: 'id', value };
     if (key === 'annotation') return { kind: 'annotationText', value };
+    if (key === 'ocr' || key === 'image-text') return { kind: 'ocrText', value };
     if (key === 'media-note' || key === 'medianote') return { kind: 'mediaNoteText', value };
     if (key === 'note' && value !== 'true' && value !== 'false') return { kind: 'noteText', value };
     if (key === 'downloaded' || key === 'missing' || key === 'note') {
@@ -233,6 +235,8 @@
     if (rule.kind === 'conversation') return row.conversationId === rule.value || row.id === rule.value;
     if (rule.kind === 'quotes') return row.quotedPostId === rule.value;
     if (rule.kind === 'mediaCount') return compareNumber(Number(row.mediaCount) || 0, rule.operator, rule.number);
+    if (rule.kind === 'ocr') return !!row.ocrText;
+    if (rule.kind === 'ocrText') return String(row.ocrText || '').includes(rule.value);
     if (rule.kind === 'date') {
       const value = Number(row[rule.field]);
       return Number.isFinite(value) && value > 0 && (rule.after ? value >= rule.value : value < rule.value);
@@ -398,6 +402,10 @@
       noteText: [String(meta.note || '').toLowerCase(), ...mediaNotes, ...annotationTexts].join(' '),
       mediaNoteText: mediaNotes.join(' '),
       annotationText: annotationTexts.join(' '),
+      // Text recognised locally in images (xvault-derived/ocr), joined only for ocr:/has:ocr queries.
+      ocrText: String(options.ocrText || '')
+        .toLowerCase()
+        .replace(/\s+/g, ' '),
       archivedAt: Number(post.archivedAt || 0),
       postedAt: new Date(post.createdAt || 0).getTime(),
       language: String(post.language || '').toLowerCase(),

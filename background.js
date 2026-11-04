@@ -1152,6 +1152,15 @@ function invalidateActiveLibraryQueries() {
   rankedLibraryPlanCache.clear();
   for (const control of activeLibraryQueries.values()) control.cancelled = true;
 }
+// OCR text lives in xvault-derived; only queries that mention ocr:/has:ocr load the index.
+async function ocrTextFor(compiled) {
+  if (!globalThis.XVaultLibrarySearch.usesRuleKind(compiled, ['ocr', 'ocrText'])) return { revision: 0, map: null };
+  try {
+    return { revision: await derived.ocrIndex.revision(), map: await derived.ocrIndex.map() };
+  } catch {
+    return { revision: 0, map: new Map() };
+  }
+}
 function stableRandomOrder(id, seed) {
   let value = 2166136261;
   for (const character of `${seed}:${id}`) {
@@ -1170,7 +1179,8 @@ async function scanSortedLibraryPage(database, message, settings, control) {
     limit = Math.max(1, Math.min(1500, Math.floor(Number(message.limit) || 120)));
   const query = String(message.query || '').slice(0, 1000),
     compiled = globalThis.XVaultLibrarySearch.compileQuery(query),
-    needsDownloads = globalThis.XVaultLibrarySearch.usesRuleKind(compiled, ['downloaded', 'missing', 'size']);
+    needsDownloads = globalThis.XVaultLibrarySearch.usesRuleKind(compiled, ['downloaded', 'missing', 'size']),
+    ocrText = await ocrTextFor(compiled);
   const revision = await readLibraryRevision(database),
     downloadRevision = needsDownloads ? await readLibraryDownloadRevision(database) : null;
   if (
@@ -1184,7 +1194,15 @@ async function scanSortedLibraryPage(database, message, settings, control) {
     planId = String(message.rankPlanId || queryId),
     randomSeed = Number(message.randomSeed) || 1,
     inboxSince = Number(settings.inboxSince) || 0;
-  const identityKey = JSON.stringify([query, sort, randomSeed, revision, downloadRevision, inboxSince]);
+  const identityKey = JSON.stringify([
+    query,
+    sort,
+    randomSeed,
+    revision,
+    downloadRevision,
+    inboxSince,
+    ocrText.revision,
+  ]);
   let downloadsByTweet = new Map(),
     cursorOperations = 0,
     downloadRowsRead = 0,
@@ -1225,6 +1243,7 @@ async function scanSortedLibraryPage(database, message, settings, control) {
             downloads: downloadsByTweet.get(String(post.id)) || [],
             inboxSince,
             randomOrder: stableRandomOrder(String(post.id), randomSeed),
+            ocrText: ocrText.map?.get(String(post.id)),
           })
         : globalThis.XVaultLibrarySearch.projectRankPost(post, index, {
             randomOrder: stableRandomOrder(String(post.id), randomSeed),
@@ -1410,6 +1429,7 @@ async function executeLibraryPage(message = {}, control = { cancelled: false }) 
     if (control.cancelled) return { ok: true, cancelled: true, rows: [] };
     const compiled = globalThis.XVaultLibrarySearch.compileQuery(query),
       needsDownloads = globalThis.XVaultLibrarySearch.usesRuleKind(compiled, ['downloaded', 'missing', 'size']),
+      ocrText = await ocrTextFor(compiled),
       queryPlanningMs = performance.now() - planStarted;
     if (!['new', 'old'].includes(sort)) {
       const pageReadStarted = performance.now(),
@@ -1442,7 +1462,10 @@ async function executeLibraryPage(message = {}, control = { cancelled: false }) 
       cancelled: () => control.cancelled,
       match: (post, download) => {
         if (!query) return true;
-        const projection = globalThis.XVaultLibrarySearch.projectPost(post, 0, { inboxSince: settings.inboxSince });
+        const projection = globalThis.XVaultLibrarySearch.projectPost(post, 0, {
+          inboxSince: settings.inboxSince,
+          ocrText: ocrText.map?.get(String(post.id)),
+        });
         if (download) {
           projection.downloaded = download.downloaded;
           projection.missing = download.missing;
