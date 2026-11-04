@@ -1459,6 +1459,7 @@ function sync() {
     if (e.type === 'checkbox') e.checked = !!v;
     else if (v != null) e.value = String(v);
   });
+  window.XVaultLibrarySearch?.setCalendarTimeZone?.(settings.calendarTimeZone);
   $('#capture').checked = settings.captureWhileBrowsing !== false;
   $('#runMirror').checked = !!settings.fullMirrorMode;
   $('#collectionHandles').value = (settings.profileCollections || []).join('\n');

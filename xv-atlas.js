@@ -183,7 +183,7 @@
       line = root?.querySelector('#xaSummary');
     if (!line || !data) return;
     line.textContent = data.total
-      ? `${count(data.total)} posts from ${count(data.authorsTotal)} people · archiving since ${dateText(data.range?.firstArchived)} · counted locally in ${count(data.computeMs || 0)} ms`
+      ? `${count(data.total)} posts from ${count(data.authorsTotal)} people · archiving since ${dateText(data.range?.firstArchived)} · ${state.refreshing ? 'updating in the background…' : `counted locally in ${count(data.computeMs || 0)} ms`} · days in ${data.timeZone === 'utc' ? 'UTC' : 'local time'}`
       : 'Nothing archived yet';
   }
 
@@ -202,7 +202,9 @@
         const first = !state.data;
         state.data = result.insights;
         state.loadedAt = Date.now();
-        state.stale = false;
+        // A stale result is last session's numbers; fresh ones arrive via 'xvault-insights'.
+        state.stale = !!result.insights.stale;
+        state.refreshing = !!result.insights.stale;
         summary();
         if (!shown()) state.rendered = '';
         else if (!quiet || state.view === 'overview' || state.view === 'calendar') {
@@ -285,10 +287,16 @@
   }
 
   /* ───────── Overview ───────── */
+  // "Today" in the same calendar the statistics were bucketed in (local time or UTC).
+  function todayKey() {
+    if (state.data?.timeZone === 'utc') return isoDay(Date.now());
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }
   function recent(days, span) {
-    const now = Date.now();
+    const today = Date.parse(`${todayKey()}T00:00:00Z`);
     let total = 0;
-    for (let offset = 0; offset < span; offset++) total += days?.[isoDay(now - offset * DAY)] || 0;
+    for (let offset = 0; offset < span; offset++) total += days?.[isoDay(today - offset * DAY)] || 0;
     return total;
   }
   const kpi = (label, value, note) =>
@@ -626,7 +634,8 @@ ${data.topLiked?.length ? `<section class="xa-section"><header class="xa-section
     const field = state.calField,
       days = data.days?.[field] || {};
     const years = [...new Set(Object.keys(days).map(key => key.slice(0, 4)))].filter(year => year >= '2006').sort();
-    const toggle = `<div class="seg" role="radiogroup" aria-label="Calendar dates"><button type="button" role="radio" data-cal-field="archived" aria-checked="${field === 'archived'}">Archived</button><button type="button" role="radio" data-cal-field="posted" aria-checked="${field === 'posted'}">Posted</button></div>`;
+    const zone = data.timeZone === 'utc' ? 'utc' : 'local';
+    const toggle = `<div class="seg" role="radiogroup" aria-label="Calendar dates"><button type="button" role="radio" data-cal-field="archived" aria-checked="${field === 'archived'}">Archived</button><button type="button" role="radio" data-cal-field="posted" aria-checked="${field === 'posted'}">Posted</button></div><div class="seg" role="radiogroup" aria-label="Calendar days in"><button type="button" role="radio" data-cal-zone="local" aria-checked="${zone === 'local'}" title="Days and streaks follow this computer's time zone">Local</button><button type="button" role="radio" data-cal-zone="utc" aria-checked="${zone === 'utc'}" title="Days and streaks follow UTC">UTC</button></div>`;
     if (!years.length)
       return `<section class="xa-section"><header class="xa-section-head"><h2>Calendar</h2>${toggle}</header><p class="xa-quiet">No dated posts yet.</p></section>`;
     if (!years.includes(state.calYear)) state.calYear = years.at(-1);
@@ -779,22 +788,45 @@ ${data.topLiked?.length ? `<section class="xa-section"><header class="xa-section
     return `<button type="button" class="xa-person" data-person="${html(author.handle)}" data-raw="${html(author.raw || author.handle)}">${avatar(author.avatar, author.name || author.handle)}<span class="xa-person-name"><b>${html(author.name || author.raw || author.handle)}${author.verified ? ' <i class="xa-verified" title="Verified">✓</i>' : ''}</b><small>@${html(author.raw || author.handle)}</small></span><span class="xa-person-stats"><b>${count(author.count)}</b><small>${author.media ? `${count(author.media)} media · ` : ''}${html(relative(author.latest))}</small></span></button>`;
   }
 
+  // Windowed rendering: tiles are appended in pages (never re-rendered) and the next page loads
+  // automatically when the sentinel scrolls into view; off-screen tiles skip layout via
+  // content-visibility (xv-atlas.css).
+  let peopleObserver = null;
   function paintPeople(reset = false) {
     const grid = root?.querySelector('#xaPeopleGrid');
     if (!grid) return;
     if (reset) state.peopleLimit = 60;
     const list = filteredPeople(),
-      slice = list.slice(0, state.peopleLimit);
-    grid.innerHTML = slice.length
-      ? slice.map(personTile).join('')
-      : `<p class="xa-quiet">No one matches “${html(state.peopleQuery)}”.</p>`;
+      slice = list.slice(0, state.peopleLimit),
+      painted = Number(grid.dataset.painted || 0),
+      sameQuery = grid.dataset.query === `${state.peopleQuery}|${state.peopleSort}`;
+    if (!slice.length) grid.innerHTML = `<p class="xa-quiet">No one matches “${html(state.peopleQuery)}”.</p>`;
+    else if (!reset && sameQuery && painted && painted <= slice.length && grid.querySelector('.xa-person'))
+      grid.insertAdjacentHTML('beforeend', slice.slice(painted).map(personTile).join(''));
+    else grid.innerHTML = slice.map(personTile).join('');
+    grid.dataset.painted = String(slice.length);
+    grid.dataset.query = `${state.peopleQuery}|${state.peopleSort}`;
     const data = state.data;
     root.querySelector('#xaPeopleCount').textContent =
       `${count(list.length)} ${list.length === 1 ? 'person' : 'people'}${data.authorsTotal > data.authors.length ? ` · the ${count(data.authors.length)} most archived of ${count(data.authorsTotal)}` : ''}`;
-    const rest = list.length - slice.length;
-    root.querySelector('#xaPeopleMore').innerHTML = rest
+    const rest = list.length - slice.length,
+      more = root.querySelector('#xaPeopleMore');
+    more.innerHTML = rest
       ? `<button type="button" class="quiet" data-act="more-people">Show ${count(Math.min(120, rest))} more</button>`
       : '';
+    if ('IntersectionObserver' in window) {
+      peopleObserver ||= new IntersectionObserver(
+        entries => {
+          if (entries.some(entry => entry.isIntersecting) && root?.querySelector('[data-act="more-people"]')) {
+            state.peopleLimit += 120;
+            paintPeople();
+          }
+        },
+        { rootMargin: '600px 0px' }
+      );
+      peopleObserver.disconnect();
+      if (rest) peopleObserver.observe(more);
+    }
   }
 
   function ensureSheet() {
@@ -1341,7 +1373,7 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
   /* ───────── Events ───────── */
   function onClick(event) {
     const target = event.target.closest(
-      '[data-view],[data-q],[data-read],[data-person],[data-growth],[data-cal-field],[data-cal-year],[data-day],[data-sort],[data-act],[data-dup],[data-page-go]'
+      '[data-view],[data-q],[data-read],[data-person],[data-growth],[data-cal-field],[data-cal-zone],[data-cal-year],[data-day],[data-sort],[data-act],[data-dup],[data-page-go]'
     );
     if (!target || target.disabled) return;
     const set = target.dataset;
@@ -1358,6 +1390,14 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
       for (const button of root.querySelectorAll('[data-growth]'))
         button.setAttribute('aria-checked', String(button.dataset.growth === state.growth));
       return drawGrowth(true);
+    }
+    if (set.calZone && set.calZone !== (state.data?.timeZone === 'utc' ? 'utc' : 'local')) {
+      return call({ type: 'SET_SETTINGS', settings: { calendarTimeZone: set.calZone } }).then(() => {
+        if (typeof settings === 'object' && settings) settings.calendarTimeZone = set.calZone;
+        window.XVaultLibrarySearch?.setCalendarTimeZone?.(set.calZone);
+        toast(set.calZone === 'utc' ? 'Calendar days now follow UTC' : 'Calendar days now follow local time');
+        return load(true);
+      });
     }
     if (set.calField && set.calField !== state.calField) {
       state.calField = set.calField;
@@ -1457,6 +1497,14 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => shown() && load(false, { quiet: true }), 4000);
   }
+  try {
+    new BroadcastChannel('xvault-insights').onmessage = event => {
+      if (event.data?.type !== 'INSIGHTS_READY') return;
+      state.refreshing = false;
+      state.stale = true;
+      if (shown()) load(false, { quiet: true });
+    };
+  } catch {}
   try {
     new BroadcastChannel('xvault-library-changes').onmessage = changed;
     new BroadcastChannel('xvault-library-metadata').onmessage = changed;

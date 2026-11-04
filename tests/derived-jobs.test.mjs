@@ -127,3 +127,23 @@ test('perceptual hashes are stable under brightness shifts and differ for differ
   assert.ok(hamming(pHash(image), pHash(other)) > 12);
   assert.deepEqual(fromHex(toHex([0xdeadbeef, 0x01234567])), [0xdeadbeef, 0x01234567]);
 });
+
+test('calendar keys and day filters follow the time-zone setting', async () => {
+  const { dayKeyIn, dayStreaks } = await import('../vault-insights.mjs');
+  const { createRequire } = await import('node:module');
+  const search = createRequire(import.meta.url)('../library-search-core.js');
+  const stamp = Date.UTC(2026, 0, 1, 23, 30);
+  assert.equal(dayKeyIn(stamp, 'utc'), '2026-01-01');
+  const local = new Date(stamp);
+  assert.equal(
+    dayKeyIn(stamp, 'local'),
+    `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`
+  );
+  assert.equal(dayStreaks({ '2026-01-01': 1, '2026-01-02': 2 }, Date.UTC(2026, 0, 2, 12), 'utc').current, 2);
+  search.setCalendarTimeZone('local');
+  const [rule] = search.compileQuery('on:2026-03-08');
+  assert.equal(rule.start, new Date(2026, 2, 8).getTime());
+  assert.equal(rule.end, new Date(2026, 2, 9).getTime());
+  search.setCalendarTimeZone('utc');
+  assert.equal(search.compileQuery('on:2026-03-08')[0].start, Date.UTC(2026, 2, 8));
+});

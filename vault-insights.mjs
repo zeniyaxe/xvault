@@ -4,10 +4,16 @@
 
 const DAY = 86400000;
 
-const dayKey = stamp => {
+const pad = value => String(value).padStart(2, '0');
+// Calendar day keys (YYYY-MM-DD) in UTC or in the computer's local time zone (XVault 19 setting).
+export function dayKeyIn(stamp, timeZone = 'utc') {
   const value = Number(stamp);
-  return Number.isFinite(value) && value > 0 ? new Date(value).toISOString().slice(0, 10) : '';
-};
+  if (!Number.isFinite(value) || value <= 0) return '';
+  if (timeZone !== 'local') return new Date(value).toISOString().slice(0, 10);
+  const local = new Date(value);
+  return `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}`;
+}
+const dayKey = stamp => dayKeyIn(stamp, 'utc');
 const postedStamp = post => {
   const value = Date.parse(post?.createdAt || '');
   return Number.isFinite(value) ? value : 0;
@@ -88,6 +94,8 @@ function keepTop(list, item, score) {
 
 export function createInsightsAccumulator(options = {}) {
   const now = Number(options.now) || Date.now();
+  const timeZone = options.timeZone === 'local' ? 'local' : 'utc';
+  const keyOf = stamp => dayKeyIn(stamp, timeZone);
   const today = new Date(now);
   const monthDay = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const state = {
@@ -127,15 +135,16 @@ export function createInsightsAccumulator(options = {}) {
       handle = handleOf(post),
       media = Array.isArray(post.media) ? post.media : [],
       meta = post.userMeta || {};
-    const archivedDay = dayKey(archivedAt),
-      postedDay = dayKey(postedAt);
+    const archivedDay = keyOf(archivedAt),
+      postedDay = keyOf(postedAt);
     bump(state.archivedDays, archivedDay);
     bump(state.postedDays, postedDay);
     bump(state.archivedMonths, archivedDay.slice(0, 7));
     bump(state.postedMonths, postedDay.slice(0, 7));
     if (postedAt) {
       const local = new Date(postedAt);
-      state.rhythm[local.getDay()][local.getHours()]++;
+      if (timeZone === 'utc') state.rhythm[local.getUTCDay()][local.getUTCHours()]++;
+      else state.rhythm[local.getDay()][local.getHours()]++;
       if (!state.oldestPosted || postedAt < state.oldestPosted) state.oldestPosted = postedAt;
       if (postedAt > state.newestPosted) state.newestPosted = postedAt;
     }
@@ -251,6 +260,7 @@ export function createInsightsAccumulator(options = {}) {
     return {
       version: 1,
       computedAt: now,
+      timeZone,
       total: state.total,
       authorsTotal: state.authors.size,
       days: {
@@ -258,8 +268,8 @@ export function createInsightsAccumulator(options = {}) {
         posted: Object.fromEntries(state.postedDays),
       },
       streaks: {
-        archived: dayStreaks(Object.fromEntries(state.archivedDays), now),
-        posted: dayStreaks(Object.fromEntries(state.postedDays), now),
+        archived: dayStreaks(Object.fromEntries(state.archivedDays), now, timeZone),
+        posted: dayStreaks(Object.fromEntries(state.postedDays), now, timeZone),
       },
       months: {
         archived: Object.fromEntries([...state.archivedMonths].sort()),
@@ -306,8 +316,8 @@ export function buildInsights(posts, options = {}) {
   return accumulator.finish();
 }
 
-// Streaks over UTC day keys. A streak still counts as current if it ended yesterday.
-export function dayStreaks(days = {}, now = Date.now()) {
+// Streaks over calendar day keys. A streak still counts as current if it ended yesterday.
+export function dayStreaks(days = {}, now = Date.now(), timeZone = 'utc') {
   const keys = Object.keys(days)
     .filter(key => days[key] > 0)
     .sort();
@@ -324,8 +334,9 @@ export function dayStreaks(days = {}, now = Date.now()) {
     }
     previous = stamp;
   }
-  const todayKey = dayKey(now),
-    yesterdayKey = dayKey(now - DAY);
+  const todayKey = dayKeyIn(now, timeZone),
+    yesterdayKey =
+      timeZone === 'local' ? dayKeyIn(new Date(now).setDate(new Date(now).getDate() - 1), 'local') : dayKey(now - DAY);
   let current = 0;
   const last = keys.at(-1);
   if (last === todayKey || last === yesterdayKey) {

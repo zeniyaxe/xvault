@@ -1101,6 +1101,7 @@ async function getSettings() {
     raw =
       stored.settings && typeof stored.settings === 'object' && !Array.isArray(stored.settings) ? stored.settings : {},
     out = normalizeSettings(raw);
+  globalThis.XVaultLibrarySearch?.setCalendarTimeZone?.(out.calendarTimeZone);
   if (JSON.stringify(raw) !== JSON.stringify(out)) await chrome.storage.local.set({ settings: out });
   return out;
 }
@@ -1803,50 +1804,84 @@ const readIndexRows = (database, storeName, indexName, value, limit = 400) =>
     request.onsuccess = () => ok(request.result || []);
     request.onerror = () => no(request.error || new Error(`${indexName} lookup failed`));
   });
-async function vaultInsights(force = false) {
-  if (vaultInsightsPending) return vaultInsightsPending;
-  vaultInsightsPending = (async () => {
-    const database = await db();
-    try {
-      const [revision, total] = await Promise.all([
-        readLibraryRevision(database).catch(() => 0),
-        new Promise(ok => {
-          const request = database.transaction('tweets', 'readonly').objectStore('tweets').count();
-          request.onsuccess = () => ok(request.result);
-          request.onerror = () => ok(-1);
-        }),
-      ]);
-      const key = `${revision}:${total}`;
-      if (!force && vaultInsightsCache?.key === key && Date.now() - vaultInsightsCache.at < 15 * 60000)
-        return { ...vaultInsightsCache.data, cached: true };
-      const started = performance.now(),
-        accumulator = createInsightsAccumulator({ now: Date.now() });
-      let afterKey = null;
-      for (let guard = 0; guard < 100000; guard++) {
-        const page = await readLibraryPage(database, afterKey, 1000);
-        for (const row of page.rows) accumulator.add(row);
-        if (page.done || !page.rows.length) break;
-        afterKey = page.nextKey;
-      }
-      const [stored, downloads] = await Promise.all([
-        navigator.storage?.estimate?.().catch(() => null),
-        queueStats().catch(() => null),
-      ]);
-      const data = accumulator.finish({
-        revision,
-        storage: stored ? { usage: stored.usage || 0, quota: stored.quota || 0 } : null,
-        downloads,
-        computeMs: Math.round(performance.now() - started),
-      });
-      vaultInsightsCache = { key, at: Date.now(), data };
-      return data;
-    } finally {
-      database.close();
+// Atlas statistics. Stale-while-revalidate: the last result is persisted in xvault-derived/meta so a
+// cold service worker answers instantly, then recomputes in the background and broadcasts
+// INSIGHTS_READY on 'xvault-insights' when fresh numbers are available.
+async function vaultInsightsKey(database) {
+  const [revision, total, settings] = await Promise.all([
+    readLibraryRevision(database).catch(() => 0),
+    new Promise(ok => {
+      const request = database.transaction('tweets', 'readonly').objectStore('tweets').count();
+      request.onsuccess = () => ok(request.result);
+      request.onerror = () => ok(-1);
+    }),
+    getSettings(),
+  ]);
+  const timeZone = settings.calendarTimeZone === 'utc' ? 'utc' : 'local';
+  const zoneName = timeZone === 'local' ? Intl.DateTimeFormat().resolvedOptions().timeZone || 'local' : 'UTC';
+  return { revision, timeZone, key: `${revision}:${total}:${timeZone}:${zoneName}:${new Date().toDateString()}` };
+}
+async function computeVaultInsights() {
+  const database = await db();
+  try {
+    const { revision, timeZone, key } = await vaultInsightsKey(database);
+    const started = performance.now(),
+      accumulator = createInsightsAccumulator({ now: Date.now(), timeZone });
+    let afterKey = null;
+    for (let guard = 0; guard < 100000; guard++) {
+      const page = await readLibraryPage(database, afterKey, 1000);
+      for (const row of page.rows) accumulator.add(row);
+      if (page.done || !page.rows.length) break;
+      afterKey = page.nextKey;
     }
-  })().finally(() => {
-    vaultInsightsPending = null;
-  });
-  return vaultInsightsPending;
+    const [stored, downloads] = await Promise.all([
+      navigator.storage?.estimate?.().catch(() => null),
+      queueStats().catch(() => null),
+    ]);
+    const data = accumulator.finish({
+      revision,
+      storage: stored ? { usage: stored.usage || 0, quota: stored.quota || 0 } : null,
+      downloads,
+      computeMs: Math.round(performance.now() - started),
+    });
+    vaultInsightsCache = { key, at: Date.now(), data };
+    derived.store.putMany('meta', [{ key: 'insights', value: { key, at: Date.now(), data } }]).catch(() => {});
+    try {
+      new BroadcastChannel('xvault-insights').postMessage({ type: 'INSIGHTS_READY', key, at: Date.now() });
+    } catch {}
+    return data;
+  } finally {
+    database.close();
+  }
+}
+async function vaultInsights(force = false) {
+  if (vaultInsightsPending && force) return vaultInsightsPending;
+  const database = await db();
+  let current;
+  try {
+    current = await vaultInsightsKey(database);
+  } finally {
+    database.close();
+  }
+  if (!force && vaultInsightsCache?.key === current.key && Date.now() - vaultInsightsCache.at < 15 * 60000)
+    return { ...vaultInsightsCache.data, cached: true };
+  if (!vaultInsightsCache && !force) {
+    const persisted = (await derived.store.getMany('meta', ['insights']).catch(() => new Map())).get('insights')?.value;
+    if (persisted?.data) vaultInsightsCache = { ...persisted, at: persisted.key === current.key ? Date.now() : 0 };
+    if (persisted?.key === current.key) return { ...persisted.data, cached: true };
+  }
+  const refresh = () => {
+    vaultInsightsPending ||= computeVaultInsights().finally(() => {
+      vaultInsightsPending = null;
+    });
+    return vaultInsightsPending;
+  };
+  // Serve the previous numbers immediately (marked stale) and refresh in the background.
+  if (!force && vaultInsightsCache?.data && vaultInsightsCache.data.timeZone === current.timeZone) {
+    refresh().catch(() => {});
+    return { ...vaultInsightsCache.data, cached: true, stale: true };
+  }
+  return refresh();
 }
 async function threadFor(id) {
   if (!/^\d{1,32}$/.test(String(id || ''))) throw Error('Thread lookup requires a post ID');

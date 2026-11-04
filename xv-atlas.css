@@ -1297,3 +1297,13 @@ html.xv-calm .xa-ring {
   animation: none !important;
   stroke-dashoffset: 0;
 }
+
+/* Large archives: let the browser skip layout/paint for off-screen tiles and groups. */
+.xa-person {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+.xa-group {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
+}
