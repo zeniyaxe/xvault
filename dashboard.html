@@ -41,6 +41,7 @@
     <script defer src="xv-search-assist.js"></script>
     <script defer src="xv-background-jobs.js"></script>
     <script defer src="xv-library3.js"></script>
+    <script defer src="xv-vault.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script>
   </head>
@@ -58,7 +59,9 @@
           <button class="nav" data-page="home" data-pages="home archive sessions"><span>Capture</span></button>
           <button class="nav" data-page="media"><span>Downloads</span></button>
           <button class="nav" data-page="studio"><span>Tools</span></button>
-          <button class="nav" data-page="health" data-pages="health integrity activity"><span>System</span></button>
+          <button class="nav" data-page="health" data-pages="health integrity activity vault">
+            <span>System</span>
+          </button>
         </nav>
         <div class="rail-spacer"></div>
         <button class="nav" data-page="settings"><span>Settings</span></button>
@@ -626,7 +629,7 @@
                 <button id="snapshotNow">Create snapshot</button>
                 <button id="manifestNow">Generate manifest</button>
               </div>
-              <input id="recoveryFile" type="file" accept=".jsonl,.ndjson,application/x-ndjson" hidden />
+              <input id="recoveryFile" type="file" accept=".jsonl,.ndjson,.xvenc,application/x-ndjson" hidden />
               <div id="recoveryStatus" class="xv-recovery-status" role="status" aria-live="polite"></div>
               <button id="recoveryConflictExport" type="button" hidden>Export conflict evidence</button>
               <button id="recoveryAssetExport" type="button" hidden>Export recovered file references</button>
@@ -647,6 +650,7 @@
             <div id="activityList" class="activitylist"></div>
           </section>
         </section>
+        <section class="page" id="page-vault" aria-label="Storage and backups"></section>
         <section class="page" id="page-settings">
           <h2 class="xv-sr-only">Settings</h2>
           <div class="settings-shell">
@@ -1192,6 +1196,11 @@
                         <span>Concurrent downloads</span>
                         <input type="number" data-setting="maxConcurrentDownloads" />
                       </label>
+                      <label class="check"
+                        ><input type="checkbox" data-setting="adaptiveDownloads" /><span
+                          >Adaptive parallelism — back off when X's media servers push back</span
+                        ></label
+                      >
                       <label class="field">
                         <span>Retries</span>
                         <input type="number" data-setting="downloadRetries" />
