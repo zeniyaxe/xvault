@@ -2,6 +2,71 @@
 
 This file is the hand-off document: another session should be able to resume from here.
 
+## v21 "Forge" pass
+
+Branch: `xvault-21-forge` (from `main` after PRs #1–#3 were merged). Version 21.0.0. Goal: close the v20 gaps, then
+capture quality, downloads and search/discovery (the four-part plan), with everything that talks to X or other sites
+opt-in.
+
+| Area | Change |
+| --- | --- |
+| Router | All 115 legacy `if (m.type === …)` blocks became `route(type, handler)` registrations (converted mechanically via the AST, then reviewed). `route()` derives `allow` from `isContentAction(type)` (`message-boundary.mjs`): content-script actions accept `[DESKTOP, CONTENT]`, everything else `[DESKTOP]`. The `onMessage` listener is now authorize → `router.dispatch` → `unknownMessage`. Removed `GET_ALL`, `GET_LIBRARY_ROWS`, `GET_LIBRARY_CHUNK`, `CLEAR_ALL`. `tests/router-migration.test.mjs` checks there is no switch left and every type has a policy. |
+| Archive quality | `library-search-core.js` `postQuality()` (score + missing list, `INCOMPLETE_BELOW = 70`). `sw/forge-candidates.mjs` (quality report, repair/gap/check candidates, thread gaps, change summary), `sw/archive-quality-service.mjs` (`QUALITY_*`, `AVAILABILITY_SET`, `REVISIONS_FOR`), `sw/status-visitor.mjs` (one reused background tab, per-kind daily caps, `patchJob` writes onto fresh state, pause/resume/cancel/recover, history of 30). Results are read back from the archive: `lastSeenAt` after the visit = seen, `availability.checkedAt` after the visit = gone. |
+| Change tracking | `library-capture.mjs` keeps `revisionCount`/`textRevisionCount`/`lastRevisionAt` and marks live observations available; `library-storage.mjs` `patchLibrarySystemFields` (only system fields) and a one-time `readRevisionCounters` backfill. `revision-diff.js` (LCS word diff with prefix/suffix trimming and a 4M-cell cap, `changedFields`, `timeline`) drives the Reader timeline. |
+| Post extras | `x-post-extras.js` (content script + tests): polls, cards (incl. `unified_card`), Spaces, Community Notes, edit control, media alt/duration/aspect, tombstones and focal-post errors (`TweetDetail`/`TweetResultByRestId` only); `validExtras`/`validAvailability` at the boundary; `STORE_AVAILABILITY`. Badges are booleans only (`archive-indicators.mjs`). |
+| Watch lists / snapshots | `sw/watch-lists.mjs` (`chrome.alarms`, due lists, daily cap, log). `sw/link-snapshots.mjs` (optional host permission, `credentials: 'omit'`, streamed size cap, skips X hosts, loopback/private/link-local/CGNAT/`.local`/single-label hosts and redirects to them) → `xvault-derived` v3 `snapshots` store. |
+| Downloads | `sw/download-policy.mjs`: `pickVariant`/`applyVideoQuality` (+ per-rule quality from `parseVideoQualityRules`, evaluated with the rule matcher), `holdReason` (window, Data Saver, cellular, 2G), `createBandwidthGovernor` (pauses active downloads to keep the average under the cap — `chrome.downloads` cannot throttle), `hostHealth`, `duplicateReport` (+ `DUPLICATE_RECLAIM` via `downloads.removeFile`, `reclaimedAt`), `integrityDue` (alarm, optional re-download). `filename-template.js` (tokens, preview, `planRenames` conflict-safe, in order) + `RENAME_PLAN/RENAME_RECORD`; the dashboard writes `sh`/`ps1` scripts. |
+| Import | `x-archive-import.mjs`: `noteFromArchive`/`attachNotes` (±10 min, prefix match, closest first), `deletedFromArchive`, community tweets, `matchMediaFiles` (folder + file-name match against archived media), `zipEntryBlob` (stored entries are Blob slices). `xv-vault.js` saves ZIP media through the download queue with page-owned `blob:` URLs in batches (the tab must stay open). DMs are skipped and counted. |
+| Search | New rule kinds `numeric`, `flag`, `contains`, `cluster`, `label(State)`, `availability`, `aspect`, `weekday`, `hour`, `fuzzy`, `asof` range; `queryNeeds()` tells the worker which joins (archived ids, snapshot ids, cluster ids, sort values) to load; `SORT_VALUES` precompute one number per row. `sw/search-insights.mjs`: `SEARCH_SUGGEST` (vocabulary + edit distance), `SAVED_VIEW_ALERTS/VISITED` (ids from `XVaultCollections.normalizeDefinition`), clusters. `xv-search-assist.js` knows every new key/value; `xv-forge-search.js` adds did-you-mean, history/time travel and the blend slider. |
+| Meaning | `sw/semantic.mjs` v2 tokenizer: diacritic folding, Cyrillic/Greek transliteration aliases, multilingual stopwords, surface forms for suggestions (`SEMANTIC_VERSION = 2`; v1 indexes are rebuilt on first use); `nearestTerms`. `sw/clusters.mjs`: k-means++ on a sample, mini-batch updates over the int8 vectors, distinctive-word labels, `carryNames` (≥ 0.4 Jaccard). |
+| UI | `xv-forge.js` + `xv-forge.css`: Capture › Quality, Downloads › Files & health, Atlas › Topics, capture presets/ETA/run history, filename and video-rule previews. Reader: extras, availability, revision timeline, snapshots. |
+| Firefox / CI | `sw/ocr.mjs` `createOcrHost` (offscreen on Chrome/Edge; in-page engine via `offscreen-ocr.js` → `globalThis.XVaultOcrEngine` on a Firefox event page). `manifest-targets` adds `data_collection_permissions`. CI `firefox` job: build + `web-ext lint` (errors fail). `release.yml`: all three zips, `.sha256` + `SHA256SUMS.txt`, notes from CHANGELOG. |
+
+### Decisions (v21)
+
+- **Nothing new talks to X or other sites unless you turn it on.** Repair, gap filling, still-on-X checks, watch
+  lists and link snapshots are opt-in or explicit buttons, capped per day, and visit pages in the user's own
+  signed-in X tab session instead of calling private APIs. Results are inferred from what normal capture records.
+- **Availability needs an explicit signal.** Only tombstones or "No status found"-style errors on the focal post of
+  a status page mark a post gone; timeouts, empty timelines and network errors leave it "not shown".
+- **Renames are scripts, not moves.** Chrome cannot move or rename finished downloads, so XVault plans the moves
+  (never overwriting) and writes a script; records change only after the user confirms they ran it.
+- **Bandwidth caps by duty cycling.** `chrome.downloads` cannot throttle, so the governor pauses and resumes active
+  downloads to hold the average rate; short bursts above the cap are expected.
+- **`asof:` is about the archive, not X.** It filters by when posts were archived and shows the current archived
+  copy (revisions are shown in the Reader), so the search is cheap and needs no snapshot store.
+- **No neural model yet.** Optional on-device embeddings (item 4.3) were deferred: the size/runtime cost and the
+  extension CSP work did not fit this pass; the multilingual Random Indexing upgrade covers part of the need.
+- **Router: content actions stay narrow.** The allow-list is derived from the same `isContentAction` the boundary
+  already used, so the migration cannot widen what an x.com page can ask for.
+
+### Verification log (v21)
+
+| Check | Result |
+| --- | --- |
+| `npm run verify` (structure check, ESLint, unit tests, Prettier) | pass: 96 source files, ESLint 0 errors (10 pre-existing warnings), 140/140 tests |
+| `npm run e2e` (all pages at 4 viewports, seeded Library) | pass |
+| `node scripts/e2e-a11y.mjs` (axe-core) | 28 surfaces, 0 violations (new: Quality, Files, Atlas Topics, Library history menu + blend slider) |
+| Local Forge smoke (seeded Library, 49 checks) | pass: extras and edit capture, new filters/sorts, Reader history diff, availability, Quality, Files, rename plan, host health, duplicates, did-you-mean, time travel, history menu, blend slider, alerts, topics, filename and video-rule previews |
+| `npm run build:all` | Chrome, Edge and Firefox zips built (177 files each) |
+| `web-ext lint` on the Firefox build | 0 errors (warnings are minified-code and `innerHTML` notices) |
+
+Not verified: live X (new capture fields, tombstones, visit and watch queues, badges), a real X-issued archive
+(the importer was tested on synthetic archives, including ZIP media), a real Firefox, the Edge store, and screen
+readers.
+
+### Remaining after v21
+
+1. Run the experimental Firefox build in a real Firefox (event page OCR, downloads, sidebar) and fix what breaks.
+2. Optional neural embeddings (opt-in, local model, off by default) as a second meaning engine.
+3. Test the new capture paths against live X: extras on real GraphQL payloads, tombstones, visit and watch queues,
+   badges; and the importer on a real (anonymised) X-issued archive, including ZIP media.
+4. Keep replacing regex-based source tests with behavioural ones (some structural tests remain by design), and
+   delete superseded `dashboard.js` code paths.
+5. Hard links for duplicates via the helper (Chrome can only delete the extra copy); renames through the helper
+   instead of scripts.
+6. Year in Review export and a reply/quote graph; OCR languages.
+
 ## v20 "Meridian" pass
 
 Branch: `xvault-20-transformation` (from `xvault-19-horizon` @ d0a1152, PR #2 not yet merged, so the v20 PR stacks on
