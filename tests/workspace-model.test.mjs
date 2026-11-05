@@ -67,7 +67,7 @@ for (const key of ['safeMode', 'motionLevel', 'helperAuthToken', 'lastLibraryQue
 assert.deepEqual(api.toolbar(['export', 'export', 'bad', 'inbox']), ['export', 'inbox']);
 assert.deepEqual(api.toolbar([]), [], 'empty custom toolbar remains intentional');
 assert.ok(!('theme' in api.snapshot({ theme: '<script>' })));
-assert.equal(api.snapshot({ inspectorPixels: 5000 }).inspectorPixels, 600);
+assert.equal(api.snapshot({ inspectorPixels: 5000 }).inspectorPixels, 880);
 assert.doesNotThrow(
   () => api.normalizeList([{ id: 'broken', name: 'Recovered', values: null }]),
   'a malformed saved layout must not block application startup'

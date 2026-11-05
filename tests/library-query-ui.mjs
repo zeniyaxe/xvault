@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import { compactSource } from './source-text.mjs';
 
 const require = createRequire(import.meta.url);
 const playwright = require(process.argv[2] || 'playwright');
-const background = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8');
+const background = compactSource(fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8'));
 assert.match(
   background,
   /r\.onblocked=\(\)=>\{if\(settled\)return;settled=true;no\(new Error\('XVault storage is waiting for another open XVault tab\./,
@@ -12,7 +13,7 @@ assert.match(
 );
 assert.match(
   background,
-  /if\(settled\)\{database\.close\(\);return\}/,
+  /if\(settled\)\{database\.close\(\);return;?\}/,
   'a database connection that opens after the UI received a blocked error must be closed'
 );
 const browser = await playwright.chromium.launch({
@@ -158,6 +159,9 @@ try {
   );
   const matching = await frame.locator('#list .tweet').evaluateAll(nodes => nodes.map(node => node.dataset.id));
   assert.ok(matching.every(id => Number(id) % 3 === 0));
+  // Library 5 keeps loading as the reader scrolls; turn that off so the footer's page buttons stay put.
+  await frame.evaluate(() => save({ libraryAutoLoad: false }, false));
+  const loadedIds = await frame.evaluate(() => window.XVaultLibraryRows().map(row => String(row.id)));
   const next = frame.locator('#libraryNext');
   if ((await next.isVisible()) && !(await next.isDisabled())) {
     await next.click();
@@ -188,7 +192,11 @@ try {
           errors,
         })
       );
-    assert.equal(nextIds.filter(id => matching.includes(id)).length, 0, 'stable cursor pages must not duplicate IDs');
+    assert.equal(
+      nextIds.filter(id => matching.includes(id) || loadedIds.includes(id)).length,
+      0,
+      'stable cursor pages must not duplicate IDs'
+    );
   }
   // Give the mock enough known favorite results to place the edited fixture
   // immediately outside the first page while keeping its state deterministic.
@@ -204,7 +212,7 @@ try {
         window.XVaultLibraryQueryState?.().loaded &&
         window.XVaultLibraryQueryState?.().loadedFor === window.XVaultLibraryQueryState?.().queryKeyNow &&
         !document.querySelector('#list').hasAttribute('aria-busy') &&
-        document.querySelectorAll('#list .tweet').length === 50
+        window.XVaultLibraryRows().length === 50
     );
   } catch (error) {
     console.log(
@@ -234,9 +242,10 @@ try {
     channel.postMessage({ ids: [id] });
     channel.close();
   });
-  await frame.locator('#list .tweet[data-id="900510"]').waitFor({ state: 'attached' });
+  // Library 5 mounts cards in windows, so look for the record in the loaded results rather than the DOM.
+  await frame.waitForFunction(() => window.XVaultLibraryRows().some(row => String(row.id) === '900510'));
   const metadataSync = await frame.evaluate(() => ({
-    ids: [...document.querySelectorAll('#list .tweet')].map(node => node.dataset.id),
+    ids: window.XVaultLibraryRows().map(row => String(row.id)),
     metadataReads: window.__xvMessageLog.filter(type => type === 'GET_LIBRARY_METADATA').length,
     queryCalls: window.__xvQueryCalls.length,
   }));

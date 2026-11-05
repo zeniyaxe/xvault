@@ -15,6 +15,8 @@
     <script defer src="inspector-notes.js"></script>
     <script defer src="note-recovery.js"></script>
     <script defer src="library-trash.js"></script>
+    <script defer src="xv-avatars.js"></script>
+    <script defer src="library-feed.js"></script>
     <script defer src="library-workspace.js"></script>
     <script defer src="xv-motion.js"></script>
     <script defer src="xv-motion-plus.js"></script>
@@ -46,6 +48,7 @@
     <script defer src="xv-keystone.js"></script>
     <script defer src="xv-downloads.js"></script>
     <script defer src="xv-library4.js"></script>
+    <script defer src="xv-capture-inbox.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script>
   </head>
@@ -285,6 +288,35 @@
               <span id="pipelineState" class="savebadge">IDLE</span>
             </section>
           </div>
+          <section class="panel capture-inbox" id="captureInboxPanel" aria-labelledby="captureInboxTitle">
+            <div class="panelhead">
+              <h3 id="captureInboxTitle">Capture inbox</h3>
+              <span id="captureInboxState" class="pill">Idle</span>
+            </div>
+            <p class="capture-inbox-lede">
+              Single posts sent from your phone (Share → XVault, or Paste in Phone Remote) or pasted here. XVault opens
+              each one in a single background X tab, archives it and closes nothing else.
+            </p>
+            <form id="captureInboxForm" class="capture-inbox-form">
+              <label class="field"
+                ><span>Post links</span
+                ><textarea
+                  id="captureInboxInput"
+                  rows="2"
+                  spellcheck="false"
+                  placeholder="https://x.com/name/status/123 — paste several at once"
+                ></textarea>
+              </label>
+              <button class="primary" id="captureInboxAdd" type="submit">Add to inbox</button>
+            </form>
+            <div class="capture-inbox-tools">
+              <span id="captureInboxSummary" class="capture-inbox-summary" aria-live="polite"></span>
+              <button id="captureInboxPause" type="button">Pause</button>
+              <button id="captureInboxRetry" type="button" hidden>Retry problems</button>
+              <button id="captureInboxClear" class="quiet" type="button" hidden>Clear finished</button>
+            </div>
+            <ol id="captureInboxList" class="capture-inbox-list" aria-labelledby="captureInboxTitle"></ol>
+          </section>
           <section class="panel">
             <div class="panelhead">
               <h3>Profile collections</h3>
@@ -304,143 +336,230 @@
         <section class="page" id="page-atlas" aria-label="Atlas"></section>
         <section class="page" id="page-library">
           <h2 class="xv-sr-only">Library</h2>
-          <div class="lib-main">
-            <header class="lib-toolbar libraryCommand">
-              <div class="searchWrap">
-                <svg
-                  class="searchIcon"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.65"
-                  stroke-linecap="round"
+          <!-- Library 5.0: library-workspace.js inserts the sidebar (#libraryDestinations) before .lib-main and moves the
+               Inspector (#detailsDrawer) after it. .lib-main is the single scroll owner of the page. -->
+          <div class="lib-main" id="libraryScroll">
+            <header class="lib5-head" id="libraryHead">
+              <div class="lib5-row lib5-row-main">
+                <button
+                  type="button"
+                  id="librarySideToggle"
+                  class="lib5-iconbtn"
+                  aria-controls="libraryDestinations"
+                  aria-expanded="true"
+                  title="Show or hide the sidebar (backslash key)"
+                  data-xv-icon="sidebar"
                 >
-                  <circle cx="10.5" cy="10.5" r="6.5" />
-                  <path d="m16 16 5 5" />
-                </svg>
-                <input
-                  id="search"
-                  type="search"
-                  autocomplete="off"
-                  spellcheck="false"
-                  placeholder="Search your archive"
-                />
-                <button id="clearSearch" type="button" class="quiet">×</button>
-                <details class="menu search-help">
-                  <summary aria-label="Search syntax help" title="Search syntax">?</summary>
-                  <div class="menu-pop booruHelp"></div>
-                </details>
-              </div>
-              <div class="lib-controls">
-                <div class="seg" id="libraryLayout" role="radiogroup" aria-label="Layout">
-                  <button type="button" role="radio" data-layout="timeline" title="Timeline: read posts in a column">
-                    <span class="sr">Timeline</span>
-                  </button>
-                  <button type="button" role="radio" data-layout="cards" title="Cards">
-                    <span class="sr">Cards</span>
-                  </button>
-                  <button type="button" role="radio" data-layout="gallery" title="Grid: even tiles">
-                    <span class="sr">Grid</span>
-                  </button>
-                  <button type="button" role="radio" data-layout="masonry" title="Wall: natural proportions">
-                    <span class="sr">Wall</span>
-                  </button>
-                  <button type="button" role="radio" data-layout="compact" title="List: one row per post">
-                    <span class="sr">List</span>
-                  </button>
-                  <button type="button" role="radio" data-layout="table" title="Table: sortable columns">
-                    <span class="sr">Table</span>
-                  </button>
-                </div>
-                <label class="tile-size" title="Tile size"
-                  ><span class="sr">Tile size</span
-                  ><input id="libraryTile" type="range" min="150" max="440" step="10" value="260"
-                /></label>
-                <select id="sort" aria-label="Sort">
-                  <option value="new">Newest archived</option>
-                  <option value="old">Oldest archived</option>
-                  <option value="likes">Most liked</option>
-                  <option value="views">Most viewed</option>
-                  <option value="bookmarks">Most bookmarked</option>
-                  <option value="reposts">Most reposted</option>
-                  <option value="replies">Most replied</option>
-                  <option value="media">Most media</option>
-                  <option value="author">Author A–Z</option>
-                  <option value="relevance">Best match (keywords + meaning)</option>
-                  <optgroup label="Posted">
-                    <option value="posted">Newest posted</option>
-                    <option value="posted-old">Oldest posted</option>
-                    <option value="thread">Conversation order</option>
-                  </optgroup>
-                  <optgroup label="Engagement">
-                    <option value="engagement">Engagement rate</option>
-                    <option value="quotes">Most quoted</option>
-                    <option value="highlights">Most highlights</option>
-                  </optgroup>
-                  <optgroup label="Content">
-                    <option value="longest">Longest text</option>
-                    <option value="shortest">Shortest text</option>
-                    <option value="duration">Longest video</option>
-                    <option value="resolution">Highest resolution</option>
-                  </optgroup>
-                  <optgroup label="Archive">
-                    <option value="quality">Most complete</option>
-                    <option value="quality-low">Least complete</option>
-                    <option value="edited">Most edited</option>
-                    <option value="seen">Recently seen on X</option>
-                    <option value="checked-old">Longest since checked</option>
-                    <option value="read-recent">Recently read</option>
-                  </optgroup>
-                </select>
-                <select id="libraryView" class="sr" tabindex="-1" aria-hidden="true">
-                  <option value="timeline">Timeline</option>
-                  <option value="cards">Cards</option>
-                  <option value="gallery">Grid</option>
-                  <option value="masonry">Wall</option>
-                  <option value="compact">List</option>
-                  <option value="table">Table</option>
-                </select>
-                <details class="menu" id="libraryTools">
-                  <summary aria-label="Library actions" title="Library actions">
-                    <span class="sr">Library actions</span>
-                  </summary>
-                  <div class="menu-pop" id="libraryToolsBody">
-                    <button id="load" type="button">Reload library</button>
-                    <button id="browseTrash" type="button">Browse Trash</button>
-                    <button id="recoverNoteDrafts" type="button">Recover note drafts</button>
-                    <button id="shuffleLibrary" type="button">Shuffle</button>
-                    <button id="surpriseMe" type="button">Open a random post</button>
-                    <hr />
-                    <button id="integrityQuick" type="button">Scan integrity</button>
-                    <button id="manifestQuick" type="button">Create manifest</button>
-                    <button id="csv" type="button">Export CSV</button>
-                    <button id="exportMarkdown" type="button">Export Markdown (Obsidian)</button>
-                    <button id="exportHtml" type="button">Export offline HTML</button>
-                    <button id="exportThreadsMarkdown" type="button">Export threads (Markdown)</button>
-                    <button id="exportThreadsHtml" type="button">Export threads (HTML)</button>
-                    <button id="remoteQuick" type="button">Browse on phone</button>
-                    <hr />
-                    <button id="clearLibrary" type="button" class="danger">Clear library…</button>
+                  <span class="sr">Sidebar</span>
+                </button>
+                <div class="lib5-title" id="libraryTitleSlot"></div>
+                <div class="lib-toolbar libraryCommand">
+                  <div class="searchWrap">
+                    <svg
+                      class="searchIcon"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.65"
+                      stroke-linecap="round"
+                    >
+                      <circle cx="10.5" cy="10.5" r="6.5" />
+                      <path d="m16 16 5 5" />
+                    </svg>
+                    <input
+                      id="search"
+                      type="search"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="Search your archive"
+                    />
+                    <button id="clearSearch" type="button" class="quiet">×</button>
+                    <details class="menu search-help">
+                      <summary aria-label="Search syntax help" title="Search syntax">?</summary>
+                      <div class="menu-pop booruHelp"></div>
+                    </details>
                   </div>
-                </details>
+                </div>
+                <div class="lib-controls">
+                  <div class="seg" id="libraryLayout" role="radiogroup" aria-label="Layout">
+                    <button type="button" role="radio" data-layout="timeline" title="Feed: one reading column">
+                      <span class="sr">Feed</span>
+                    </button>
+                    <button type="button" role="radio" data-layout="cards" title="Cards: a fluid multi-column grid">
+                      <span class="sr">Cards</span>
+                    </button>
+                    <button type="button" role="radio" data-layout="gallery" title="Grid: even media tiles">
+                      <span class="sr">Grid</span>
+                    </button>
+                    <button type="button" role="radio" data-layout="masonry" title="Wall: natural proportions">
+                      <span class="sr">Wall</span>
+                    </button>
+                    <button type="button" role="radio" data-layout="compact" title="List: one row per post">
+                      <span class="sr">List</span>
+                    </button>
+                    <button type="button" role="radio" data-layout="table" title="Table: sortable columns">
+                      <span class="sr">Table</span>
+                    </button>
+                  </div>
+                  <details class="menu lib5-view" id="libraryViewMenu">
+                    <summary title="Card style, media fit, width and tile size" data-xv-icon="sliders">
+                      <span class="lib5-label">View</span>
+                    </summary>
+                    <div class="menu-pop lib5-viewpop" role="group" aria-label="View options">
+                      <fieldset class="lib5-choice lib5-layouts" data-layout-choice>
+                        <legend>Layout</legend>
+                        <label
+                          ><input type="radio" name="libraryLayoutChoice" value="timeline" /><span>Feed</span></label
+                        >
+                        <label><input type="radio" name="libraryLayoutChoice" value="cards" /><span>Cards</span></label>
+                        <label
+                          ><input type="radio" name="libraryLayoutChoice" value="gallery" /><span>Grid</span></label
+                        >
+                        <label
+                          ><input type="radio" name="libraryLayoutChoice" value="masonry" /><span>Wall</span></label
+                        >
+                        <label
+                          ><input type="radio" name="libraryLayoutChoice" value="compact" /><span>List</span></label
+                        >
+                        <label><input type="radio" name="libraryLayoutChoice" value="table" /><span>Table</span></label>
+                      </fieldset>
+                      <fieldset class="lib5-choice" data-setting="libraryCardStyle">
+                        <legend>Card style</legend>
+                        <label
+                          ><input type="radio" name="libraryCardStyle" value="compact" /><span>Compact</span></label
+                        >
+                        <label
+                          ><input type="radio" name="libraryCardStyle" value="comfortable" /><span
+                            >Comfortable</span
+                          ></label
+                        >
+                        <label
+                          ><input type="radio" name="libraryCardStyle" value="media" /><span>Media first</span></label
+                        >
+                        <label
+                          ><input type="radio" name="libraryCardStyle" value="detailed" /><span>Detailed</span></label
+                        >
+                      </fieldset>
+                      <fieldset class="lib5-choice" data-setting="libraryMediaFit">
+                        <legend>Media</legend>
+                        <label><input type="radio" name="libraryMediaFit" value="cover" /><span>Fill</span></label>
+                        <label
+                          ><input type="radio" name="libraryMediaFit" value="contain" /><span>Whole image</span></label
+                        >
+                      </fieldset>
+                      <fieldset class="lib5-choice" data-setting="libraryFeedWidth">
+                        <legend>Feed width</legend>
+                        <label
+                          ><input type="radio" name="libraryFeedWidth" value="reading" /><span>Reading</span></label
+                        >
+                        <label><input type="radio" name="libraryFeedWidth" value="wide" /><span>Wide</span></label>
+                        <label><input type="radio" name="libraryFeedWidth" value="full" /><span>Full</span></label>
+                      </fieldset>
+                      <label class="tile-size"
+                        ><span>Column width</span
+                        ><input id="libraryTile" type="range" min="150" max="440" step="10" value="260"
+                      /></label>
+                    </div>
+                  </details>
+                  <select id="sort" aria-label="Sort">
+                    <option value="new">Newest archived</option>
+                    <option value="old">Oldest archived</option>
+                    <option value="likes">Most liked</option>
+                    <option value="views">Most viewed</option>
+                    <option value="bookmarks">Most bookmarked</option>
+                    <option value="reposts">Most reposted</option>
+                    <option value="replies">Most replied</option>
+                    <option value="media">Most media</option>
+                    <option value="author">Author A–Z</option>
+                    <option value="relevance">Best match (keywords + meaning)</option>
+                    <optgroup label="Posted">
+                      <option value="posted">Newest posted</option>
+                      <option value="posted-old">Oldest posted</option>
+                      <option value="thread">Conversation order</option>
+                    </optgroup>
+                    <optgroup label="Engagement">
+                      <option value="engagement">Engagement rate</option>
+                      <option value="quotes">Most quoted</option>
+                      <option value="highlights">Most highlights</option>
+                    </optgroup>
+                    <optgroup label="Content">
+                      <option value="longest">Longest text</option>
+                      <option value="shortest">Shortest text</option>
+                      <option value="duration">Longest video</option>
+                      <option value="resolution">Highest resolution</option>
+                    </optgroup>
+                    <optgroup label="Archive">
+                      <option value="quality">Most complete</option>
+                      <option value="quality-low">Least complete</option>
+                      <option value="edited">Most edited</option>
+                      <option value="seen">Recently seen on X</option>
+                      <option value="checked-old">Longest since checked</option>
+                      <option value="read-recent">Recently read</option>
+                    </optgroup>
+                  </select>
+                  <select id="libraryView" class="sr" tabindex="-1" aria-hidden="true">
+                    <option value="timeline">Feed</option>
+                    <option value="cards">Cards</option>
+                    <option value="gallery">Grid</option>
+                    <option value="masonry">Wall</option>
+                    <option value="compact">List</option>
+                    <option value="table">Table</option>
+                  </select>
+                  <details class="menu" id="libraryTools">
+                    <summary aria-label="Library actions" title="Library actions">
+                      <span class="sr">Library actions</span>
+                    </summary>
+                    <div class="menu-pop" id="libraryToolsBody">
+                      <button id="load" type="button">Reload library</button>
+                      <button id="browseTrash" type="button">Browse Trash</button>
+                      <button id="recoverNoteDrafts" type="button">Recover note drafts</button>
+                      <button id="shuffleLibrary" type="button">Shuffle</button>
+                      <button id="surpriseMe" type="button">Open a random post</button>
+                      <hr />
+                      <button id="integrityQuick" type="button">Scan integrity</button>
+                      <button id="manifestQuick" type="button">Create manifest</button>
+                      <button id="csv" type="button">Export CSV</button>
+                      <button id="exportMarkdown" type="button">Export Markdown (Obsidian)</button>
+                      <button id="exportHtml" type="button">Export offline HTML</button>
+                      <button id="exportThreadsMarkdown" type="button">Export threads (Markdown)</button>
+                      <button id="exportThreadsHtml" type="button">Export threads (HTML)</button>
+                      <button id="remoteQuick" type="button">Browse on phone</button>
+                      <hr />
+                      <button id="clearLibrary" type="button" class="danger">Clear library…</button>
+                    </div>
+                  </details>
+                </div>
+              </div>
+              <div class="lib5-row lib5-row-sub" id="libraryFilterRow">
+                <div class="lib-filters">
+                  <div class="filterchips" id="libraryChips" role="group" aria-label="Quick filters">
+                    <button class="active" data-filter="">All</button>
+                    <button data-filter="has:image">Images</button>
+                    <button data-filter="has:gif">GIFs</button>
+                    <button data-filter="has:video">Videos</button>
+                    <button data-filter="rating:sensitive">Sensitive</button>
+                  </div>
+                </div>
+                <div class="lib5-active" id="libraryActiveSlot"></div>
+                <div class="libraryStatusBar">
+                  <div><b id="libShown">0</b><span>shown</span></div>
+                  <div><b id="libMediaCount">0</b><span>media</span></div>
+                  <div><b id="libLocalCount">0</b><span>on disk</span></div>
+                  <div class="libraryMiniActions"></div>
+                </div>
+                <button
+                  type="button"
+                  id="libraryTimelineToggle"
+                  class="lib5-chipbtn"
+                  aria-expanded="false"
+                  aria-controls="xkTimeline"
+                  data-xv-icon="calendarRange"
+                >
+                  <span>Timeline</span>
+                </button>
               </div>
             </header>
-            <div class="lib-filters">
-              <div class="filterchips" id="libraryChips" role="group" aria-label="Quick filters">
-                <button class="active" data-filter="">All</button>
-                <button data-filter="has:image">Images</button>
-                <button data-filter="has:gif">GIFs</button>
-                <button data-filter="has:video">Videos</button>
-                <button data-filter="rating:sensitive">Sensitive</button>
-              </div>
-              <div class="libraryStatusBar">
-                <div><b id="libShown">0</b><span>shown</span></div>
-                <div><b id="libMediaCount">0</b><span>media</span></div>
-                <div><b id="libLocalCount">0</b><span>on disk</span></div>
-                <div class="libraryMiniActions"></div>
-              </div>
-            </div>
             <div class="list" id="list">
               <div class="empty">Load the local library to browse it.</div>
             </div>
@@ -919,6 +1038,15 @@
                       <label
                         ><span><b>Show avatars</b></span
                         ><input type="checkbox" data-setting="libraryShowAvatars"
+                      /></label>
+                      <label
+                        ><span
+                          ><b>Keep local copies of avatars</b
+                          ><small id="avatarArchiveStats"
+                            >Author pictures are saved on this computer (96 px, no cookies sent), so they still show
+                            when X changes or removes them, and on your phone.</small
+                          ></span
+                        ><input type="checkbox" data-setting="archiveAvatars"
                       /></label>
                       <label
                         ><span><b>Show engagement counts</b></span
@@ -1835,6 +1963,10 @@
                         <label>
                           <input type="checkbox" data-remote-permission="downloads.manage" />
                           <span>Save archived media to PC</span>
+                        </label>
+                        <label>
+                          <input type="checkbox" data-remote-permission="capture.create" />
+                          <span>Send posts to capture (share or paste X links)</span>
                         </label>
                       </div>
                     </details>

@@ -5,7 +5,9 @@
    LIBRARY_TIMELINE in the service worker and are cached per search and archive revision. */
 (() => {
   const $ = selector => document.querySelector(selector);
-  const OPEN_KEY = 'xv-timeline-open',
+  // XVault 25: the strip is folded by default (it lives under the Library header and costs a whole-archive scan),
+  // opened from the header's Timeline chip; a fresh key so v24's "open" does not carry over.
+  const OPEN_KEY = 'xv-timeline-open-25',
     FIELD_KEY = 'xv-timeline-field';
   const n = value => (typeof fmt === 'function' ? fmt(Number(value) || 0) : String(Number(value) || 0));
   const html = value =>
@@ -24,7 +26,7 @@
     } catch {}
   };
   const state = {
-    open: read(OPEN_KEY, '1') === '1',
+    open: read(OPEN_KEY, '0') === '1',
     field: read(FIELD_KEY, 'posted'),
     data: null,
     query: null,
@@ -62,17 +64,21 @@
   }
 
   function mount() {
-    const filters = $('#page-library .lib-filters');
-    if (!filters) return null;
+    const filters = $('#page-library .lib-filters'),
+      head = $('#libraryHead');
+    if (!filters && !head) return null;
     let box = $('#xkTimeline');
     if (box) return box;
     box = document.createElement('section');
     box.id = 'xkTimeline';
     box.className = 'xk-timeline';
     box.setAttribute('aria-label', 'Timeline of matching posts');
-    box.innerHTML = `<header><button type="button" class="quiet xk-toggle" data-xk="toggle" aria-expanded="false" aria-controls="xkBars">Timeline</button><span class="xk-summary" aria-live="polite"></span><span class="xk-tools"><label class="xk-field"><span class="xv-sr-only">Date</span><select data-xk="field" aria-label="Timeline date"><option value="posted">Posted</option><option value="archived">Archived</option></select></label><button type="button" class="quiet" data-xk="back" hidden>‹ Back</button><button type="button" class="quiet" data-xk="clear" hidden>All dates</button></span></header><div class="xk-bars" id="xkBars" role="group" aria-label="Posts per period — drag across bars to choose a range"></div><div class="xk-axis" aria-hidden="true"><span class="xk-axis-start"></span><span class="xk-axis-peak"></span><span class="xk-axis-end"></span></div>`;
-    filters.after(box);
+    box.innerHTML = `<header><h3 class="xk-title">Timeline</h3><span class="xk-summary" aria-live="polite"></span><span class="xk-tools"><label class="xk-field"><span class="xv-sr-only">Date</span><select data-xk="field" aria-label="Timeline date"><option value="posted">Posted</option><option value="archived">Archived</option></select></label><button type="button" class="quiet" data-xk="back" hidden>‹ Back</button><button type="button" class="quiet" data-xk="clear" hidden>All dates</button><button type="button" class="quiet xk-toggle" data-xk="toggle" aria-expanded="true" aria-controls="xkBars" aria-label="Hide timeline" title="Hide timeline" data-xv-icon="close"></button></span></header><div class="xk-bars" id="xkBars" role="group" aria-label="Posts per period — drag across bars to choose a range"></div><div class="xk-axis" aria-hidden="true"><span class="xk-axis-start"></span><span class="xk-axis-peak"></span><span class="xk-axis-end"></span></div>`;
+    box.hidden = !state.open;
+    if (head) head.after(box);
+    else filters.after(box);
     box.addEventListener('click', onClick);
+    document.dispatchEvent(new CustomEvent('xv:timeline-mounted'));
     box.querySelector('[data-xk="field"]').addEventListener('change', event => {
       state.field = event.target.value === 'archived' ? 'archived' : 'posted';
       write(FIELD_KEY, state.field);
@@ -89,6 +95,7 @@
     if (!box) return;
     const toggle = box.querySelector('[data-xk="toggle"]');
     toggle.setAttribute('aria-expanded', String(state.open));
+    box.hidden = !state.open;
     box.classList.toggle('is-open', state.open);
     box.querySelector('[data-xk="field"]').value = state.field;
     const query = $('#search')?.value || '';
@@ -243,9 +250,9 @@
     const button = event.target.closest('[data-xk]');
     if (!button) return;
     if (button.dataset.xk === 'toggle') {
-      state.open = !state.open;
-      write(OPEN_KEY, state.open ? '1' : '0');
-      return state.open ? refresh(true) : paint();
+      setOpen(false);
+      $('#libraryTimelineToggle')?.focus({ preventScroll: true });
+      return;
     }
     if (button.dataset.xk === 'back') return zoomOut();
     if (button.dataset.xk === 'clear') {
@@ -325,11 +332,25 @@
       hint: 'posts per month for the current search; drag to filter by date',
       run: () => {
         if (typeof page === 'function') page('library');
-        state.open = true;
-        write(OPEN_KEY, '1');
-        refresh(true).then(() => $('#xkBars .xk-bar')?.focus());
+        setOpen(true).then(() => $('#xkBars .xk-bar')?.focus());
       },
     },
   ]);
-  window.XVaultTimeline = { withRange, refresh, zoomOut, zoomDepth: () => state.zoom.length };
+  function setOpen(open) {
+    state.open = !!open;
+    write(OPEN_KEY, state.open ? '1' : '0');
+    mount();
+    document.dispatchEvent(new CustomEvent('xv:timeline-state', { detail: { open: state.open } }));
+    if (state.open) return refresh(true);
+    paint();
+    return Promise.resolve();
+  }
+  window.XVaultTimeline = {
+    withRange,
+    refresh,
+    zoomOut,
+    setOpen,
+    isOpen: () => state.open,
+    zoomDepth: () => state.zoom.length,
+  };
 })();

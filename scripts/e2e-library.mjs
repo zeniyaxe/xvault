@@ -106,10 +106,16 @@ try {
     await page.fill('#search', q);
     await page.press('#search', 'Enter');
     await page.waitForTimeout(900);
-    return page.evaluate(() => document.querySelectorAll('#list [data-id], #list article, #list .card').length);
+    // Library 5.0 mounts cards incrementally, so the result count is the loaded window, not the DOM.
+    return page.evaluate(
+      () =>
+        window.XVaultLibraryResultRows?.()?.length ??
+        document.querySelectorAll('#list [data-id], #list article, #list .card').length
+    );
   };
   const all = await count('');
-  check('library renders seeded posts', all > 0, `${all} cards`);
+  const mountedCards = await page.evaluate(() => document.querySelectorAll('#list > article.tweet').length);
+  check('library renders seeded posts', all > 0 && mountedCards > 0, `${all} results, ${mountedCards} mounted`);
   const nasa = await count('from:nasa');
   check('from: filter', nasa > 0 && nasa < all, `${nasa}`);
   const notNasa = await count('-from:nasa');
@@ -121,6 +127,18 @@ try {
   await count('');
 
   // XVault 22 timeline: whole-archive counts, click a bar → after:/before: and exactly that many posts.
+  // XVault 25 folds the strip by default; the header's Timeline chip opens it.
+  const timelineFolded = await page.evaluate(() => document.querySelector('#xkTimeline')?.hidden !== false);
+  check('timeline is folded by default', timelineFolded);
+  await page.locator('#libraryTimelineToggle').click();
+  check(
+    'Timeline chip opens the strip',
+    await page.evaluate(
+      () =>
+        document.querySelector('#xkTimeline')?.hidden === false &&
+        document.querySelector('#libraryTimelineToggle')?.getAttribute('aria-expanded') === 'true'
+    )
+  );
   // Wait for the empty search's counts (the previous search's bars may still be on screen).
   await page
     .waitForFunction(
@@ -144,7 +162,9 @@ try {
   await page.waitForTimeout(1200);
   const ranged = await page.inputValue('#search');
   const rangedCards = await page.evaluate(
-    () => document.querySelectorAll('#list [data-id], #list article, #list .card').length
+    () =>
+      window.XVaultLibraryResultRows?.()?.length ??
+      document.querySelectorAll('#list [data-id], #list article, #list .card').length
   );
   check(
     'timeline bar narrows the search to its dates',

@@ -1,4 +1,4 @@
-/* exported openDetails */
+/* exported openDetails, fmtCompact, postContextHtml, postExtrasHtml, addTag -- the last four are shared with library-feed.js, which renders the cards */
 // Extension points other dashboard scripts register with instead of reassigning these functions (dashboard-hooks.js).
 const dashboardHooks = window.XVaultDashboardHooks.createHooks([
   'page',
@@ -1138,244 +1138,47 @@ function postExtrasHtml(t, um, mediaCount, view) {
 function renderLib(...args) {
   return dashboardHooks.invoke('renderLib', builtinRenderLib, this, args);
 }
+// XVault 25: library-feed.js draws every card layout and library-workspace.js owns query, paging and the windowed
+// List/Table. This fallback only filters and sorts the rows in memory (used before the workspace is installed and by
+// tests that load the dashboard alone) and hands them to the feed.
+const BUILTIN_SORTS = {
+  old: (a, b) => (a.archivedAt || 0) - (b.archivedAt || 0),
+  likes: (a, b) => (b.metrics?.likes || 0) - (a.metrics?.likes || 0),
+  views: (a, b) => (b.metrics?.views || 0) - (a.metrics?.views || 0),
+  bookmarks: (a, b) => (b.metrics?.bookmarks || 0) - (a.metrics?.bookmarks || 0),
+  reposts: (a, b) => (b.metrics?.reposts || 0) - (a.metrics?.reposts || 0),
+  replies: (a, b) => (b.metrics?.replies || 0) - (a.metrics?.replies || 0),
+  media: (a, b) => (b.media?.length || 0) - (a.media?.length || 0),
+  author: (a, b) => String(a.author?.handle || '').localeCompare(String(b.author?.handle || '')),
+  new: (a, b) => (b.archivedAt || 0) - (a.archivedAt || 0),
+};
 function builtinRenderLib(options = {}) {
   const box = $('#list');
   if (!box) return;
-  const videoTimes = new Map([...box.querySelectorAll('video')].map(v => [v.src, v.currentTime || 0]));
   const q = ($('#search').value || '').trim();
   if (settings.rememberLibraryQuery) save({ lastLibraryQuery: q }, false);
   const tokens = (q.match(/(?:[^\s\"]+|\"[^\"]*\")+/g) || []).map(x => x.replace(/^\"|\"$/g, ''));
   const externallyFiltered = options?.externallyFiltered === true;
   let rows = externallyFiltered ? library.slice() : library.filter(t => tokens.every(tok => tokenMatch(t, tok)));
   const sort = $('#sort').value;
-  if (!externallyFiltered)
-    rows.sort((a, b) =>
-      sort === 'old'
-        ? (a.archivedAt || 0) - (b.archivedAt || 0)
-        : sort === 'likes'
-          ? (b.metrics?.likes || 0) - (a.metrics?.likes || 0)
-          : sort === 'views'
-            ? (b.metrics?.views || 0) - (a.metrics?.views || 0)
-            : sort === 'bookmarks'
-              ? (b.metrics?.bookmarks || 0) - (a.metrics?.bookmarks || 0)
-              : sort === 'reposts'
-                ? (b.metrics?.reposts || 0) - (a.metrics?.reposts || 0)
-                : sort === 'replies'
-                  ? (b.metrics?.replies || 0) - (a.metrics?.replies || 0)
-                  : sort === 'media'
-                    ? (b.media?.length || 0) - (a.media?.length || 0)
-                    : sort === 'author'
-                      ? String(a.author?.handle || '').localeCompare(String(b.author?.handle || ''))
-                      : (b.archivedAt || 0) - (a.archivedAt || 0)
-    );
-  const totalRows = rows.length;
-  if (!externallyFiltered) rows = rows.slice(0, settings.libraryPageSize || 300);
-  box.dataset.mediaSize = settings.libraryMediaSize || 'comfortable';
-  box.dataset.view = settings.libraryView || 'timeline';
+  if (!externallyFiltered) {
+    rows.sort(BUILTIN_SORTS[sort] || BUILTIN_SORTS.new);
+    rows = rows.slice(0, settings.libraryPageSize || 300);
+  }
+  const view = ['timeline', 'cards', 'gallery', 'masonry'].includes(settings.libraryView)
+    ? settings.libraryView
+    : 'timeline';
+  window.XVaultLibraryFeed?.render({ rows, key: `builtin|${q}|${sort}`, view, selected: () => new Set() });
   let mediaCount = 0,
     localCount = 0;
-  box.innerHTML =
-    rows
-      .map((t, idx) => {
-        const rawText = String(t.text || ''),
-          textPreview = rawText.length > 1200 ? rawText.slice(0, 1200) + '…' : rawText,
-          um = t.userMeta || {},
-          dls = libraryDownloads.get(String(t.id)) || [],
-          name = t.author?.name || t.author?.handle || 'Unknown',
-          handle = t.author?.handle || 'unknown',
-          avatar = t.author?.avatar || '',
-          local = dls.filter(x => x.state === 'complete').length;
-        localCount += local;
-        const allMedia = t.media || [],
-          galleryLimit = ['gallery', 'masonry'].includes(box.dataset.view) ? 1 : 4,
-          visibleMedia = allMedia.slice(0, galleryLimit);
-        mediaCount += allMedia.length;
-        const media = visibleMedia
-          .map((m, mi) => {
-            const kind = mediaLogical(m),
-              basePick = mediaSource(m),
-              mode = settings.libraryAnimationMode || 'native',
-              localGif = kind === 'gif' ? localConvertedFor(t, m) : null,
-              forceMp4 = kind === 'gif' && mode === 'mp4',
-              pick = forceMp4
-                ? { src: bestVariant(m) || m.playbackUrl || basePick.src, native: false, kind }
-                : localGif
-                  ? { src: localGif, native: true, kind, localConverted: true }
-                  : basePick,
-              src = pick.src;
-            if (!src) return '';
-            const ext = (new URL(src, location.href).pathname.match(/\.([a-z0-9]{2,5})$/i)?.[1] || kind).toUpperCase(),
-              dim = m.width && m.height ? `${m.width}×${m.height}` : '';
-            const dl = `<button class="mediaDownload" data-dl-one="${idx}:${mi}" title="Download this media" aria-label="Download this media">↓</button>`;
-            if (kind === 'video' || (kind === 'gif' && !pick.native))
-              return `<div class="mediaItem ${kind}" data-t="${idx}" data-m="${mi}"${m.width > 0 && m.height > 0 ? ` style="--ar:${Number(m.width)}/${Number(m.height)}"` : ''}><video src="${esc(src)}" poster="${esc(m.preview || m.url || '')}" ${settings.libraryVideoMuted === true ? 'muted' : ''} ${kind === 'gif' && settings.libraryAutoplayAnimated !== false ? 'autoplay loop playsinline' : ''} ${settings.libraryVideoControls !== false ? 'controls' : ''} preload="${esc(settings.libraryPreloadMedia || 'metadata')}"></video>${kind === 'video' ? `<span class="playOverlay"><i>${window.XVaultIcons?.svg('play') || '▶'}</i></span>` : ''}<span class="mediaType">${kind === 'gif' ? 'GIF' : 'Video'}</span><span class="formatBadge">${esc(ext)}${dim ? ' · ' + esc(dim) : ''}</span>${dl}</div>`;
-            return `<div class="mediaItem ${kind}" data-t="${idx}" data-m="${mi}"${m.width > 0 && m.height > 0 ? ` style="--ar:${Number(m.width)}/${Number(m.height)}"` : ''}><img loading="lazy" src="${esc(src)}" ${pick.localConverted ? `data-local-converted="1" data-fallback="${esc(basePick.src || '')}"` : ''} alt="Media from @${esc(handle)}"><span class="mediaType">${kind === 'gif' ? 'GIF' : 'Image'}</span><span class="formatBadge">${esc(ext)}${dim ? ' · ' + esc(dim) : ''}</span>${dl}</div>`;
-          })
-          .join('');
-        const metrics =
-          settings.libraryShowMetrics === false
-            ? ''
-            : `<div class="metricBar"><span>♥ <b title="${fmt(t.metrics?.likes)}">${fmtCompact(t.metrics?.likes)}</b></span><span>↻ <b title="${fmt(t.metrics?.reposts)}">${fmtCompact(t.metrics?.reposts)}</b></span><span>💬 <b title="${fmt(t.metrics?.replies)}">${fmtCompact(t.metrics?.replies)}</b></span><span>◉ <b title="${fmt(t.metrics?.views)}">${fmtCompact(t.metrics?.views)}</b></span><span>◆ <b title="${fmt(t.metrics?.bookmarks)}">${fmtCompact(t.metrics?.bookmarks)}</b></span><span class="disk${local && local >= allMedia.length ? ' complete' : ''}" title="Media files saved to disk"><b>${local}/${(t.media || []).length}</b> on disk</span></div>`;
-        const allTags = um.tags || [],
-          shownTags = allTags.slice(0, 8),
-          tags =
-            shownTags
-              .map(
-                x => `<button type="button" data-tag="${esc(x)}" aria-label="Filter by #${esc(x)}">#${esc(x)}</button>`
-              )
-              .join('') +
-            (allTags.length > shownTags.length
-              ? `<button type="button" class="tagOverflow" data-expand-tags="${idx}" aria-expanded="false" aria-label="Show ${allTags.length - shownTags.length} more tags">+${allTags.length - shownTags.length} tags</button>`
-              : '');
-        return `<article class="tweet ${t.sensitive ? 'sensitive' : ''} ${um.favorite ? 'favorite' : ''}" data-id="${esc(t.id)}"><div class="who">${settings.libraryShowAvatars !== false && avatar ? `<img class="avatar" src="${esc(avatar)}">` : `<div class="avatar fallback">${esc(handle[0]?.toUpperCase() || '?')}</div>`}<div class="identity">${settings.libraryShowNames !== false ? `<b>${esc(name)} ${t.author?.verified ? '✓' : ''}</b>` : ''}<small>@${esc(handle)}</small></div>${t.createdAt && Number.isFinite(new Date(t.createdAt).getTime()) ? `<time datetime="${esc(new Date(t.createdAt).toISOString())}" title="${esc(new Date(t.createdAt).toLocaleString())}">${esc(new Date(t.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }))}</time>` : ''}</div><div class="tweetMetaBadges">${window.XVaultLibraryModel?.isInbox?.(t, settings.inboxSince) ? '<span class="new" title="New since your last review">New</span>' : ''}${um.readLater && !um.readAt ? '<span class="later" title="Saved for later">Later</span>' : ''}${um.highlights?.length ? `<span class="hl" title="Highlighted passages">${fmt(um.highlights.length)} highlight${um.highlights.length === 1 ? '' : 's'}</span>` : ''}${(
-          um.boards || []
-        )
-          .slice(0, 2)
-          .map(id => (settings.boards || []).find(board => board.id === id))
-          .filter(Boolean)
-          .map(
-            board =>
-              `<span class="board" style="--board:${esc(board.color || 'var(--accent)')}">${esc(board.name)}</span>`
-          )
-          .join('')}${t.sensitive ? '<span class="flag">Sensitive</span>' : ''}${
-          t.sourceFlags
-            ?.slice(0, 2)
-            .map(x => `<span>${esc(x)}</span>`)
-            .join('') || ''
-        }</div>${postContextHtml(t, handle)}<p class="tweetText">${linkifyText(textPreview)}</p>${rawText.length > 1200 ? `<button type="button" class="textOverflow" data-details="${esc(t.id)}" aria-label="Open full post text in Inspector, ${fmt(rawText.length)} characters">Open full post text · ${fmt(rawText.length)} characters</button>` : ''}${media ? `<div class="mediaGrid" data-count="${allMedia.length}" data-visible="${visibleMedia.length}" data-more="${Math.max(0, allMedia.length - (['gallery', 'masonry'].includes(box.dataset.view) ? 1 : visibleMedia.length))}">${media}${allMedia.length > visibleMedia.length && !['gallery', 'masonry'].includes(box.dataset.view) ? `<button type="button" class="mediaOverflow" data-media-more="${idx}" aria-label="Open viewer to browse ${allMedia.length} media items">+${allMedia.length - visibleMedia.length} more media</button>` : ''}</div>` : ''}${postExtrasHtml(t, um, allMedia.length, box.dataset.view)}${metrics}<div class="tweetTags">${tags}<button data-addtag="${esc(t.id)}" title="Add a tag">Tag</button></div><div class="tweetActions"><button data-fav="${esc(t.id)}" aria-pressed="${um.favorite ? 'true' : 'false'}" title="${um.favorite ? 'Remove favorite (F)' : 'Favorite (F)'}"><span class="lbl">${um.favorite ? 'Remove favorite' : 'Favorite'}</span></button><button class="primary" data-download-post="${esc(t.id)}" title="Download media"><span class="lbl">Download post</span></button><button data-quicklook="${esc(t.id)}" title="Quick Look (Space)"><span class="lbl">Quick Look</span></button><button data-details="${esc(t.id)}" title="Inspector"><span class="lbl">Details</span></button><button data-copy="${esc(t.url || '')}" title="Copy link"><span class="lbl">Copy link</span></button><button data-open="${esc(t.url || '')}" title="Open on X"><span class="lbl">Open X</span></button>${dls[0]?.downloadId ? `<button data-show="${dls[0].downloadId}" title="Show file"><span class="lbl">Show file</span></button>` : ''}</div></article>`;
-      })
-      .join('') || '<div class="empty">No matches. Try removing filters or archive a source first.</div>';
-  if ($('#libShown')) $('#libShown').textContent = fmt(totalRows);
+  for (const t of rows) {
+    mediaCount += t.media?.length || 0;
+    localCount += (libraryDownloads.get(String(t.id)) || []).filter(x => x.state === 'complete').length;
+  }
+  if ($('#libShown')) $('#libShown').textContent = fmt(rows.length);
   if ($('#libMediaCount')) $('#libMediaCount').textContent = fmt(mediaCount);
   if ($('#libLocalCount')) $('#libLocalCount').textContent = fmt(localCount);
-  const shown = rows;
-  $$('#list .mediaItem').forEach(
-    el =>
-      (el.onclick = e => {
-        if (e.target.closest('video[controls]') && e.target.tagName === 'VIDEO') return;
-        openLightbox(shown, Number(el.dataset.t), Number(el.dataset.m));
-      })
-  );
-  $$('#list [data-media-more]').forEach(
-    button =>
-      (button.onclick = e => {
-        e.stopPropagation();
-        openLightbox(shown, Number(button.dataset.mediaMore), 0);
-      })
-  );
-  $$('#list [data-download-post]').forEach(
-    b =>
-      (b.onclick = e => {
-        e.stopPropagation();
-        const t = shown.find(x => String(x.id) === String(b.dataset.downloadPost));
-        if (t) downloadPost(t);
-      })
-  );
-  $$('#list [data-dl-one]').forEach(
-    b =>
-      (b.onclick = e => {
-        e.stopPropagation();
-        const [ti, mi] = b.dataset.dlOne.split(':').map(Number),
-          t = shown[ti],
-          m = t?.media?.[mi];
-        if (t && m) downloadOne(t, m, mi);
-      })
-  );
-  $$('#list [data-open]').forEach(b => (b.onclick = () => chrome.tabs.create({ url: b.dataset.open })));
-  $$('#list [data-show]').forEach(
-    b => (b.onclick = () => call({ type: 'SHOW_DOWNLOAD', downloadId: Number(b.dataset.show) }))
-  );
-  $$('#list [data-copy]').forEach(
-    b =>
-      (b.onclick = async () => {
-        await navigator.clipboard.writeText(b.dataset.copy);
-        toast('Link copied');
-      })
-  );
-  $$('#list [data-details]').forEach(b => (b.onclick = () => window.openDetails(b.dataset.details)));
-  $$('#list [data-fav]').forEach(b => (b.onclick = () => toggleFavorite(b.dataset.fav)));
-  $$('#list [data-addtag]').forEach(b => (b.onclick = () => addTag(b.dataset.addtag)));
-  $$('#list [data-tag]').forEach(
-    b =>
-      (b.onclick = () => {
-        $('#search').value = `tag:${b.dataset.tag}`;
-        renderLib();
-      })
-  );
-  $$('#list [data-expand-tags]').forEach(
-    button =>
-      (button.onclick = () => {
-        const post = shown[Number(button.dataset.expandTags)],
-          container = button.closest('.tweetTags');
-        if (!post || !container) return;
-        const expanded = button.getAttribute('aria-expanded') === 'true',
-          all = post.userMeta?.tags || [],
-          remaining = Math.max(0, all.length - 8);
-        if (expanded) {
-          container.querySelectorAll('[data-overflow-tag]').forEach(tag => tag.remove());
-          button.setAttribute('aria-expanded', 'false');
-          button.setAttribute('aria-label', `Show ${remaining} more tags`);
-          button.textContent = `+${remaining} tags`;
-          return;
-        }
-        all.slice(8).forEach(tag => {
-          const chip = document.createElement('button');
-          chip.type = 'button';
-          chip.dataset.tag = tag;
-          chip.dataset.overflowTag = '';
-          chip.setAttribute('aria-label', `Filter by #${tag}`);
-          chip.textContent = `#${tag}`;
-          chip.onclick = () => {
-            $('#search').value = `tag:${tag}`;
-            renderLib();
-          };
-          container.insertBefore(chip, button);
-        });
-        button.setAttribute('aria-expanded', 'true');
-        button.setAttribute('aria-label', 'Show fewer tags');
-        button.textContent = 'Show fewer tags';
-      })
-  );
-  $$('#list img[data-local-converted]').forEach(im =>
-    im.addEventListener('error', () => {
-      const u = im.dataset.fallback;
-      if (!u) return;
-      const host = im.closest('.mediaItem');
-      const v = document.createElement('video');
-      v.src = u;
-      v.controls = settings.libraryVideoControls !== false;
-      v.loop = true;
-      v.autoplay = settings.libraryAutoplayAnimated !== false;
-      v.muted = settings.libraryVideoMuted === true;
-      v.playsInline = true;
-      im.replaceWith(v);
-      host?.querySelector('.mediaType') &&
-        (host.querySelector('.mediaType').textContent = 'X GIF · MP4 FALLBACK (enable file URL access / run helper)');
-    })
-  );
-  if (settings.libraryHoverVideo !== false)
-    $$('#list .mediaItem video:not([loop])').forEach(v => {
-      v.addEventListener('mouseenter', () => v.play().catch(() => {}));
-      v.addEventListener('mouseleave', () => {
-        v.pause();
-        if (settings.libraryVideoHoverReset === true) v.currentTime = 0;
-      });
-    });
-  $$('#list video').forEach(v => {
-    const t = videoTimes.get(v.src);
-    if (t > 0)
-      v.addEventListener(
-        'loadedmetadata',
-        () => {
-          try {
-            if (Math.abs((v.currentTime || 0) - t) > 1) v.currentTime = t;
-          } catch {}
-        },
-        { once: true }
-      );
-  });
-  installAnimatedObserver();
-  wireLibraryVideoState();
+  return rows;
 }
 async function clearLibrary() {
   if (settings.confirmClearArchive !== false && !confirm('Clear local XVault library? Downloaded files stay on disk.'))

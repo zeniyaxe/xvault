@@ -87,12 +87,12 @@ try {
     () => window.XVaultLibraryQueryState?.().rows === 1500 && !document.querySelector('#list').hasAttribute('aria-busy')
   );
   assert.ok((await frame.locator('#list .tweet').count()) <= 15);
-  assert.match(await frame.locator('#libShown').innerText(), /^1–1500/);
+  assert.match(await frame.locator('#libShown').innerText(), /^1–1\D?500/);
   console.log('PASS bounded compact viewport');
   await setPhase('keyboard-navigation-and-quick-look');
   await frame.locator('#list .tweet').first().press('End');
   assert.equal(await frame.evaluate(() => document.activeElement.dataset.id), '901499');
-  assert.ok((await frame.locator('#list').evaluate(element => element.scrollTop)) > 100000);
+  assert.ok((await frame.locator('#libraryScroll').evaluate(element => element.scrollTop)) > 100000);
   assert.ok((await frame.locator('#list .tweet').count()) <= 15);
   console.log('PASS keyboard navigation to unmounted last record');
   await frame.locator('.tweet[data-id="901499"]').press('Space');
@@ -160,7 +160,7 @@ try {
   );
   console.log('PASS 1500-post bulk Favorite, Trash, visible Undo, and restoration');
   await setPhase('quick-look-and-command-navigation');
-  await frame.locator('#list').evaluate(element => (element.scrollTop = 0));
+  await frame.locator('#libraryScroll').evaluate(element => (element.scrollTop = 0));
   try {
     await frame.locator('.tweet[data-id="900000"]').waitFor();
   } catch (error) {
@@ -214,7 +214,7 @@ try {
   await page.keyboard.press('Escape');
   await frame.waitForFunction(() => document.activeElement.id === 'cmdBtn');
   assert.equal(await frame.evaluate(() => document.activeElement.id), 'cmdBtn');
-  await frame.locator('#list').evaluate(element => (element.scrollTop = 0));
+  await frame.locator('#libraryScroll').evaluate(element => (element.scrollTop = 0));
   await frame.locator('.tweet[data-id="900001"]').press('Space');
   await frame.locator('#xvQuickLookTitle').press('Enter');
   await frame.waitForFunction(() => !document.querySelector('#lightbox').classList.contains('hidden'));
@@ -223,6 +223,12 @@ try {
   assert.equal(await frame.evaluate(() => document.activeElement.closest('#lightbox') != null), true);
   await page.keyboard.press('Escape');
   assert.equal(await frame.locator('.shell').evaluate(element => element.inert), false);
+  // Focus returns on the next frame, after the viewer's focus scope is released.
+  await frame
+    .waitForFunction(() => document.activeElement?.closest?.('.tweet')?.dataset.id === '900001', null, {
+      timeout: 2000,
+    })
+    .catch(() => {});
   const viewerReturn = await frame.evaluate(() => ({
     id: document.activeElement.dataset?.id,
     active: document.activeElement.outerHTML.slice(0, 220),

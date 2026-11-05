@@ -57,6 +57,8 @@ try {
   assert.equal(firstPage.metric.recordsRead, 10050);
   assert.equal(firstPage.ids[0], '909999', 'most-liked query should sort the highest metric record first');
   await frame.evaluate(() => window.__xvSimulateWorkerRestart());
+  // Library 5 keeps loading as the reader scrolls; turn that off so the footer's page buttons stay put.
+  await frame.evaluate(() => save({ libraryAutoLoad: false }, false));
   await frame.locator('#libraryNext').click();
   await frame.waitForFunction(
     () =>
@@ -100,10 +102,11 @@ try {
       .slice()
       .sort((a, b) => Number(b) - Number(a)),
   }));
+  // Library 5 mounts the first block of cards, so the mounted cards are a prefix of the page.
   assert.deepEqual(
     randomPage.cards,
-    randomPage.rows,
-    'the legacy card renderer must preserve the cursor-backed randomized page order'
+    randomPage.rows.slice(0, randomPage.cards.length),
+    'the card renderer must preserve the cursor-backed randomized page order'
   );
   assert.notDeepEqual(
     randomPage.cards,

@@ -1,4 +1,5 @@
-/* Library workspace: paging, saved views, bulk work, and focused media playback. */
+/* Library workspace: query paging, the in-flow "load more" window, selection, saved views, bulk work and focused media
+   playback. Card markup and incremental mounting live in library-feed.js (Library 5.0). */
 (() => {
   const selected = new Set();
   function compactTagSummary(post) {
@@ -41,6 +42,14 @@
   let pageCursors = [null],
     loadedQueryKey = '',
     activeQueryId = '';
+  // Library 5.0 window: pages windowStart..pageIndex are loaded and concatenated in `library`. "Load more" appends
+  // the next page; "Next page" starts a fresh window. A metadata edit reloads the same number of rows so the reader
+  // keeps their place. The window never retains more than MAX_RETAINED rows.
+  const MAX_RETAINED = 1500;
+  let windowStart = 0,
+    reloadTarget = 0,
+    loadingMore = false,
+    loadedBase = '';
   let queryInputEvents = 0,
     queryRenderScheduled = 0;
   const libraryQueryMetrics = [];
@@ -91,12 +100,14 @@
   ];
   function tableHead() {
     const sort = $('#sort')?.value || 'new';
-    return `<div class="xv-table-head" role="presentation">${TABLE_COLUMNS.map(([key, label, sortKey]) => {
-      const active = sortKey && (sort === sortKey || (sortKey === 'new' && sort === 'old'));
-      return sortKey
-        ? `<button type="button" class="xv-th" data-col="${key}" data-table-sort="${sortKey}" aria-pressed="${active ? 'true' : 'false'}" title="Sort by ${label.toLowerCase()}">${label}${active ? (sort === 'old' ? ' ↑' : ' ↓') : ''}</button>`
-        : `<span class="xv-th" data-col="${key}">${label}</span>`;
-    }).join('')}</div>`;
+    return `<div class="xv-table-head" role="presentation"><span class="xv-th xv-th-select"></span><span class="xv-th xv-th-thumb"></span>${TABLE_COLUMNS.map(
+      ([key, label, sortKey]) => {
+        const active = sortKey && (sort === sortKey || (sortKey === 'new' && sort === 'old'));
+        return sortKey
+          ? `<button type="button" class="xv-th" data-col="${key}" data-table-sort="${sortKey}" aria-pressed="${active ? 'true' : 'false'}" title="Sort by ${label.toLowerCase()}">${label}${active ? (sort === 'old' ? ' ↑' : ' ↓') : ''}</button>`
+          : `<span class="xv-th" data-col="${key}">${label}</span>`;
+      }
+    ).join('')}<span class="xv-th xv-th-actions"></span></div>`;
   }
   function tableRow(post, index) {
     const media = post.media || [],
@@ -127,95 +138,134 @@
       ]
         .filter(Boolean)
         .join(' · ');
-    return `<article class="tweet xv-record-row xv-table-row ${meta.favorite ? 'favorite' : ''}" data-id="${esc(post.id)}" data-row-index="${index}" aria-label="Post ${esc(post.id)} by @${esc(post.author?.handle || 'unknown')}" tabindex="0"><span class="xv-td xv-td-thumb" draggable="true">${preview ? `<img src="${esc(preview)}" alt="" loading="lazy" decoding="async">` : ''}</span><span class="xv-td" data-col="author"><b>@${esc(post.author?.handle || 'unknown')}</b></span><span class="xv-td" data-col="text" title="${esc(String(post.text || '').slice(0, 300))}">${esc(String(post.text || 'Media post').slice(0, 220))}</span><span class="xv-td" data-col="type">${esc(type)}${media.length > 1 ? ` ×${media.length}` : ''}</span><span class="xv-td" data-col="posted">${esc(day(post.createdAt))}</span><span class="xv-td" data-col="archived">${esc(day(post.archivedAt))}</span><span class="xv-td num" data-col="likes">${fmt(post.metrics?.likes || 0)}</span><span class="xv-td num" data-col="views">${fmt(post.metrics?.views || 0)}</span><span class="xv-td" data-col="tags">${esc((meta.tags || []).map(tag => `#${tag}`).join(' '))}</span><span class="xv-td" data-col="state">${esc(state)}</span><span class="xv-td xv-td-actions"><button type="button" data-record-preview="${index}" title="Quick Look (Space)" aria-label="Quick Look at post ${esc(post.id)}"><span class="lbl">Preview</span></button></span></article>`;
+    return `<article class="tweet xv-record-row xv-table-row ${meta.favorite ? 'favorite' : ''}${selected.has(String(post.id)) ? ' xv-selected' : ''}" data-id="${esc(post.id)}" data-row-index="${index}" aria-label="Post ${esc(post.id)} by @${esc(post.author?.handle || 'unknown')}" tabindex="0">${selectBox(post.id, post.author?.handle)}<span class="xv-td xv-td-thumb" draggable="true">${preview ? `<img src="${esc(preview)}" alt="" loading="lazy" decoding="async">` : ''}</span><span class="xv-td" data-col="author"><b>@${esc(post.author?.handle || 'unknown')}</b></span><span class="xv-td" data-col="text" title="${esc(String(post.text || '').slice(0, 300))}">${esc(String(post.text || 'Media post').slice(0, 220))}</span><span class="xv-td" data-col="type">${esc(type)}${media.length > 1 ? ` ×${media.length}` : ''}</span><span class="xv-td" data-col="posted">${esc(day(post.createdAt))}</span><span class="xv-td" data-col="archived">${esc(day(post.archivedAt))}</span><span class="xv-td num" data-col="likes">${fmt(post.metrics?.likes || 0)}</span><span class="xv-td num" data-col="views">${fmt(post.metrics?.views || 0)}</span><span class="xv-td" data-col="tags">${esc((meta.tags || []).map(tag => `#${tag}`).join(' '))}</span><span class="xv-td" data-col="state">${esc(state)}</span><span class="xv-td xv-td-actions"><button type="button" data-record-preview="${index}" title="Quick Look (Space)" aria-label="Quick Look at post ${esc(post.id)}">${window.XVaultIcons?.svg('quicklook') || ''}<span class="lbl">Preview</span></button></span></article>`;
+  }
+
+  // List and Table are windowed inside the single Library scroller (#libraryScroll). The visible slice is the part
+  // of #list between the sticky header and the bottom of the scroller; only that slice (plus overscan) is mounted.
+  const libraryScroller = () => $('#libraryScroll');
+  let compactScrollTarget = null;
+  function onCompactScroll() {
+    if (compactFrame) return;
+    compactFrame = requestAnimationFrame(() => {
+      compactFrame = 0;
+      paintCompact();
+    });
+  }
+  function detachCompactScroll() {
+    compactScrollTarget?.removeEventListener('scroll', onCompactScroll);
+    compactScrollTarget = null;
+    compactResizeObserver?.disconnect();
+    compactResizeObserver = null;
+    compactKey = '';
+    compactStart = compactEnd = -1;
+  }
+  // Height of the sticky header that covers the top of the scroller (phones pin only its last row).
+  function pinnedHeadHeight() {
+    const head = $('#libraryHead');
+    if (!head) return 0;
+    return Math.max(0, head.offsetHeight + Math.min(0, parseFloat(getComputedStyle(head).top) || 0));
+  }
+  function compactViewport(list) {
+    const box = libraryScroller();
+    if (!box || !box.contains(list)) return { top: list.scrollTop, height: list.clientHeight || 600 };
+    const head = pinnedHeadHeight(),
+      tableHead = compactMode === 'table' ? 36 : 0,
+      listTop = list.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+    return {
+      top: Math.max(0, box.scrollTop + head - listTop - tableHead),
+      height: Math.max(160, box.clientHeight - head - tableHead),
+    };
+  }
+  function compactRowHtml(post, index) {
+    const media = post.media || [];
+    const first = media[0];
+    let preview = first?.preview || (first?.type === 'photo' ? first.url : '');
+    try {
+      const url = new URL(preview);
+      if (url.hostname === 'pbs.twimg.com') {
+        url.searchParams.set('name', 'small');
+        preview = url.href;
+      }
+    } catch {}
+    const type = !media.length
+      ? 'Text'
+      : media.some(item => item.type === 'video')
+        ? 'Video'
+        : media.some(item => item.type === 'animated_gif')
+          ? 'Animation'
+          : 'Image';
+    const rawText = String(post.text || 'Media post');
+    const textPreview = rawText.length > 500 ? `${rawText.slice(0, 500)}…` : rawText;
+    const date = Number(post.archivedAt) ? new Date(post.archivedAt).toLocaleDateString() : 'Unknown date';
+    const on = selected.has(String(post.id));
+    return `<article class="tweet xv-record-row ${post.userMeta?.favorite ? 'favorite' : ''}${on ? ' xv-selected' : ''}" data-id="${esc(post.id)}" data-row-index="${index}" aria-label="Post ${esc(post.id)} by @${esc(post.author?.handle || 'unknown')}" tabindex="0">${selectBox(post.id, post.author?.handle)}<div class="xv-record-thumb" draggable="true">${preview ? `<img src="${esc(preview)}" alt="" loading="lazy" decoding="async">` : `<span>${type}</span>`}</div><div class="xv-record-copy"><b>@${esc(post.author?.handle || 'unknown')}</b><p title="Full text is available in Inspector">${esc(textPreview)}</p><small>${esc(compactTagSummary(post))}</small></div><div class="xv-record-facts"><b>${esc(type)}${media.length > 1 ? ' · ' + media.length : ''}</b><time>${esc(date)}</time><span>${model.isDownloaded(post, libraryDownloads) ? 'Local copy' : media.length ? 'Source media' : 'Archived text'}</span></div><div class="xv-record-actions"><button type="button" data-record-preview="${index}" title="Quick Look (Space)" aria-label="Quick Look at post ${esc(post.id)}">${window.XVaultIcons?.svg('quicklook') || ''}<span class="lbl">Preview</span></button><button type="button" data-details="${esc(post.id)}" title="Inspector (I)" aria-label="Open post ${esc(post.id)} in the Inspector">${window.XVaultIcons?.svg('inspector') || ''}<span class="lbl">Details</span></button></div></article>`;
   }
 
   function paintCompact(force = false, focusIndex = null) {
     const list = $('#list');
     if (!list?.classList.contains('xv-virtual-list')) return;
-    const head = compactMode === 'table' ? 36 : 0;
-    const viewportWindow = model.virtualWindow(
-      compactRows.length,
-      Math.max(0, list.scrollTop - head),
-      list.clientHeight || 600,
-      rowHeight()
-    );
+    const view = compactViewport(list);
+    const viewportWindow = model.virtualWindow(compactRows.length, view.top, view.height, rowHeight());
     if (!force && viewportWindow.start === compactStart && viewportWindow.end === compactEnd) return;
     compactStart = viewportWindow.start;
     compactEnd = viewportWindow.end;
     const focusedId = document.activeElement?.closest('#list .tweet')?.dataset.id;
+    releaseHelperMedia(list);
     list.innerHTML =
       (compactMode === 'table' ? tableHead() : '') +
       `<div class="xv-virtual-spacer" aria-hidden="true" style="height:${viewportWindow.before}px"></div>` +
       compactRows
         .slice(viewportWindow.start, viewportWindow.end)
-        .map((post, offset) => {
-          const index = viewportWindow.start + offset;
-          if (compactMode === 'table') return tableRow(post, index);
-          const media = post.media || [];
-          const first = media[0];
-          let preview = first?.preview || (first?.type === 'photo' ? first.url : '');
-          try {
-            const url = new URL(preview);
-            if (url.hostname === 'pbs.twimg.com') {
-              url.searchParams.set('name', 'small');
-              preview = url.href;
-            }
-          } catch {}
-          const type = !media.length
-            ? 'Text'
-            : media.some(item => item.type === 'video')
-              ? 'Video'
-              : media.some(item => item.type === 'animated_gif')
-                ? 'Animation'
-                : 'Image';
-          const rawText = String(post.text || 'Media post');
-          const textPreview = rawText.length > 500 ? `${rawText.slice(0, 500)}…` : rawText;
-          const date = Number(post.archivedAt) ? new Date(post.archivedAt).toLocaleDateString() : 'Unknown date';
-          return `<article class="tweet xv-record-row ${post.userMeta?.favorite ? 'favorite' : ''}" data-id="${esc(post.id)}" data-row-index="${index}" aria-label="Post ${esc(post.id)} by @${esc(post.author?.handle || 'unknown')}" tabindex="0"><div class="xv-record-thumb" draggable="true">${preview ? `<img src="${esc(preview)}" alt="" loading="lazy" decoding="async">` : `<span>${type}</span>`}</div><div class="xv-record-copy"><b>@${esc(post.author?.handle || 'unknown')}</b><p title="Full text is available in Inspector">${esc(textPreview)}</p><small>${esc(compactTagSummary(post))}</small></div><div class="xv-record-facts"><b>${esc(type)}${media.length > 1 ? ' · ' + media.length : ''}</b><time>${esc(date)}</time><span>${model.isDownloaded(post, libraryDownloads) ? 'Local copy' : media.length ? 'Source media' : 'Archived text'}</span></div><div class="xv-record-actions"><button type="button" data-record-preview="${index}" title="Quick Look (Space)" aria-label="Quick Look at post ${esc(post.id)}"><span class="lbl">Preview</span></button><button type="button" data-details="${esc(post.id)}" title="Inspector"><span class="lbl">Details</span></button></div></article>`;
-        })
+        .map((post, offset) =>
+          compactMode === 'table'
+            ? tableRow(post, viewportWindow.start + offset)
+            : compactRowHtml(post, viewportWindow.start + offset)
+        )
         .join('') +
       `<div class="xv-virtual-spacer" aria-hidden="true" style="height:${viewportWindow.after}px"></div>`;
     renderSelection();
-    list.querySelectorAll('[data-details]').forEach(button => {
-      button.onclick = () => window.openDetails(button.dataset.details);
-    });
-    list.querySelectorAll('[data-record-preview]').forEach(button => {
-      button.onclick = () => openQuickLook(compactRows, Number(button.dataset.recordPreview));
-    });
-    list.querySelectorAll('[data-table-sort]').forEach(button => {
-      button.onclick = () => {
-        const sort = $('#sort'),
-          wanted = button.dataset.tableSort;
-        sort.value = wanted === 'new' && sort.value === 'new' ? 'old' : wanted;
-        sort.dispatchEvent(new Event('change', { bubbles: true }));
-      };
-    });
+    hydrateHelperMedia(list);
     if (focusIndex != null) list.querySelector(`[data-row-index="${focusIndex}"]`)?.focus({ preventScroll: true });
     else if (focusedId)
       list.querySelector(`.tweet[data-id="${CSS.escape(focusedId)}"]`)?.focus({ preventScroll: true });
+    if (viewportWindow.end >= compactRows.length - 4) loadMore(true);
+  }
+  // Scroll the single Library scroller so the given windowed row is fully visible below the sticky header.
+  function revealCompactRow(index) {
+    const box = libraryScroller(),
+      list = $('#list');
+    if (!box || !list) return;
+    const head = pinnedHeadHeight() + (compactMode === 'table' ? 36 : 0),
+      listTop = list.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop,
+      rowTop = listTop + (compactMode === 'table' ? 36 : 0) + index * rowHeight(),
+      rowBottom = rowTop + rowHeight();
+    if (rowTop < box.scrollTop + head) box.scrollTop = rowTop - head;
+    else if (rowBottom > box.scrollTop + box.clientHeight) box.scrollTop = rowBottom - box.clientHeight + 8;
   }
 
   function renderCompact(rows, mode = 'compact') {
     const list = $('#list');
-    const key = `${currentSearchKey()}|${pageIndex}|${mode}`;
+    const key = `${currentBase()}|${windowStart}|${mode}`;
     const reset = !list.classList.contains('xv-virtual-list') || key !== compactKey;
+    window.XVaultLibraryFeed?.reset();
     compactRows = rows;
     compactKey = key;
     compactMode = mode;
     list.dataset.view = mode;
     list.classList.add('xv-virtual-list');
-    if (reset) list.scrollTop = 0;
-    list.onscroll = () => {
-      if (compactFrame) return;
-      compactFrame = requestAnimationFrame(() => {
-        compactFrame = 0;
-        paintCompact();
-      });
-    };
-    compactResizeObserver?.disconnect();
-    compactResizeObserver = new ResizeObserver(() => paintCompact(true));
-    compactResizeObserver.observe(list);
+    list.classList.remove('masonry');
+    if (reset && list.offsetTop < (libraryScroller()?.scrollTop || 0)) scrollToListTop(true);
+    const box = libraryScroller() || list;
+    if (compactScrollTarget !== box) {
+      compactScrollTarget?.removeEventListener('scroll', onCompactScroll);
+      box.addEventListener('scroll', onCompactScroll, { passive: true });
+      compactScrollTarget = box;
+    }
+    if (!compactResizeObserver) {
+      compactResizeObserver = new ResizeObserver(() => paintCompact(true));
+      compactResizeObserver.observe(box);
+    }
     paintCompact(true);
   }
 
@@ -597,8 +647,8 @@
     }
   }
 
-  function currentSearchKey() {
-    return `${libraryRevision}|${($('#search')?.value || '').trim()}|${$('#sort')?.value || 'new'}|${library.length}`;
+  function currentBase() {
+    return `${($('#search')?.value || '').trim()}|${$('#sort')?.value || 'new'}|${randomSeed}|${exportPageSize()}`;
   }
   function freshRandomSeed(previous = randomSeed) {
     const values = new Uint32Array(1);
@@ -616,9 +666,11 @@
     scheduleFacets();
     if (activeQueryId) void call({ type: 'CANCEL_LIBRARY_QUERY', queryId: activeQueryId }).catch(() => {});
     activeQueryId = '';
+    reloadTarget = windowStart === 0 && loadedBase === currentBase() ? Math.min(MAX_RETAINED, library.length) : 0;
     loadedQueryKey = '';
     pageCursors = [null];
     pageIndex = 0;
+    windowStart = 0;
     libraryQueryDownloadRevision = null;
     libraryTotalRecords = null;
     libraryQueryMatched = null;
@@ -638,8 +690,10 @@
   function setQueryTokens(tokens) {
     $('#search').value = tokens.join(' ');
     pageIndex = 0;
+    windowStart = 0;
     renderLib();
   }
+  window.XVaultLibraryToggleToken = (token, group = '') => toggleToken(token, group);
   function toggleToken(token, group = '') {
     const tokens = splitQuery($('#search').value),
       wanted = normToken(token);
@@ -776,9 +830,9 @@
     syncChrome();
   }
 
+  // Every loaded row of the window (Load more appends to it), not only the first page.
   function currentPageRows() {
-    const filtered = resultRows();
-    return filtered ? filtered.slice(0, exportPageSize()) : null;
+    return resultRows();
   }
   function openQuickLookById(id) {
     const rows = currentPageRows();
@@ -829,45 +883,26 @@
   }
 
   function setPage(delta) {
-    pageIndex = Math.max(0, pageIndex + delta);
-    if (pageIndex < 0) pageIndex = 0;
+    pageIndex = delta > 0 ? pageIndex + 1 : Math.max(0, windowStart - 1);
+    windowStart = pageIndex;
+    reloadTarget = 0;
     renderLib();
-    const list = $('#list');
-    if (list)
-      list.scrollTo({
-        top: 0,
-        behavior:
-          document.body.dataset.motion === 'off' || document.body.dataset.motion === 'reduced' ? 'instant' : 'smooth',
-      });
+    // A page change replaces the content, so jump rather than glide through the old page.
+    scrollToListTop(true);
+  }
+  function scrollToListTop(instant = false) {
+    const scroller = $('#libraryScroll'),
+      list = $('#list');
+    if (!scroller || !list) return;
+    scroller.scrollTo({
+      top: 0,
+      behavior:
+        instant || document.body.dataset.motion === 'off' || document.body.dataset.motion === 'reduced'
+          ? 'instant'
+          : 'smooth',
+    });
   }
 
-  // Wall layout: a CSS grid of 4px rows; every tile spans the rows its own height needs.
-  let masonryObserver = null;
-  function layoutMasonry() {
-    const list = $('#list');
-    masonryObserver?.disconnect();
-    masonryObserver = null;
-    if (!list || list.dataset.view !== 'masonry' || list.classList.contains('xv-virtual-list')) return;
-    const unit = 4,
-      gap = 6;
-    const tiles = [...list.children].filter(element => element.classList.contains('tweet'));
-    const heights = tiles.map(tile => tile.getBoundingClientRect().height);
-    tiles.forEach((tile, index) => {
-      tile.style.gridRowEnd = `span ${Math.max(1, Math.ceil((heights[index] + gap) / unit))}`;
-    });
-    if (typeof ResizeObserver !== 'function') return;
-    masonryObserver = new ResizeObserver(entries => {
-      const sized = entries.map(entry => [
-        entry.target,
-        entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height,
-      ]);
-      for (const [tile, height] of sized)
-        tile.style.gridRowEnd = `span ${Math.max(1, Math.ceil((height + gap) / unit))}`;
-    });
-    for (const tile of tiles) masonryObserver.observe(tile);
-  }
-
-  let performanceObserver = null;
   let libraryLongTaskObserver = null;
   const libraryLongTasks = [];
   if (typeof PerformanceObserver === 'function') {
@@ -949,70 +984,6 @@
     const configuredPageSize = Math.min(1500, Math.max(50, Number(settings.libraryPageSize) || 120));
     return settings.libraryPerformanceMode === 'performance' ? Math.min(configuredPageSize, 80) : configuredPageSize;
   }
-  function applyPerformanceHints(root) {
-    if (!root) return;
-    const containment = settings.libraryContentVisibility !== false && root.dataset.view !== 'masonry';
-    root.style.contentVisibility = containment ? 'auto' : 'visible';
-    root.style.contain = containment ? 'layout style' : 'none';
-    root.querySelectorAll('.tweet').forEach(card => {
-      card.style.contentVisibility = containment ? 'auto' : 'visible';
-      card.style.contain = containment ? 'layout style' : 'none';
-      if (containment) card.style.containIntrinsicSize = '0 360px';
-      else card.style.removeProperty('contain-intrinsic-size');
-    });
-    root.querySelectorAll('img').forEach(image => {
-      if (settings.libraryLazyMedia !== false) image.loading = 'lazy';
-      image.decoding = 'async';
-    });
-    root.querySelectorAll('video').forEach(video => {
-      if (settings.libraryPerformanceMode === 'performance' || settings.libraryPreloadMedia === 'none')
-        video.preload = 'none';
-      else if (settings.libraryPreloadMedia) video.preload = settings.libraryPreloadMedia;
-      const source = video.getAttribute('src');
-      if (source && !source.includes('#xvhelper=')) {
-        video.dataset.mediaSrc = source;
-        video.removeAttribute('src');
-        video.load();
-      }
-    });
-    performanceObserver?.disconnect();
-    if ('IntersectionObserver' in window) {
-      performanceObserver = new IntersectionObserver(
-        entries =>
-          entries.forEach(entry => {
-            const video = entry.target;
-            if (entry.isIntersecting) {
-              if (!video.getAttribute('src') && video.dataset.mediaSrc) {
-                video.src = video.dataset.mediaSrc;
-                const resumeAt = Number(video.dataset.resumeAt || 0);
-                if (resumeAt)
-                  video.addEventListener(
-                    'loadedmetadata',
-                    () => {
-                      if (resumeAt < video.duration) video.currentTime = resumeAt;
-                    },
-                    { once: true }
-                  );
-              }
-            } else if (settings.libraryPauseOffscreenVideo !== false) {
-              video.pause();
-              if (video.getAttribute('src')) {
-                video.dataset.resumeAt = String(video.currentTime || 0);
-                video.removeAttribute('src');
-                video.load();
-              }
-            }
-          }),
-        { rootMargin: '240px 0px' }
-      );
-      root.querySelectorAll('video[data-media-src]').forEach(video => performanceObserver.observe(video));
-    } else {
-      root.querySelectorAll('video[data-media-src]').forEach(video => {
-        video.src = video.dataset.mediaSrc;
-      });
-    }
-  }
-
   const workspaceRenderLib = function (dataReady = false) {
     const q = ($('#search')?.value || '').trim(),
       sort = $('#sort')?.value || 'new';
@@ -1021,6 +992,8 @@
     // lastSort has not been initialized on a fresh dashboard.
     if (!dataReady && (q !== lastQuery || sort !== lastSort)) {
       pageIndex = 0;
+      windowStart = 0;
+      reloadTarget = 0;
       pageCursors = [null];
       loadedQueryKey = '';
       libraryQueryDownloadRevision = null;
@@ -1061,10 +1034,9 @@
       return library;
     }
     $('#list')?.removeAttribute('aria-busy');
-    releaseHelperMedia($('#list'));
     const pageSize = exportPageSize(),
-      rows = filtered.slice(0, pageSize),
-      start = pageIndex * pageSize;
+      rows = filtered,
+      start = windowStart * pageSize;
     const exactTotal = libraryQueryMatched ?? (!q ? libraryTotalRecords : null);
     const pageTotal = libraryQueryTruncated ? libraryQueryRetained : exactTotal;
     const pages =
@@ -1074,6 +1046,7 @@
     settings.rememberLibraryQuery = false;
     try {
       if (['compact', 'table'].includes(settings.libraryView) && rows.length) {
+        releaseHelperMedia($('#list'));
         renderCompact(rows, settings.libraryView);
         $('#libMediaCount').textContent = fmt(rows.reduce((count, post) => count + (post.media?.length || 0), 0));
         $('#libLocalCount').textContent = fmt(
@@ -1084,11 +1057,10 @@
           )
         );
       } else {
-        library = rows;
         compactResizeObserver?.disconnect();
+        detachCompactScroll();
         $('#list').classList.remove('xv-virtual-list');
-        $('#list').onscroll = null;
-        baseRender({ externallyFiltered: true });
+        renderFeed(rows);
       }
     } finally {
       library = original;
@@ -1099,7 +1071,7 @@
       shown.textContent = filtered.length
         ? libraryQueryTruncated
           ? `${start + 1}–${start + rows.length} / ${fmt(libraryQueryRetained)} retained · top of ${fmt(libraryQueryMatched)} matches`
-          : `${start + 1}–${start + rows.length}${exactTotal == null ? (libraryQueryHasMore ? '+' : '') : ` / ${fmt(exactTotal)}`}`
+          : `${fmt(start + 1)}–${fmt(start + rows.length)}${exactTotal == null ? (libraryQueryHasMore ? '+' : '') : ` / ${fmt(exactTotal)}`}`
         : '0';
     if (!filtered.length && libraryTotalRecords !== 0 && q) {
       const empty = $('#list .empty');
@@ -1143,26 +1115,76 @@
     renderPaging(pages, libraryQueryHasMore);
     scheduleFacets();
     renderSelection();
-    applyPerformanceHints($('#list'));
-    layoutMasonry();
-    hydrateHelperMedia($('#list'));
     return rows;
   };
+  // Card layouts: library-feed.js mounts the window incrementally and patches in place for the same query.
+  function renderFeed(rows) {
+    const list = $('#list');
+    const feed = window.XVaultLibraryFeed;
+    if (!feed) return baseRender?.({ externallyFiltered: true });
+    const view = ['timeline', 'cards', 'gallery', 'masonry'].includes(settings.libraryView)
+      ? settings.libraryView
+      : 'cards';
+    feed.render({
+      rows,
+      key: `${currentBase()}|${windowStart}`,
+      view,
+      selected: () => selected,
+      nearEnd: () => loadMore(true),
+    });
+    let media = 0,
+      local = 0;
+    for (const post of rows) {
+      media += post.media?.length || 0;
+      local += (libraryDownloads.get(String(post.id)) || []).filter(row => row.state === 'complete').length;
+    }
+    if ($('#libMediaCount')) $('#libMediaCount').textContent = fmt(media);
+    if ($('#libLocalCount')) $('#libLocalCount').textContent = fmt(local);
+    // Settings → Library → Performance: let the browser skip painting mounted cards that are off screen.
+    if (list) list.dataset.cv = settings.libraryContentVisibility !== false && view !== 'masonry' ? 'auto' : 'off';
+  }
+  // Append the next page to the window. Automatic when the reader reaches the end (Settings → Library → "Load
+  // more automatically"), explicit through the in-flow button otherwise. Never past MAX_RETAINED rows.
+  function loadMore(auto = false) {
+    if (loadingMore || mutationBusy || !loadedQueryKey || !libraryQueryHasMore) return false;
+    if (auto && settings.libraryAutoLoad === false) return false;
+    if (library.length + exportPageSize() > MAX_RETAINED) {
+      if (!auto) setPage(1);
+      return false;
+    }
+    loadingMore = true;
+    pageIndex++;
+    void workspaceLoadLib({ append: true }).finally(() => {
+      loadingMore = false;
+    });
+    return true;
+  }
+  window.XVaultLibraryLoadMore = () => loadMore(false);
   window.XVaultDashboard.provide('renderLib', builtin => {
     baseRender = builtin;
     return workspaceRenderLib;
   });
 
-  const workspaceLoadLib = async function () {
+  const workspaceLoadLib = async function (options = {}) {
     if (mutationBusy) return toast('Wait for the current Library change to finish');
+    const append = options?.append === true && library.length > 0 && loadedBase === currentBase();
     const generation = ++libraryLoadGeneration;
-    const previous = library;
+    const previous = library,
+      previousDownloads = libraryDownloads,
+      startPage = pageIndex,
+      base = currentBase(),
+      // Same search, same window: keep the rows on screen while the fresh copy is read (no blank flash).
+      inPlace = append || (base === loadedBase && library.length > 0 && $('#list')?.querySelector('.tweet'));
     if (activeQueryId) void call({ type: 'CANCEL_LIBRARY_QUERY', queryId: activeQueryId }).catch(() => {});
     const queryId = crypto.randomUUID();
     activeQueryId = queryId;
     const q = ($('#search')?.value || '').trim(),
       sort = $('#sort')?.value || 'new',
-      pageSize = exportPageSize();
+      pageSize = exportPageSize(),
+      target = append
+        ? pageSize
+        : Math.max(pageSize, Math.min(MAX_RETAINED, base === loadedBase && !startPage ? reloadTarget : 0));
+    reloadTarget = 0;
     const rankedSort = !['new', 'old'].includes(sort),
       planIdentity = JSON.stringify([q, sort, randomSeed]);
     if (rankedSort && planIdentity !== rankedPlanIdentity) {
@@ -1204,11 +1226,16 @@
       retained = null,
       rankCacheHit = false;
     const list = $('#list');
-    if (list) {
+    if (list && inPlace) {
+      list.setAttribute('aria-busy', 'true');
+      list.dataset.refreshing = append ? 'more' : 'refresh';
+      if (append) renderPaging(0, true, 'loading');
+    } else if (list) {
       releaseHelperMedia(list);
-      performanceObserver?.disconnect();
       helperObserver?.disconnect();
       list.setAttribute('aria-busy', 'true');
+      delete list.dataset.refreshing;
+      window.XVaultLibraryFeed?.reset();
       list.innerHTML =
         '<div class="empty" role="status"><span data-query-progress>Opening a bounded Library page…</span> <button type="button" class="quiet" data-cancel-library-query>Cancel search</button></div>';
       list.querySelector('[data-cancel-library-query]')?.addEventListener('click', () => {
@@ -1228,14 +1255,14 @@
       });
     }
     try {
-      for (let batch = 0; batch < 10000 && rows.length < pageSize && !done; batch++) {
-        const remaining = pageSize - rows.length;
+      for (let batch = 0; batch < 10000 && rows.length < target && !done; batch++) {
+        const remaining = target - rows.length;
         const request = {
           type: 'QUERY_LIBRARY_PAGE',
           queryId,
           query: q,
           sort,
-          limit: rankedSort ? pageSize : remaining,
+          limit: rankedSort ? target : remaining,
           offset: rankedSort ? pageIndex * pageSize : 0,
           after: rankedSort ? null : afterKey,
           expectedRevision,
@@ -1322,12 +1349,12 @@
         hasMore = !!page.hasMore;
         if (done && pageIndex === 0 && !q && !rows.length && totalRecords == null) totalRecords = 0;
         if (!rankedSort) afterKey = page.nextKey || afterKey;
-        if (list && !done && rows.length < pageSize) {
+        if (list && !inPlace && !done && rows.length < target) {
           const status = list.querySelector('.empty');
           if (status)
             status.textContent = `Searching indexed records · ${fmt(scanned)} checked · ${fmt(rows.length)} matches`;
         }
-        if (rankedSort || rows.length >= pageSize || done) break;
+        if (rankedSort || rows.length >= target || done) break;
         if (!page.nextKey || (page.nextKey === afterKey && !page.scanned))
           throw Error('The Library cursor stopped advancing. Restart the query.');
         await new Promise(resolve => setTimeout(resolve, 0));
@@ -1340,8 +1367,18 @@
         if (!nextDownloads.has(id)) nextDownloads.set(id, []);
         nextDownloads.get(id).push(row);
       }
-      library = rows;
-      libraryDownloads = nextDownloads;
+      if (append) {
+        const known = new Set(previous.map(row => String(row.id)));
+        library = previous.concat(rows.filter(row => !known.has(String(row.id))));
+        libraryDownloads = new Map([...previousDownloads, ...nextDownloads]);
+      } else {
+        library = rows;
+        libraryDownloads = nextDownloads;
+        windowStart = startPage;
+        // A same-window reload may read several pages at once; the window still ends on a page boundary.
+        if (rows.length > pageSize) pageIndex = startPage + Math.ceil(rows.length / pageSize) - 1;
+      }
+      loadedBase = base;
       libraryTotalRecords = totalRecords;
       libraryQueryMatched = matched;
       libraryQueryTruncated = truncated;
@@ -1349,6 +1386,7 @@
       libraryQueryHasMore = rankedSort ? hasMore : !done;
       if (!rankedSort) pageCursors[pageIndex + 1] = libraryQueryHasMore ? afterKey : null;
       loadedQueryKey = `${libraryRevision}|${q}|${sort}|${pageIndex}|${randomSeed}|${pageSize}`;
+      if (list) delete list.dataset.refreshing;
       if (activeQueryId === queryId) activeQueryId = '';
       const renderStartedAt = performance.now();
       renderLib(true);
@@ -1378,7 +1416,8 @@
         searchProjectionRows,
         cursorOperations,
         recordsReturned: rows.length,
-        dashboardRecordsRetained: rows.length,
+        dashboardRecordsRetained: library.length,
+        appended: append,
         downloadRowsRead,
         downloadCursorOperations,
         responseBytesEstimate: bytesEstimate,
@@ -1420,6 +1459,9 @@
     } catch (error) {
       if (generation !== libraryLoadGeneration) return;
       library = previous;
+      libraryDownloads = previousDownloads;
+      if (append) pageIndex = startPage - 1;
+      if (list) delete list.dataset.refreshing;
       loadedQueryKey = `${libraryRevision}|${q}|${sort}|${pageIndex}|${randomSeed}|${pageSize}`;
       if (activeQueryId === queryId) activeQueryId = '';
       renderLib(true);
@@ -1452,80 +1494,89 @@
   };
   window.XVaultDashboard.provide('loadLib', () => workspaceLoadLib);
 
-  function renderPaging(pages, hasMore = false) {
+  // In-flow footer at the end of the results: what is shown, "Load more", page navigation and back to top. It is
+  // part of the scrolling content, so it can never cover a post.
+  let lastPages = 1;
+  function renderPaging(pages, hasMore = false, phase = '') {
     const target = $('#libraryPages');
     if (!target) return;
-    const exact = libraryQueryMatched != null || (!($('#search')?.value || '').trim() && libraryTotalRecords != null);
-    const canNext = exact ? pageIndex < pages - 1 : hasMore;
-    target.hidden = pageIndex === 0 && !canNext;
-    target.innerHTML = `<button id="libraryPrev" class="quiet" ${pageIndex === 0 ? 'disabled' : ''}>← Previous</button><span>${exact ? `Page ${pageIndex + 1} of ${pages}` : `Page ${pageIndex + 1} · ${hasMore ? 'more results' : 'end of results'}`}</span><button id="libraryNext" class="quiet" ${!canNext ? 'disabled' : ''}>Next →</button>`;
+    if (pages) lastPages = pages;
+    const pageSize = exportPageSize(),
+      q = ($('#search')?.value || '').trim();
+    const exact = libraryQueryMatched != null || (!q && libraryTotalRecords != null);
+    const total = libraryQueryTruncated
+      ? libraryQueryRetained
+      : (libraryQueryMatched ?? (!q ? libraryTotalRecords : null));
+    const canNext = exact ? pageIndex < lastPages - 1 : hasMore;
+    const canPrev = windowStart > 0;
+    const from = windowStart * pageSize + 1,
+      to = windowStart * pageSize + library.length,
+      capped = library.length + pageSize > MAX_RETAINED,
+      remaining = total == null ? pageSize : Math.max(0, Math.min(pageSize, total - to));
+    target.hidden = !library.length && !canPrev;
+    target.dataset.phase = phase || (canNext ? 'more' : 'end');
+    const status =
+      phase === 'loading'
+        ? 'Loading more posts…'
+        : library.length
+          ? `Showing ${fmt(from)}–${fmt(to)}${total != null ? ` of ${fmt(total)}` : hasMore ? ' · more available' : ''}${!canNext ? ' · end of results' : ''}`
+          : '';
+    const pageLabel = `Page ${fmt(windowStart + 1)}${pageIndex > windowStart ? `–${fmt(pageIndex + 1)}` : ''}${exact ? ` of ${fmt(lastPages)}` : ''}`;
+    target.innerHTML = `<p class="lib5-pager-status" role="status" aria-live="polite">${esc(status)}</p>${
+      canNext && !capped
+        ? `<button type="button" id="libraryLoadMore" class="primary" ${phase === 'loading' ? 'disabled aria-busy="true"' : ''}>${phase === 'loading' ? 'Loading…' : `Load ${fmt(remaining || pageSize)} more`}</button>`
+        : ''
+    }${
+      canNext && capped
+        ? `<p class="lib5-pager-note">${fmt(library.length)} posts are open in this window. Continue on the next page to keep scrolling light.</p>`
+        : ''
+    }<span class="lib5-pager-nav" role="group" aria-label="Library pages"><button type="button" id="libraryPrev" class="quiet" ${canPrev ? '' : 'disabled'}>${window.XVaultIcons?.svg('previous') || ''}<span>Previous page</span></button><span class="lib5-pager-page">${esc(pageLabel)}</span><button type="button" id="libraryNext" class="quiet" ${canNext ? '' : 'disabled'}><span>Next page</span>${window.XVaultIcons?.svg('next') || ''}</button></span><button type="button" id="libraryTop" class="quiet">${window.XVaultIcons?.svg('toTop') || ''}<span>Back to top</span></button>`;
     $('#libraryPrev').onclick = () => setPage(-1);
     $('#libraryNext').onclick = () => setPage(1);
+    $('#libraryTop').onclick = () => {
+      scrollToListTop();
+      $('#search')?.focus({ preventScroll: true });
+    };
+    const more = $('#libraryLoadMore');
+    if (more) more.onclick = () => loadMore(false);
   }
 
+  // Selection state is drawn by the renderers (library-feed.js cards, windowed List/Table rows); this only syncs it.
   function renderSelection() {
-    const cards = $$('#list .tweet');
-    const matching = resultRows();
-    const visibleRows = matching ? matching.slice(0, exportPageSize()) : [];
-    const byId = new Map(visibleRows.map(post => [String(post.id), post]));
-    for (const card of cards) {
-      card.querySelectorAll('.xv-color-pill,.xv-card-select,.xv-open-player').forEach(element => element.remove());
-      const id = card.dataset.id;
-      const color = byId.get(id)?.userMeta?.colorLabel || card.dataset.colorLabel;
-      if (color && color !== 'none') {
-        card.dataset.colorLabel = color;
-        const pill = document.createElement('span');
-        pill.className = 'xv-color-pill';
-        pill.textContent = `${color} label`;
-        card.prepend(pill);
-      } else delete card.dataset.colorLabel;
-      const label = document.createElement('label');
-      label.className = 'xv-card-select';
-      label.innerHTML = `<input type="checkbox" aria-label="Select post ${esc(id)}" ${selected.has(id) ? 'checked' : ''}><span class="sr">Select</span>`;
-      label.onclick = event => event.stopPropagation();
-      label.querySelector('input').onclick = event => {
-        event.currentTarget.dataset.shiftSelection = event.shiftKey ? '1' : '0';
-      };
-      label.querySelector('input').onchange = event => {
-        if (event.target.dataset.shiftSelection === '1' && selectionAnchor) {
-          const matching = resultRows();
-          if (matching) model.applySelectionRange(selected, matching, selectionAnchor, id, event.target.checked);
-        }
-        if (event.target.checked) {
-          if (selected.size >= 5000 && !selected.has(id)) {
-            event.target.checked = false;
-            toast('Selection is limited to 5,000 posts at a time.');
-            return;
-          }
-          selected.add(id);
-        } else selected.delete(id);
-        event.target.dataset.shiftSelection = '0';
-        selectionAnchor = id;
-        updateSelectionBar();
-      };
-      card.prepend(label);
-      card.tabIndex = 0;
-      card.classList.toggle('xv-selected', selected.has(id));
-      for (const media of [...card.querySelectorAll('.mediaItem')].filter(item => item.querySelector('video'))) {
-        const open = document.createElement('button');
-        open.className = 'xv-open-player';
-        open.type = 'button';
-        open.title = 'Open in viewer';
-        open.innerHTML = '<span class="sr">Open player</span>';
-        open.insertAdjacentHTML('afterbegin', window.XVaultIcons?.svg('quicklook') || '');
-        open.onclick = event => {
-          event.stopPropagation();
-          const matching = resultRows();
-          if (!matching) return toast('Wait for the current search to finish');
-          const rows = matching.slice(0, exportPageSize());
-          const index = rows.findIndex(post => String(post.id) === id);
-          if (index >= 0) openLightbox(rows, index, Number(media.dataset.m));
-        };
-        media.append(open);
-      }
+    window.XVaultLibraryFeed?.syncSelection(selected);
+    for (const row of $$('#list.xv-virtual-list .tweet')) {
+      const on = selected.has(row.dataset.id);
+      row.classList.toggle('xv-selected', on);
+      const box = row.querySelector('.xv-card-select input');
+      if (box && box.checked !== on) box.checked = on;
     }
     updateSelectionBar();
   }
+  // One entry point for checkbox, Shift-click range and Ctrl/Cmd-click toggles from every layout.
+  window.XVaultLibrarySelect = (rawId, { range = false, checked = true, toggle = false } = {}) => {
+    const id = String(rawId),
+      on = toggle ? !selected.has(id) : checked !== false;
+    if (range && selectionAnchor) {
+      const matching = resultRows();
+      if (matching) model.applySelectionRange(selected, matching, selectionAnchor, id, on);
+    }
+    if (on) {
+      if (selected.size >= 5000 && !selected.has(id)) {
+        toast('Selection is limited to 5,000 posts at a time.');
+        renderSelection();
+        return;
+      }
+      selected.add(id);
+    } else selected.delete(id);
+    if (selected.size > 5000) {
+      for (const extra of [...selected].slice(5000)) selected.delete(extra);
+      toast('Selection is limited to 5,000 posts at a time.');
+    }
+    selectionAnchor = id;
+    renderSelection();
+  };
+  const selectBox = (id, handle) =>
+    `<label class="xv-card-select" title="Select (Shift-click for a range)"><input type="checkbox" data-select="${esc(id)}" aria-label="Select post by @${esc(handle || 'unknown')}"${selected.has(String(id)) ? ' checked' : ''}></label>`;
 
   function openLinkExport() {
     const dialog = $('#libraryExportDialog');
@@ -1576,7 +1627,7 @@
         ? selected.size
         : scope === 'page'
           ? matching
-            ? Math.min(matching.length, exportPageSize())
+            ? matching.length
             : 0
           : completeInMemory
             ? (total ?? matching?.length ?? 0)
@@ -1584,7 +1635,7 @@
     const streaming = scope === 'all' && (libraryQueryHasMore || libraryQueryTruncated);
     $('#libraryExportCount').textContent = streaming
       ? `${fmt(matching?.length || 0)} loaded; remaining matches stream newest first in revision-checked pages`
-      : `${ready ? fmt(count || 0) : '...'} ${scope === 'all' ? 'matching' : scope === 'page' ? 'on this page' : 'selected'} unique posts${ready ? '' : ' - search pending'}`;
+      : `${ready ? fmt(count || 0) : '...'} ${scope === 'all' ? 'matching' : scope === 'page' ? 'loaded in this window' : 'selected'} unique posts${ready ? '' : ' - search pending'}`;
     const disabled = !ready || !count || !host || exportBusy;
     $('#libraryExportTxt').disabled = disabled;
     $('#libraryCopyLinks').disabled = disabled;
@@ -1595,8 +1646,7 @@
     if (!matching) throw new Error('Wait for the current search to finish');
     const scope = $('#libraryExportScope').value;
     if (scope === 'all' && (libraryQueryHasMore || libraryQueryTruncated)) return { posts: [], stream: true };
-    const currentPage = matching.slice(0, exportPageSize());
-    return { posts: window.XVaultLinkExport.selectScope(matching, scope, selected, currentPage), stream: false };
+    return { posts: window.XVaultLinkExport.selectScope(matching, scope, selected, matching), stream: false };
   }
 
   function runLinkExport(action) {
@@ -1825,12 +1875,43 @@
     renderSelection();
   }
 
+  // Every match of the current search, not only the loaded window: the background resolves the ids (up to the
+  // 5,000-post selection limit) without sending records. Download-state rules fall back to the loaded rows.
+  let selectingEvery = false;
+  async function selectEveryMatch() {
+    const q = ($('#search')?.value || '').trim();
+    if (selectingEvery) return;
+    if (!libraryQueryHasMore && !libraryQueryTruncated && windowStart === 0) return selectAllMatching();
+    selectingEvery = true;
+    const count = $('#librarySelectedCount');
+    if (count) count.textContent = 'Selecting every match…';
+    try {
+      const response = await call({ type: 'QUERY_LIBRARY_IDS', query: q, limit: 5000 });
+      if (!response?.ok || response.unsupported) throw new Error(response?.error || 'unsupported');
+      selected.clear();
+      for (const id of response.ids || []) selected.add(String(id));
+      selectionAnchor = response.ids?.[0] ? String(response.ids[0]) : '';
+      toast(
+        response.truncated
+          ? `Selected the first ${fmt(selected.size)} matches (selection limit 5,000)`
+          : `Selected all ${fmt(selected.size)} matches`
+      );
+    } catch {
+      selectAllMatching();
+      toast(`Selected the ${fmt(selected.size)} loaded matches`);
+    } finally {
+      selectingEvery = false;
+      renderSelection();
+    }
+  }
+  window.XVaultLibrarySelectEveryMatch = selectEveryMatch;
+
   function selectVisiblePage() {
     const rows = resultRows();
     if (!rows) return;
     const next = model.addSelection(
       selected,
-      rows.slice(0, exportPageSize()).map(post => post.id)
+      rows.map(post => post.id)
     );
     if (next.length > 5000) {
       toast('Selection is limited to 5,000 posts at a time.');
@@ -1846,7 +1927,7 @@
     if (!rows) return;
     const next = model.invertSelection(
       selected,
-      rows.slice(0, exportPageSize()).map(post => post.id)
+      rows.map(post => post.id)
     );
     if (next.length > 5000) {
       toast('Selection is limited to 5,000 posts at a time.');
@@ -2513,7 +2594,11 @@
   }
 
   function releaseHelperMedia(root) {
-    for (const element of root?.querySelectorAll?.('[data-helper-path]') || []) releaseHelperElement(element);
+    const elements = root?.matches?.('[data-helper-path]') ? [root] : [];
+    for (const element of [...elements, ...(root?.querySelectorAll?.('[data-helper-path]') || [])]) {
+      helperObserver?.unobserve(element);
+      releaseHelperElement(element);
+    }
     helperPool.collect();
   }
   window.XVaultReleaseHelperMedia = releaseHelperMedia;
@@ -2559,37 +2644,43 @@
     }
   }
 
-  function hydrateHelperMedia(root) {
-    if (root?.id === 'list') {
-      helperObserver?.disconnect();
-      helperObserver = new IntersectionObserver(
-        entries => {
-          for (const entry of entries) {
-            if (!entry.isIntersecting) {
-              entry.target.dataset.helperVisible = '0';
-              releaseHelperElement(entry.target);
-              continue;
-            }
-            entry.target.dataset.helperVisible = '1';
-            const path = entry.target.dataset.helperPath;
-            if (path && !entry.target.getAttribute('src')?.startsWith('blob:'))
-              helperQueue.push({ element: entry.target, path });
+  // One observer for the whole Library list: blocks mounted by library-feed.js and windowed rows register their
+  // helper-served media as they appear and unregister when they are released.
+  function listHelperObserver() {
+    helperObserver ||= new IntersectionObserver(
+      entries => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) {
+            entry.target.dataset.helperVisible = '0';
+            releaseHelperElement(entry.target);
+            continue;
           }
-          pumpHelperQueue();
-        },
-        { rootMargin: '320px 0px' }
-      );
-    }
+          entry.target.dataset.helperVisible = '1';
+          const path = entry.target.dataset.helperPath;
+          if (path && !entry.target.getAttribute('src')?.startsWith('blob:'))
+            helperQueue.push({ element: entry.target, path });
+        }
+        pumpHelperQueue();
+      },
+      { root: $('#libraryScroll'), rootMargin: '320px 0px' }
+    );
+    return helperObserver;
+  }
+  function hydrateHelperMedia(root) {
+    const inList = root?.id === 'list' || !!root?.closest?.('#list');
     for (const element of root?.querySelectorAll?.('img[src*="#xvhelper="],video[src*="#xvhelper="]') || []) {
       const marker = element.getAttribute('src')?.split('#xvhelper=')[1];
       if (!marker) continue;
       const path = decodeURIComponent(marker);
       element.dataset.helperPath = path;
-      if (root.id === 'list') helperObserver.observe(element);
+      if (inList) listHelperObserver().observe(element);
       else helperQueue.push({ element, path });
     }
     pumpHelperQueue();
   }
+  window.XVaultObserveHelperMedia = nodes => {
+    for (const node of nodes || []) hydrateHelperMedia(node);
+  };
   window.XVaultHydrateHelperMedia = hydrateHelperMedia;
 
   const workspaceRenderLightbox = function () {
@@ -3407,7 +3498,9 @@
     queryIssues.className = 'xv-query-issues';
     queryIssues.setAttribute('role', 'status');
     queryIssues.hidden = true;
-    $('.lib-filters').before(queryIssues);
+    const headMain = $('#libraryHead .lib5-row-main');
+    if (headMain) headMain.after(queryIssues);
+    else $('.lib-filters').before(queryIssues);
     const help = $('#page-library .booruHelp');
     if (help)
       help.innerHTML =
@@ -3428,10 +3521,100 @@
 <section class="facet" aria-labelledby="facetSourcesTitle"><h3 id="facetSourcesTitle">Sources</h3><div><button type="button" class="facet-item" data-token="source:bookmarks"><span class="facet-icon" data-facet-icon="saved"></span><span>Bookmarks</span></button><button type="button" class="facet-item" data-token="source:likes"><span class="facet-icon" data-facet-icon="heart"></span><span>Likes</span></button><button type="button" class="facet-item" data-token="source:profile"><span class="facet-icon" data-facet-icon="person"></span><span>Profiles</span></button></div></section>
 <section class="facet" aria-labelledby="facetAuthorsTitle"><h3 id="facetAuthorsTitle">Authors</h3><div id="facetAuthors"></div></section>
 <section class="facet" aria-labelledby="facetTagsTitle"><h3 id="facetTagsTitle">Tags</h3><div id="facetTags"></div></section>
-<section class="facet xv-smart-collections" aria-labelledby="facetViewsTitle"><header class="facet-heading"><h3 id="facetViewsTitle">Smart Collections</h3><div><button type="button" class="quiet" id="libraryCollectionsExport" title="Export query definitions">Export</button><button type="button" class="quiet" id="libraryCollectionsImport" title="Preview an imported collection file">Import</button><input id="libraryCollectionsFile" type="file" accept="application/json,.json" hidden></div></header><p class="facet-portable-note">Live search rules · archive rows stay local</p><div id="facetViews"></div><form class="facet-save" id="libraryViewForm"><input id="libraryViewName" maxlength="48" placeholder="Name this collection" aria-label="Smart Collection name"><select id="libraryCollectionIcon" aria-label="Collection icon"><option value="saved">Search</option><option value="video">Video</option><option value="image">Image</option><option value="note">Notes</option><option value="tag">Tags</option><option value="favorite">Favorites</option><option value="thread">Thread</option><option value="quote">Quotes</option><option value="calendar">Dates</option></select><button id="librarySaveView" type="submit" title="Save the current query, sort and layout">Save</button></form></section>`;
+<section class="facet xv-smart-collections" aria-labelledby="facetViewsTitle"><header class="facet-heading"><h3 id="facetViewsTitle">Smart collections</h3><details class="menu facet-menu"><summary aria-label="Smart collection actions" title="Export or import collections" data-xv-icon="more"></summary><div class="menu-pop"><button type="button" id="libraryCollectionsExport" title="Export query definitions" data-xv-icon="export">Export definitions</button><button type="button" id="libraryCollectionsImport" title="Preview an imported collection file" data-xv-icon="importFile">Import from file…</button></div></details><input id="libraryCollectionsFile" type="file" accept="application/json,.json" hidden></header><p class="facet-portable-note">Live search rules · archive rows stay local</p><div id="facetViews"></div><form class="facet-save" id="libraryViewForm"><input id="libraryViewName" maxlength="48" placeholder="Name this collection" aria-label="Smart Collection name"><select id="libraryCollectionIcon" aria-label="Collection icon"><option value="saved">Search</option><option value="video">Video</option><option value="image">Image</option><option value="note">Notes</option><option value="tag">Tags</option><option value="favorite">Favorites</option><option value="thread">Thread</option><option value="quote">Quotes</option><option value="calendar">Dates</option></select><button id="librarySaveView" type="submit" title="Save the current query, sort and layout">Save</button></form></section>`;
     libraryPage.prepend(facets);
     for (const slot of facets.querySelectorAll('[data-facet-icon]'))
       slot.innerHTML = window.XVaultIcons?.svg(slot.dataset.facetIcon) || '';
+    // Sidebar sections fold (saved per section); sections other modules add later (Boards) fold the same way.
+    const collapsedFacets = new Set(Array.isArray(settings.librarySideCollapsed) ? settings.librarySideCollapsed : []);
+    const enhanceFacetSections = () => {
+      for (const section of facets.querySelectorAll(':scope > section.facet')) {
+        const heading = section.querySelector(':scope > h3, :scope > header > h3');
+        if (!heading || heading.querySelector('.facet-toggle')) continue;
+        const key = heading.id || section.id || heading.textContent.trim();
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'facet-toggle';
+        toggle.dataset.facetKey = key;
+        toggle.innerHTML = `<span>${esc(heading.textContent.trim())}</span>${window.XVaultIcons?.svg('chevronDown') || ''}`;
+        heading.replaceChildren(toggle);
+        const collapsed = collapsedFacets.has(key);
+        section.dataset.collapsed = collapsed ? 'true' : 'false';
+        toggle.setAttribute('aria-expanded', String(!collapsed));
+      }
+    };
+    enhanceFacetSections();
+    new MutationObserver(enhanceFacetSections).observe(facets, { childList: true });
+    facets.addEventListener('click', event => {
+      const toggle = event.target.closest('.facet-toggle');
+      if (!toggle) return;
+      const section = toggle.closest('section.facet'),
+        collapsed = section.dataset.collapsed !== 'true';
+      section.dataset.collapsed = collapsed ? 'true' : 'false';
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      if (collapsed) collapsedFacets.add(toggle.dataset.facetKey);
+      else collapsedFacets.delete(toggle.dataset.facetKey);
+      void save({ librarySideCollapsed: [...collapsedFacets].slice(0, 24) }, false);
+    });
+
+    // Sidebar: a column on wide windows (shown or hidden, remembered), a drawer over the results below 1100px.
+    const sideToggle = $('#librarySideToggle');
+    const narrowSide = matchMedia('(max-width: 1099px)');
+    const scrim = document.createElement('div');
+    scrim.className = 'lib5-scrim';
+    scrim.hidden = true;
+    libraryPage.append(scrim);
+    const syncSidebar = () => {
+      const narrow = narrowSide.matches,
+        open = narrow ? libraryPage.dataset.drawer === 'open' : settings.librarySidebar !== 'closed';
+      libraryPage.dataset.side = narrow ? (open ? 'drawer-open' : 'drawer') : open ? 'open' : 'closed';
+      facets.inert = !open;
+      scrim.hidden = !(narrow && open);
+      if (sideToggle) {
+        sideToggle.setAttribute('aria-expanded', String(open));
+        sideToggle.title = `${open ? 'Hide' : 'Show'} sidebar (\\)`;
+        sideToggle.querySelector('svg.xv-icon')?.remove();
+        sideToggle.insertAdjacentHTML(
+          'afterbegin',
+          window.XVaultIcons?.svg(open ? 'sidebarClose' : 'sidebarOpen') || ''
+        );
+      }
+    };
+    const toggleSidebar = force => {
+      const narrow = narrowSide.matches,
+        open = libraryPage.dataset.side === 'open' || libraryPage.dataset.side === 'drawer-open',
+        next = typeof force === 'boolean' ? force : !open;
+      if (narrow) libraryPage.dataset.drawer = next ? 'open' : 'closed';
+      else {
+        settings.librarySidebar = next ? 'open' : 'closed';
+        void save({ librarySidebar: settings.librarySidebar }, false);
+      }
+      syncSidebar();
+      if (narrow && next) facets.querySelector('button')?.focus({ preventScroll: true });
+      else if (narrow) sideToggle?.focus({ preventScroll: true });
+    };
+    window.XVaultLibraryToggleSidebar = toggleSidebar;
+    sideToggle?.addEventListener('click', () => toggleSidebar());
+    scrim.addEventListener('click', () => toggleSidebar(false));
+    narrowSide.addEventListener('change', syncSidebar);
+    syncSidebar();
+    facets.addEventListener('click', event => {
+      if (narrowSide.matches && event.target.closest('[data-destination],[data-token],[data-view-index]'))
+        setTimeout(() => toggleSidebar(false), 0);
+    });
+    facets.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && narrowSide.matches && libraryPage.dataset.side === 'drawer-open') {
+        event.stopPropagation();
+        toggleSidebar(false);
+      }
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key !== '\\' || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (!libraryPage.classList.contains('show') || document.querySelector('dialog[open]')) return;
+      if (event.target.closest?.('input,textarea,select,[contenteditable]')) return;
+      event.preventDefault();
+      toggleSidebar();
+    });
     facets.addEventListener('click', event => {
       const destinationButton = event.target.closest('[data-destination]');
       if (destinationButton) {
@@ -3482,14 +3665,8 @@
 
     // Layout, tile size and sort
     const layout = $('#libraryLayout');
-    let activeLayoutTransition = null,
-      layoutTransitionGeneration = 0;
-    document.addEventListener('xv:motion-disabled', () => {
-      layoutTransitionGeneration++;
-      activeLayoutTransition?.skipTransition();
-      activeLayoutTransition = null;
-      libraryPage.classList.remove('vt-list');
-    });
+    // Layout switches re-render in place; library-feed.js animates cards from their old positions (FLIP) and
+    // keeps the first visible post in view. No full-page View Transition snapshot of thousands of nodes.
     layout.addEventListener('click', event => {
       const button = event.target.closest('[data-layout]');
       if (!button) return;
@@ -3497,33 +3674,15 @@
       if (select.value === button.dataset.layout) return;
       select.value = button.dataset.layout;
       settings.libraryView = select.value; // render now; the save below confirms in the background
-      const swap = () => select.dispatchEvent(new Event('change', { bubbles: true }));
-      const calm =
-        ['off', 'reduced'].includes(document.body.dataset.motion) ||
-        matchMedia('(prefers-reduced-motion: reduce)').matches;
-      const generation = ++layoutTransitionGeneration;
-      activeLayoutTransition?.skipTransition();
-      if (!calm && typeof document.startViewTransition === 'function') {
-        libraryPage.classList.add('vt-list');
-        const transition = (activeLayoutTransition = document.startViewTransition(swap));
-        transition.finished
-          .catch(() => {})
-          .finally(() => {
-            if (generation === layoutTransitionGeneration) {
-              libraryPage.classList.remove('vt-list');
-              activeLayoutTransition = null;
-            }
-          });
-      } else {
-        libraryPage.classList.remove('vt-list');
-        activeLayoutTransition = null;
-        swap();
-      }
+      select.dispatchEvent(new Event('change', { bubbles: true }));
       syncChrome();
     });
     layout.addEventListener('keydown', event => {
       if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
-      const buttons = $$('#libraryLayout [data-layout]'),
+      // Arrow keys move between the layouts the toolbar shows (small screens hide Table and Wall).
+      const buttons = $$('#libraryLayout [data-layout]').filter(
+          button => button.offsetParent || button.getAttribute('aria-checked') === 'true'
+        ),
         current = buttons.findIndex(button => button.getAttribute('aria-checked') === 'true');
       const next =
         buttons[
@@ -3544,6 +3703,67 @@
         tileDirty = false;
       }, 350);
     });
+    // View menu: card style, media fit and feed width are saved per profile and redraw the mounted cards.
+    const viewMenu = $('#libraryViewMenu');
+    const VIEW_DEFAULTS = { libraryCardStyle: 'comfortable', libraryMediaFit: 'cover', libraryFeedWidth: 'wide' };
+    const syncViewMenu = () => {
+      for (const group of viewMenu?.querySelectorAll('[data-setting]') || []) {
+        const key = group.dataset.setting,
+          value = settings[key] || VIEW_DEFAULTS[key];
+        for (const input of group.querySelectorAll('input[type="radio"]')) input.checked = input.value === value;
+      }
+      // Small screens show every layout here too (the toolbar drops Table and, on small phones, Wall).
+      for (const input of viewMenu?.querySelectorAll('[data-layout-choice] input') || [])
+        input.checked = input.value === (settings.libraryView || 'timeline');
+    };
+    syncViewMenu();
+    viewMenu?.addEventListener('toggle', syncViewMenu);
+    viewMenu?.addEventListener('change', event => {
+      const input = event.target.closest('input[type="radio"]');
+      if (input?.closest('[data-layout-choice]')) {
+        $(`#libraryLayout [data-layout="${CSS.escape(input.value)}"]`)?.click();
+        return;
+      }
+      const key = input?.closest('[data-setting]')?.dataset.setting;
+      if (!key || settings[key] === input.value) return;
+      settings[key] = input.value;
+      void save({ [key]: input.value }, false);
+      if (key === 'libraryCardStyle') window.XVaultLibraryFeed?.reset();
+      renderLib(true);
+    });
+    // The sticky header's height feeds scroll-padding, the windowed table head and the sidebar drawer offset.
+    const head = $('#libraryHead');
+    if (head && 'ResizeObserver' in window)
+      new ResizeObserver(() =>
+        libraryPage.style.setProperty('--lib-head-h', `${Math.round(head.offsetHeight)}px`)
+      ).observe(head);
+    const scrollBox = $('#libraryScroll');
+    let scrolledFrame = 0;
+    scrollBox?.addEventListener(
+      'scroll',
+      () => {
+        if (scrolledFrame) return;
+        scrolledFrame = requestAnimationFrame(() => {
+          scrolledFrame = 0;
+          head?.toggleAttribute('data-scrolled', scrollBox.scrollTop > 4);
+        });
+      },
+      { passive: true }
+    );
+    // Timeline (xv-keystone.js #xkTimeline) is folded by default; the header chip opens it under the header.
+    const timelineToggle = $('#libraryTimelineToggle');
+    const syncTimeline = () => {
+      const open = window.XVaultTimeline?.isOpen?.() === true;
+      timelineToggle?.setAttribute('aria-expanded', String(open));
+      timelineToggle?.classList.toggle('active', open);
+      if (timelineToggle) timelineToggle.hidden = !window.XVaultTimeline;
+    };
+    timelineToggle?.addEventListener('click', () => {
+      void window.XVaultTimeline?.setOpen(!window.XVaultTimeline.isOpen());
+    });
+    document.addEventListener('xv:timeline-state', syncTimeline);
+    document.addEventListener('xv:timeline-mounted', syncTimeline);
+    syncTimeline();
     const sort = $('#sort');
     if (sort && !sort.querySelector('option[value="random"]'))
       sort.insertAdjacentHTML('beforeend', '<option value="random">Random order</option>');
@@ -3587,9 +3807,9 @@
       selectResults.id = 'librarySelectResultsQuick';
       selectResults.type = 'button';
       selectResults.className = 'quiet';
-      selectResults.textContent = 'Select page';
-      selectResults.title = 'Select the posts currently loaded for this search page (up to 1,500)';
-      selectResults.setAttribute('aria-label', 'Select page: select the posts on the current Library page');
+      selectResults.textContent = 'Select loaded';
+      selectResults.title = 'Select the posts loaded in this window (up to 1,500). Ctrl+Shift+A selects every match.';
+      selectResults.setAttribute('aria-label', 'Select loaded: select the posts loaded in this Library window');
       selectResults.onclick = selectAllMatching;
       const exportButton = document.createElement('button');
       exportButton.id = 'libraryExportOpen';
@@ -3650,8 +3870,11 @@
     bulk.setAttribute('role', 'toolbar');
     bulk.setAttribute('aria-label', 'Selected posts');
     bulk.hidden = true;
-    bulk.innerHTML = `<strong id="librarySelectedCount" aria-live="polite">0 selected</strong><button id="libraryClearSelection" class="quiet" title="Clear selection (Esc)">Clear</button><span class="bar-sep"></span><button id="libraryBulkFav">Favorite</button><button id="libraryBulkReviewed" title="Mark selected posts as reviewed">Reviewed</button><span class="bar-field"><input id="libraryBulkTagInput" maxlength="40" placeholder="Add tag" aria-label="Tag for selected posts"><button id="libraryBulkTag">Tag</button></span><button id="libraryBulkDownload">Download</button><button id="libraryBulkCopy">Links</button><details class="menu bar-more"><summary aria-label="More actions for selected posts">More</summary><div class="menu-pop"><button id="librarySelectPage" type="button">Select this page</button><button id="librarySelectResults" type="button" title="Replace selection with posts on the currently loaded page">Select loaded results</button><button id="libraryInvertPage" type="button" title="Toggle selection for posts on this page">Invert this page</button><hr><span class="bar-field"><select id="libraryBulkColorSelect" aria-label="Color label"><option value="none">No color</option><option value="red">Red</option><option value="amber">Amber</option><option value="green">Green</option><option value="blue">Blue</option><option value="violet">Violet</option></select><button id="libraryBulkColor" type="button">Apply color</button></span><button id="libraryBulkExport" type="button">Export selection as JSON</button></div></details><span class="bar-sep"></span><button id="libraryBulkTrash" class="danger">Move to Trash</button><button id="libraryUndoTrash" hidden>Undo Trash</button><button id="libraryBrowseTrash" class="quiet">Browse Trash</button>`;
-    $('#list').after(bulk);
+    bulk.innerHTML = `<strong id="librarySelectedCount" aria-live="polite">0 selected</strong><button id="libraryClearSelection" class="quiet" title="Clear selection (Esc)">Clear</button><span class="bar-sep"></span><button id="libraryBulkFav">Favorite</button><button id="libraryBulkReviewed" title="Mark selected posts as reviewed">Reviewed</button><span class="bar-field"><input id="libraryBulkTagInput" maxlength="40" placeholder="Add tag" aria-label="Tag for selected posts"><button id="libraryBulkTag">Tag</button></span><button id="libraryBulkDownload">Download</button><button id="libraryBulkCopy">Links</button><details class="menu bar-more"><summary aria-label="More actions for selected posts">More</summary><div class="menu-pop"><button id="librarySelectPage" type="button" title="Add every loaded post to the selection">Add loaded posts</button><button id="librarySelectResults" type="button" title="Replace the selection with the posts loaded in this window">Select loaded results</button><button id="librarySelectEvery" type="button" title="Select every post that matches the search, loaded or not (Ctrl+Shift+A)">Select every match</button><button id="libraryInvertPage" type="button" title="Toggle the selection of every loaded post">Invert loaded</button><hr><span class="bar-field"><select id="libraryBulkColorSelect" aria-label="Color label"><option value="none">No color</option><option value="red">Red</option><option value="amber">Amber</option><option value="green">Green</option><option value="blue">Blue</option><option value="violet">Violet</option></select><button id="libraryBulkColor" type="button">Apply color</button></span><button id="libraryBulkExport" type="button">Export selection as JSON</button></div></details><span class="bar-sep"></span><button id="libraryBulkTrash" class="danger">Move to Trash</button><button id="libraryUndoTrash" hidden>Undo Trash</button><button id="libraryBrowseTrash" class="quiet">Browse Trash</button>`;
+    ($('#libraryHead') || $('#list')).append(bulk);
+    new MutationObserver(() => {
+      head?.toggleAttribute('data-selecting', !bulk.hidden && bulk.dataset.undoOnly !== 'true');
+    }).observe(bulk, { attributes: true, attributeFilter: ['hidden', 'data-undo-only'] });
     const paging = document.createElement('nav');
     paging.id = 'libraryPages';
     paging.className = 'xv-library-pages';
@@ -3663,6 +3886,10 @@
     };
     $('#librarySelectResults').onclick = () => {
       selectAllMatching();
+      bulk.querySelector('details')?.removeAttribute('open');
+    };
+    $('#librarySelectEvery').onclick = () => {
+      void selectEveryMatch();
       bulk.querySelector('details')?.removeAttribute('open');
     };
     $('#libraryInvertPage').onclick = () => {
@@ -3713,9 +3940,16 @@
       selected.clear();
       renderSelection();
     });
+    // Card buttons are delegated by library-feed.js; the windowed List/Table rows add Preview and column sorting.
     $('#list').addEventListener('click', event => {
-      const button = event.target.closest('[data-quicklook]');
-      if (button) openQuickLookById(button.dataset.quicklook);
+      const preview = event.target.closest('[data-record-preview]');
+      if (preview) return void openQuickLook(compactRows, Number(preview.dataset.recordPreview));
+      const sortButton = event.target.closest('[data-table-sort]');
+      if (!sortButton) return;
+      const sort = $('#sort'),
+        wanted = sortButton.dataset.tableSort;
+      sort.value = wanted === 'new' && sort.value === 'new' ? 'old' : wanted;
+      sort.dispatchEvent(new Event('change', { bubbles: true }));
     });
     $('#list').addEventListener('keydown', event => {
       if (
@@ -3724,7 +3958,8 @@
         !event.target.closest('button,input,select,textarea,a,[contenteditable]')
       ) {
         event.preventDefault();
-        selectAllMatching();
+        if (event.shiftKey) void selectEveryMatch();
+        else selectAllMatching();
         return;
       }
       if (event.target.closest('button,input,select,textarea,a,[contenteditable]')) return;
@@ -3747,12 +3982,7 @@
                   0,
                   Math.min(compactRows.length - 1, current + (event.key === 'j' || event.key === 'ArrowDown' ? 1 : -1))
                 );
-        const list = $('#list'),
-          height = rowHeight(),
-          top = next * height + (compactMode === 'table' ? 36 : 0);
-        if (top < list.scrollTop + (compactMode === 'table' ? 36 : 0))
-          list.scrollTop = top - (compactMode === 'table' ? 36 : 0);
-        else if (top + height > list.scrollTop + list.clientHeight) list.scrollTop = top + height - list.clientHeight;
+        revealCompactRow(next);
         paintCompact(true, next);
       } else if (event.key === 'j' || event.key === 'k' || event.key.startsWith('Arrow')) {
         event.preventDefault();
@@ -3779,12 +4009,21 @@
               : Math.abs(ra.left + ra.width / 2 - centre) - Math.abs(rb.left + rb.width / 2 - centre);
           })[0];
           best?.focus();
-        } else cards[Math.max(0, Math.min(cards.length - 1, position + (forward ? 1 : -1)))]?.focus();
+        } else {
+          const next = cards[position + (forward ? 1 : -1)];
+          if (next) next.focus();
+          else {
+            // At the edge of the mounted blocks: let the feed mount the neighbour, then focus it.
+            const rows = resultRows() || [];
+            const index = rows.findIndex(post => String(post.id) === card.dataset.id) + (forward ? 1 : -1);
+            if (rows[index]) window.XVaultLibraryFeed?.reveal(rows[index].id)?.focus({ preventScroll: true });
+            else if (forward) loadMore(true);
+          }
+        }
       } else if (event.key === ' ' || event.key === 'Enter') {
         event.preventDefault();
-        const filtered = resultRows();
-        if (!filtered) return;
-        const rows = filtered.slice(0, exportPageSize());
+        const rows = resultRows();
+        if (!rows) return;
         const index = rows.findIndex(post => String(post.id) === card.dataset.id);
         if (index >= 0) {
           if (event.key === ' ') openQuickLook(rows, index);
