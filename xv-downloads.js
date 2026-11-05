@@ -381,7 +381,9 @@
   }
   function rowMarkup(row) {
     const name = (row.target?.filename || row.item?.url || 'media').split('/').pop();
-    const reason = row.verification?.reason || row.error || '';
+    // XVault 26: the plain-language explanation first; Chrome's raw code stays available on hover and in Copy.
+    const raw = row.verification?.reason || row.error || '',
+      reason = row.verification?.reason || row.errorHelp || row.error || '';
     const bits = [
       row.target?.kind || row.item?.mediaType || 'media',
       row.state,
@@ -413,9 +415,9 @@
       );
     if (reason)
       actions.push(
-        `<button type="button" class="mini quiet" data-xd="copy" data-text="${html(reason)}" aria-label="Copy the failure reason">Copy reason</button>`
+        `<button type="button" class="mini quiet" data-xd="copy" data-text="${html(raw && raw !== reason ? `${reason} (${raw})` : reason)}" aria-label="Copy the failure reason">Copy reason</button>`
       );
-    return `<span class="xd-dot" aria-hidden="true"></span><div><b title="${html(name)}">${html(name)}</b><small>${html(bits.join(' · '))}${reason ? ` · <span class="xd-reason">${html(reason.slice(0, 140))}</span>` : ''}</small></div><span class="xd-actions">${actions.join('')}</span>`;
+    return `<span class="xd-dot" aria-hidden="true"></span><div><b title="${html(name)}">${html(name)}</b><small>${html(bits.join(' · '))}${reason ? ` · <span class="xd-reason"${raw && raw !== reason ? ` title="${html(raw)}"` : ''}>${html(reason.slice(0, 160))}</span>` : ''}</small></div><span class="xd-actions">${actions.join('')}</span>`;
   }
   function searchable(row) {
     return [
@@ -503,6 +505,7 @@
       list = section?.querySelector('.xd-hostlist');
     if (!list) return;
     const paused = new Set(state.last?.pausedHosts || []),
+      cooling = new Map((state.last?.coolingHosts || []).map(row => [row.host, row])),
       hosts = new Map();
     const entry = host => {
       if (!hosts.has(host))
@@ -510,6 +513,7 @@
       return hosts.get(host);
     };
     for (const host of paused) entry(host);
+    for (const host of cooling.keys()) entry(host);
     for (const row of state.rows) {
       const host = hostOf(row);
       if (!host) continue;
@@ -529,21 +533,25 @@
     section.hidden = !hosts.size;
     const rows = [...hosts.values()].sort(
       (a, b) =>
-        Number(paused.has(b.host)) - Number(paused.has(a.host)) ||
+        Number(paused.has(b.host) || cooling.has(b.host)) - Number(paused.has(a.host) || cooling.has(a.host)) ||
         b.active + b.waiting + b.failed + b.complete - (a.active + a.waiting + a.failed + a.complete)
     );
     const markup = rows
       .map(item => {
         const isPaused = paused.has(item.host),
           [reason, times] = [...item.reasons.entries()].sort((a, b) => b[1] - a[1])[0] || [],
+          cool = !isPaused && cooling.get(item.host),
           facts = [
             isPaused ? 'Paused · queued files wait' : null,
+            cool
+              ? `Refusing downloads · waiting ${Math.max(1, Math.round((cool.until - Date.now()) / 1000))} s, other hosts continue`
+              : null,
             item.active ? `${number(item.active)} active` : null,
             item.waiting ? `${number(item.waiting)} waiting` : null,
             item.complete ? `${number(item.complete)} done` : null,
             item.failed ? `${number(item.failed)} failed` : null,
           ].filter(Boolean);
-        return `<div class="xd-host${isPaused ? ' is-paused' : ''}" role="listitem" data-host="${html(item.host)}"><span class="xd-host-name"><b>${html(HOST_LABEL[item.host] || item.host)}</b>${HOST_LABEL[item.host] ? `<small>${html(item.host)}</small>` : ''}</span><span class="xd-host-facts">${html(facts.join(' · ') || 'Nothing recent')}${reason ? `<small title="${html(reason)}">Most common problem: ${html(reason)}${times > 1 ? ` (${number(times)}×)` : ''}</small>` : ''}</span><span class="xd-host-actions">${item.failed ? `<button type="button" class="quiet" data-xd-host="retry">Retry failed</button>` : ''}<button type="button" data-xd-host="toggle" aria-pressed="${isPaused}" aria-label="${isPaused ? 'Resume' : 'Pause'} downloads from ${html(item.host)}">${isPaused ? 'Resume' : 'Pause'}</button></span></div>`;
+        return `<div class="xd-host${isPaused ? ' is-paused' : cool ? ' is-cooling' : ''}" role="listitem" data-host="${html(item.host)}"><span class="xd-host-name"><b>${html(HOST_LABEL[item.host] || item.host)}</b>${HOST_LABEL[item.host] ? `<small>${html(item.host)}</small>` : ''}</span><span class="xd-host-facts">${html(facts.join(' · ') || 'Nothing recent')}${reason ? `<small title="${html(reason)}">Most common problem: ${html(reason)}${times > 1 ? ` (${number(times)}×)` : ''}</small>` : ''}</span><span class="xd-host-actions">${cool ? `<button type="button" class="quiet" data-xd-host="now" aria-label="Try downloads from ${html(item.host)} now">Try now</button>` : ''}${item.failed ? `<button type="button" class="quiet" data-xd-host="retry">Retry failed</button>` : ''}<button type="button" data-xd-host="toggle" aria-pressed="${isPaused}" aria-label="${isPaused ? 'Resume' : 'Pause'} downloads from ${html(item.host)}">${isPaused ? 'Resume' : 'Pause'}</button></span></div>`;
       })
       .join('');
     if (list.dataset.sig !== markup) {
@@ -559,12 +567,19 @@
     const result =
       button.dataset.xdHost === 'retry'
         ? await send({ type: 'RETRY_FAILED', host })
-        : await send({ type: 'SET_DOWNLOAD_HOST_PAUSED', host, paused: !pausedNow });
+        : await send({
+            type: 'SET_DOWNLOAD_HOST_PAUSED',
+            host,
+            paused: button.dataset.xdHost === 'now' ? false : !pausedNow,
+          });
     button.disabled = false;
     if (!result?.ok) return window.toast?.(result?.error || 'That did not work', 'error');
     if (button.dataset.xdHost === 'retry')
       window.toast?.(result.added ? `Retrying ${number(result.added)} from ${host}` : `Nothing to retry from ${host}`);
-    else {
+    else if (button.dataset.xdHost === 'now') {
+      if (state.last) state.last.coolingHosts = (state.last.coolingHosts || []).filter(row => row.host !== host);
+      window.toast?.(`Trying ${host} again now`);
+    } else {
       if (state.last) state.last.pausedHosts = result.pausedHosts || [];
       window.toast?.(pausedNow ? `Downloads from ${host} resumed` : `Downloads from ${host} paused`);
     }
@@ -580,11 +595,24 @@
     paintHosts();
   }
 
-  async function refresh() {
+  // XVault 26: the dashboard polls queueStats every second for the status pill. Painting the Downloads page
+  // (counts, transfers, hosts, and every fifth tick the 200-row history) while another page is open cost a few ms
+  // of main thread per second and contended with Library work; it now only paints while the page is visible and
+  // catches up the moment it is opened.
+  const pageVisible = () => {
+    const page = $('#page-media');
+    return !!page && !document.hidden && (page.classList.contains('show') || page.classList.contains('active'));
+  };
+  async function refresh({ force = false } = {}) {
     const q = await send({ type: 'DOWNLOAD_QUEUE_STATS' });
     if (!q?.ok || !$('#qQueued')) return q;
-    ensureLayout();
     state.last = q;
+    if (!force && !pageVisible()) {
+      state.stale = true;
+      return q;
+    }
+    state.stale = false;
+    ensureLayout();
     paintCounts(q);
     paintHold(q);
     paintProgress(q);
@@ -594,13 +622,11 @@
     const engine = $('#qEngine'),
       meta = $('#page-media .qmeta');
     if (engine && meta && engine.previousElementSibling !== meta) meta.after(engine);
-    const onPage =
-      !!$('#page-media.active, #page-media:not([hidden]).is-active') || $('#page-media')?.offsetParent != null;
-    // History is heavier: every tick while the page is open, otherwise every fifth.
+    // History is heavier: on the first paint, when the totals move, and every third tick.
     const changed =
       state.counts.complete !== q.complete || state.counts.failed !== q.failed || state.counts.queued !== q.queued;
     state.counts = { complete: q.complete, failed: q.failed, queued: q.queued };
-    if (state.tick === 0 || changed || (onPage ? state.tick % 3 === 0 : state.tick % 5 === 0)) await loadHistory();
+    if (state.tick === 0 || force || changed || state.tick % 3 === 0) await loadHistory();
     state.tick++;
     return q;
   }
@@ -613,6 +639,9 @@
     } finally {
       state.busy = false;
     }
+  });
+  hooks.after?.('page', (result, name) => {
+    if (name === 'media' || name === 'files') void refresh({ force: true }).catch(() => {});
   });
   const openWith = filter => {
     page('media');
