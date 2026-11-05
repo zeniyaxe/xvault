@@ -1,13 +1,14 @@
-"""Real-Firefox end-to-end test for the XVault Firefox build (XVault 22).
+"""Real-Firefox end-to-end test for the XVault Firefox build (XVault 22; helper pairing since 23).
 
 Installs dist/XVault-*-firefox.zip as a temporary add-on through geckodriver, then checks the event page,
 Library, search, every dashboard page, local OCR inside the event page, idle unload + wake-up, a real
-download through the Firefox downloads API and the sidebar panel.
+download through the Firefox downloads API, pairing with the real local helper over moz-extension:// (and
+measuring disk usage with a hard link) and the sidebar panel. FF_SKIP_HELPER=1 skips the helper part.
 Usage: python3 scripts/e2e-firefox.py dist/XVault-<version>-firefox.zip
 Needs: Firefox, geckodriver and `pip install selenium`. FIREFOX_BIN / GECKODRIVER override discovery.
 FF_LIVE_X=1 also opens https://x.com and checks that the content scripts inject and answer.
 """
-import json, os, shutil, sys, tempfile, time, urllib.request
+import json, os, shutil, socket, subprocess, sys, tempfile, time, urllib.request
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -160,6 +161,41 @@ try:
             hist = run_async("return await browser.runtime.sendMessage({ type: 'GET_DOWNLOAD_HISTORY', limit: 5 });")
             print('history', json.dumps([{k: r.get(k) for k in ('state', 'attempts', 'bytesReceived', 'totalBytes', 'error')} for r in (hist or {}).get('rows', [])]))
         check('download recorded as complete', recorded, json.dumps(q)[:300])
+    # XVault 23: the real helper pairs with Firefox's moz-extension:// origin (the profile UUID).
+    if os.environ.get('FF_SKIP_HELPER') != '1':
+        helper_dir = tempfile.mkdtemp(prefix='xvault-ff-helper-')
+        here = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'FFmpeg_Helper')
+        for name in ('xvault_ffmpeg_helper.py', 'file_ops.py'):
+            shutil.copy(os.path.join(here, name), helper_dir)
+        root = os.path.join(download_dir, 'XVault', 'Linked')
+        os.makedirs(root, exist_ok=True)
+        with open(os.path.join(root, 'a.bin'), 'wb') as stream:
+            stream.write(b'x' * 4096)
+        os.link(os.path.join(root, 'a.bin'), os.path.join(root, 'a-copy.bin'))
+        config = {'downloads_root': download_dir, 'xvault_folder': 'XVault', 'extension_ids': [], 'server_port': 17843}
+        def write_config():
+            with open(os.path.join(helper_dir, 'config.json'), 'w') as stream:
+                json.dump(config, stream)
+        write_config()
+        process = subprocess.Popen([sys.executable, os.path.join(helper_dir, 'xvault_ffmpeg_helper.py')], cwd=helper_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(50):
+                try:
+                    socket.create_connection(('127.0.0.1', 17843), timeout=0.2).close(); break
+                except OSError:
+                    time.sleep(0.2)
+            refused = run_async("return await browser.runtime.sendMessage({ type: 'HELPER_STATUS' });")
+            check('helper refuses an unknown Firefox origin and says why', isinstance(refused, dict) and refused.get('running') and not refused.get('connected') and refused.get('pairing') == 'refused' and refused.get('pairingId') == UUID, json.dumps(refused)[:300])
+            config['extension_ids'] = [UUID]; write_config()
+            status = run_async("return await browser.runtime.sendMessage({ type: 'HELPER_STATUS' });")
+            check('helper pairs with the moz-extension origin', isinstance(status, dict) and status.get('connected') and status.get('browser') == 'firefox' and 'usage' in (status.get('capabilities') or []), json.dumps(status)[:300])
+            usage = run_async("return await browser.runtime.sendMessage({ type: 'MEDIA_STORAGE', measure: true });")
+            helper_usage = (usage or {}).get('helper') or {}
+            check('helper measures disk usage, hard link counted once', helper_usage.get('ok') and helper_usage.get('savedBytes') == 4096 and helper_usage.get('linkedFiles') == 1, json.dumps(helper_usage)[:300])
+        finally:
+            process.terminate()
+            try: process.wait(timeout=5)
+            except Exception: process.kill()
     # Content scripts on x.com (needs network; skipped when x.com is unreachable).
     reachable = os.environ.get('FF_LIVE_X') == '1'
     if not reachable:

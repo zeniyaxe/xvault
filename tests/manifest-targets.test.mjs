@@ -16,8 +16,10 @@ assert.deepEqual(edge.permissions, base.permissions);
 const { manifest: firefox, notes } = manifestFor(base, 'firefox');
 assert.equal(firefox.background.service_worker, undefined);
 assert.deepEqual(firefox.background.scripts, [base.background.service_worker]);
-for (const permission of ['offscreen', 'sidePanel', 'power', 'nativeMessaging'])
+for (const permission of ['offscreen', 'sidePanel', 'power'])
   assert.ok(!firefox.permissions.includes(permission), `${permission} is removed for Firefox`);
+// XVault 23: Firefox supports Native Messaging (Remote registers com.xvault.remote for the add-on ID).
+assert.equal(firefox.permissions.includes('nativeMessaging'), base.permissions.includes('nativeMessaging'));
 assert.ok(firefox.permissions.includes('storage') && firefox.permissions.includes('downloads'));
 assert.ok(!firefox.host_permissions.some(host => host.startsWith('file:')));
 assert.ok(firefox.browser_specific_settings.gecko.id.includes('@'));
