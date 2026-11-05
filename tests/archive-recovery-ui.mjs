@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { createRecoveryHeader, encodeRecoveryLine, scanRecoveryArchive } from '../archive-recovery.mjs';
+import { createRecoveryHeader, encodeRecoveryLine } from '../archive-recovery.mjs';
 
 const require = createRequire(import.meta.url);
 const pw = require(process.argv[2] || 'playwright');

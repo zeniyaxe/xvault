@@ -42,7 +42,6 @@ let settings = {},
   activitySamples = [],
   lightboxItems = [],
   lightboxIndex = 0,
-  notifications = [],
   lightboxZoom = 100,
   lightboxFit = { w: 0, h: 0 },
   videoSyncLock = false,
@@ -2269,8 +2268,7 @@ function openDetails(id) {
     (String(inspectorRecord?.id) === String(id) ? inspectorRecord : null);
   if (!t) return;
   inspectorRecord = t;
-  const d = libraryDownloads.get(String(id)) || [],
-    box = $('#detailsDrawer'),
+  const box = $('#detailsDrawer'),
     body = $('#drawerBody'),
     um = t.userMeta || {};
   const done = window.XVaultLibraryModel.downloadedMediaCount(t, libraryDownloads),

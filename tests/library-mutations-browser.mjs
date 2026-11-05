@@ -108,13 +108,11 @@ try {
           return tx;
         },
       };
-      let aborted = false,
-        abortMessage = '';
+      let aborted = false;
       try {
         await api.moveLibraryToTrash(wrapped, ['2', '3']);
-      } catch (error) {
+      } catch {
         aborted = true;
-        abortMessage = error.message;
       }
       const safe = !!(await get('tweets', '2')) && !(await get('trash', '2'));
       const undoAfterAbort = await api.readTrashUndo(db);
