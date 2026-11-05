@@ -124,7 +124,8 @@ export function createAutoBackup({
       await writeLog(log);
       return { ok: false, state: 'locked', error: log.status.message };
     }
-    log.lastAttemptAt = startedAt;
+    // lastAttemptAt only moves on success or "unchanged": a failed run (for example the archive changed
+    // while it was being written, during a capture) is retried at the next hourly alarm.
     // Unchanged archive (same archive + download revision as the newest kept file): skip the work.
     const lastSaved = (log.files || []).find(file => file.state === 'saved');
     const before = await currentRevision().catch(() => '');
@@ -136,6 +137,7 @@ export function createAutoBackup({
       lastSaved.encrypted === encrypted
     ) {
       log.status = { state: 'unchanged', at: startedAt, message: 'Nothing changed since the last backup', reason };
+      log.lastAttemptAt = startedAt;
       await writeLog(log);
       return { ok: true, state: 'unchanged' };
     }
@@ -193,6 +195,7 @@ export function createAutoBackup({
     const pruned = await prune(log, settings.autoBackupKeep);
     log.status = { state: 'saved', at: startedAt, message: '', reason };
     log.lastSavedAt = startedAt;
+    log.lastAttemptAt = startedAt;
     await writeLog(log);
     return { ok: true, state: 'saved', file: entry, pruned };
   }

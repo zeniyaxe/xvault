@@ -172,6 +172,7 @@ test('run: a failed build or download is recorded, notified and does not prune',
   const failed = await backup.run();
   assert.equal(failed.state, 'failed');
   assert.match(notes[0], /archive changed/);
+  assert.equal((await backup.run()).state, 'failed', 'a failed run stays due and is retried at the next alarm');
   const ok = createAutoBackup({
     chromeApi: fake.api,
     getSettings: async () => ({ mediaFolder: '../evil/..', autoBackupDays: 1, autoBackupKeep: 1 }),
