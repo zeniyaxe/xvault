@@ -360,11 +360,11 @@ assert.doesNotMatch(
   /DOWNLOAD_QUEUE_STATS|type:'STATS'/,
   'graph sampling should use cached summaries, not duplicate storage reads'
 );
-assert.match(
-  dashboard,
-  /queueStats\.n=\(queueStats\.n\|\|0\)\+1/,
-  'history refresh cadence should advance from a defined counter'
-);
+// XVault 23: the Downloads page (xv-downloads.js) owns the history cadence; its counter starts defined.
+const downloadsPage = fs.readFileSync(new URL('../xv-downloads.js', import.meta.url), 'utf8');
+assert.match(downloadsPage, /tick: 0,/, 'history refresh cadence should advance from a defined counter');
+assert.match(downloadsPage, /state\.tick\+\+/, 'history refresh cadence should advance');
+assert.doesNotMatch(dashboard, /\?35:/, 'no invented queue percentage');
 assert.match(
   graphSampler,
   /!\$\('#page-home'\).*classList\.contains\('show'\)/,

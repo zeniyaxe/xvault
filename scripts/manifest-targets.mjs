@@ -3,14 +3,16 @@
 // Firefox support is BETA (XVault 22: exercised in a real headless Firefox by scripts/e2e-firefox.py in CI).
 // Firefox MV3 has no extension service workers (background scripts run as an event page), no chrome.offscreen (since XVault 21 local OCR runs inside the event page, which has a
 // DOM — sw/ocr.mjs createInlineHost), no chrome.sidePanel (sidebar_action is
-// used instead) and no "power" permission. Capture, Library, search, downloads and exports are expected
+// used instead) and no "power" permission. Native Messaging works (Remote's host manifest lists the add-on
+// ID under allowed_extensions), and the helper pairs with the moz-extension:// UUID (XVault 23). Capture, Library, search, downloads and exports are expected
 // to work; every Firefox-only gap is listed in the build output.
 export const TARGETS = {
   chrome: { suffix: '' },
   edge: { suffix: '-edge' },
   firefox: { suffix: '-firefox' },
 };
-const FIREFOX_UNSUPPORTED = ['offscreen', 'sidePanel', 'power', 'nativeMessaging'];
+// nativeMessaging stays (XVault 23): Firefox supports it; setup_remote registers the host for the add-on ID.
+const FIREFOX_UNSUPPORTED = ['offscreen', 'sidePanel', 'power'];
 
 export function manifestFor(base, target) {
   const manifest = structuredClone(base),

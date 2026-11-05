@@ -5,11 +5,13 @@ $appRoot = Join-Path $env:LOCALAPPDATA 'XVault\RemoteCompanion'
 $knownId = ''
 $existingConfig = Join-Path $here 'config.json'
 if (Test-Path -LiteralPath $existingConfig) { try { $knownId = [string](Get-Content -LiteralPath $existingConfig -Raw | ConvertFrom-Json).extension_id } catch {} }
-$prompt = 'Paste the XVault extension ID from XVault Settings > Remote'
+$prompt = 'Paste the XVault extension ID from XVault Settings > Remote (Chrome/Edge: 32 letters; Firefox: xvault@zeniyaxe.github.io)'
 if ($knownId -match '^[a-p]{32}$') { $prompt += " [Enter keeps $knownId]" }
 $extensionId = (Read-Host $prompt).Trim()
 if (-not $extensionId -and $knownId -match '^[a-p]{32}$') { $extensionId = $knownId }
-if ($extensionId -notmatch '^[a-p]{32}$') { throw 'The extension ID must contain 32 letters from a through p.' }
+# XVault 23: Firefox identifies add-ons by their add-on ID (name@domain) in Native Messaging manifests.
+$isFirefox = $extensionId -match '^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$'
+if (-not $isFirefox -and $extensionId -notmatch '^[a-p]{32}$') { throw 'Use the Chrome/Edge extension ID (32 letters from a through p) or the Firefox add-on ID (name@domain).' }
 
 $python = Get-RealPythonOrThrow
 Write-Host "Using Python $($python.Version) at $($python.Path)" -ForegroundColor DarkGray
@@ -42,6 +44,8 @@ if (-not (Test-Path -LiteralPath $configTarget)) {
 foreach ($configPath in @($sourceConfig, $configTarget)) {
   if (-not (Test-Path -LiteralPath $configPath)) { continue }
   $configValue = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+  # The helper pairs with Chrome/Edge by extension ID; Firefox pairs by its moz-extension UUID (Files & health).
+  if ($isFirefox) { continue }
   $configValue | Add-Member -NotePropertyName extension_id -NotePropertyValue $extensionId -Force
   $configJson = $configValue | ConvertTo-Json -Depth 10
   [System.IO.File]::WriteAllText($configPath, $configJson, [System.Text.UTF8Encoding]::new($false))
@@ -51,11 +55,19 @@ $exePath = Join-Path $appRoot 'xvault_remote_host.exe'
 & $venvPython -m PyInstaller --noconfirm --clean --onefile --name xvault_remote_host --distpath $appRoot --workpath (Join-Path $buildRoot 'work') --specpath $buildRoot --paths $here --hidden-import remote_security --hidden-import remote_companion --hidden-import xvault_ffmpeg_helper --collect-all cryptography --collect-all PIL (Join-Path $here 'remote_native_host.py')
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $exePath)) { throw 'The Native Messaging Companion build failed.' }
 
-$manifestPath = Join-Path $appRoot 'com.xvault.remote.json'
-$manifest = [ordered]@{ name = 'com.xvault.remote'; description = 'XVault same-Wi-Fi mobile Companion'; path = $exePath; type = 'stdio'; allowed_origins = @("chrome-extension://$extensionId/") }
+if ($isFirefox) {
+  # Firefox reads its own manifest (allowed_extensions) from HKCU\Software\Mozilla\NativeMessagingHosts.
+  $manifestPath = Join-Path $appRoot 'com.xvault.remote.firefox.json'
+  $manifest = [ordered]@{ name = 'com.xvault.remote'; description = 'XVault same-Wi-Fi mobile Companion'; path = $exePath; type = 'stdio'; allowed_extensions = @($extensionId) }
+  $browsers = @('Mozilla')
+} else {
+  $manifestPath = Join-Path $appRoot 'com.xvault.remote.json'
+  $manifest = [ordered]@{ name = 'com.xvault.remote'; description = 'XVault same-Wi-Fi mobile Companion'; path = $exePath; type = 'stdio'; allowed_origins = @("chrome-extension://$extensionId/") }
+  $browsers = @('Google\Chrome', 'Microsoft\Edge')
+}
 $manifestJson = $manifest | ConvertTo-Json -Depth 4
 [System.IO.File]::WriteAllText($manifestPath, $manifestJson, [System.Text.UTF8Encoding]::new($false))
-foreach ($browser in @('Google\Chrome', 'Microsoft\Edge')) {
+foreach ($browser in $browsers) {
   $registryPath = "HKCU:\Software\$browser\NativeMessagingHosts\com.xvault.remote"
   New-Item -Path $registryPath -Force | Out-Null
   Set-Item -LiteralPath $registryPath -Value $manifestPath

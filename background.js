@@ -3361,7 +3361,10 @@ async function librarySummary() {
     sensitive,
     authors: [...authors.values()].sort((a, b) => b.posts - a.posts),
     downloaded: downloads.filter(x => x.state === 'complete').length,
-    bytes: downloads.filter(x => x.state === 'complete').reduce((n, x) => n + Number(x.totalBytes || 0), 0),
+    // Hard-linked copies share the kept file's bytes (XVault 23), so they are not added again.
+    bytes: downloads
+      .filter(x => x.state === 'complete' && !x.reclaimedAt && !x.linkedAt)
+      .reduce((n, x) => n + Number(x.totalBytes || 0), 0),
   };
 }
 // Look-alike fingerprints and OCR run as resumable service-worker jobs (see sw/derived-jobs.mjs).
@@ -3609,6 +3612,64 @@ router.register('DOWNLOAD_HOST_HEALTH', async () => ({
   lastHold: queueHold,
   bandwidth: bandwidthGovernor.status(),
 }));
+// XVault 23: what the media files take on disk. Records alone count a hard-linked copy at full size, so linked
+// rows are reported separately; with the helper, `measure` asks it to walk the folder and count each file once.
+router.register('MEDIA_STORAGE', async m => {
+  const rows = (await all('downloads')).filter(row => row.state === 'complete' && !row.reclaimedAt);
+  const kinds = {};
+  let bytes = 0,
+    linkedBytes = 0,
+    linkedFiles = 0;
+  for (const row of rows) {
+    const size = Math.max(0, Number(row.totalBytes) || 0),
+      ext = String(row.filename || row.target?.filename || '')
+        .split('.')
+        .pop()
+        .toLowerCase(),
+      kind = ['jpg', 'jpeg', 'png', 'webp', 'avif'].includes(ext)
+        ? 'images'
+        : ['mp4', 'webm', 'mov', 'm4v'].includes(ext)
+          ? 'videos'
+          : ext === 'gif'
+            ? 'GIFs'
+            : 'other';
+    bytes += size;
+    const entry = (kinds[kind] ||= { files: 0, bytes: 0 });
+    entry.files++;
+    entry.bytes += size;
+    if (row.linkedAt) {
+      linkedFiles++;
+      linkedBytes += size;
+    }
+  }
+  let helper = null;
+  if (m.measure) {
+    const status = await helperFileOps('usage');
+    if (!status.ok) helper = { ok: false, error: status.error };
+    else {
+      const response = await helperFetch('/files/usage', { signal: AbortSignal.timeout(30000) }).catch(error => ({
+        ok: false,
+        error,
+      }));
+      helper = response.ok
+        ? await response.json().catch(() => ({ ok: false, error: 'Bad helper reply' }))
+        : { ok: false, error: response.error ? String(response.error) : `Helper returned HTTP ${response.status}` };
+      if (helper.ok) await chrome.storage.local.set({ helperDiskUsage: { ...helper, measuredAt: Date.now() } });
+    }
+  } else helper = (await chrome.storage.local.get('helperDiskUsage')).helperDiskUsage || null;
+  return {
+    ok: true,
+    files: rows.length,
+    bytes,
+    linkedFiles,
+    linkedBytes,
+    physicalBytes: bytes - linkedBytes,
+    kinds: Object.entries(kinds)
+      .map(([kind, value]) => ({ kind, ...value }))
+      .sort((a, b) => b.bytes - a.bytes),
+    helper,
+  };
+});
 router.register('DUPLICATE_REPORT', async () => ({
   ok: true,
   ...duplicateReport(await all('downloads'), {
@@ -3743,7 +3804,10 @@ async function helperFileOps(capability) {
   const status = await helperStatusCore();
   if (!status.connected) return { ok: false, error: 'The XVault helper is not running' };
   if (!(status.capabilities || []).includes(capability))
-    return { ok: false, error: 'Update the XVault helper to 22.0 or newer for file operations' };
+    return {
+      ok: false,
+      error: `Update the XVault helper to ${capability === 'usage' ? '23.0' : '22.0'} or newer for this file operation`,
+    };
   const root = String(status.watching || '')
     .replace(/\\/g, '/')
     .replace(/\/+$/, '');
@@ -3940,12 +4004,32 @@ function ensureBandwidthSampling() {
       await bandwidthGovernor.resumeAll().catch(() => {});
       return;
     }
+    // While you have paused the queue, the cap must not resume a transfer it had throttled.
+    if (manualQueuePause) return;
     await bandwidthGovernor.sample().catch(() => {});
   }, 2000);
 }
 let queueHoldTimer = 0,
   queueHold = null;
+// XVault 23: a pause you choose holds new starts and survives service-worker and browser restarts (it is kept
+// in storage.local); the window / Data Saver holds below only apply while it is off.
+let manualQueuePause = null;
+const manualQueuePauseReady = chrome.storage.local
+  .get('downloadQueuePause')
+  .then(value => {
+    manualQueuePause = value?.downloadQueuePause || null;
+  })
+  .catch(() => {});
+const manualHold = () =>
+  manualQueuePause
+    ? { code: 'paused', message: 'Paused by you — resume to continue', since: manualQueuePause.at }
+    : null;
 function queueHeld(settings) {
+  const paused = manualHold();
+  if (paused) {
+    queueHold = paused;
+    return paused;
+  }
   const hold = holdReason(settings);
   queueHold = hold;
   if (hold && !queueHoldTimer)
@@ -4752,6 +4836,8 @@ route('CANCEL_DOWNLOAD', async m => {
   }
 });
 route('PAUSE_ALL_DOWNLOADS', async m => {
+  manualQueuePause = { at: Date.now() };
+  await chrome.storage.local.set({ downloadQueuePause: manualQueuePause });
   let n = 0;
   for (const r of active.values())
     if (r.downloadId)
@@ -4771,6 +4857,10 @@ route('RESUME_ALL_DOWNLOADS', async m => {
         await setDownloadStateById(r.downloadId, 'downloading');
         n++;
       } catch {}
+  manualQueuePause = null;
+  queueHold = null;
+  await chrome.storage.local.remove('downloadQueuePause');
+  void pump();
   return { ok: true, resumed: n };
 });
 route('OPEN_DOWNLOAD_SOURCE', async m => {
@@ -5318,18 +5408,25 @@ async function probe(item, s) {
     mg = {};
   const probeBytes = Math.max(65536, Math.min(1048576, Number(s.probeMediaBytes) || 524288));
   if (/^https?:/i.test(item.url || '')) {
+    // XVault 23: a server that stalls during the probe used to hold the download slot forever.
+    const controller = new AbortController(),
+      timer = setTimeout(() => controller.abort(), 12000);
     try {
       const r = await fetch(item.url, {
         headers: { Range: `bytes=0-${probeBytes - 1}` },
         cache: 'no-store',
         credentials: 'omit',
+        signal: controller.signal,
       });
       mime = mime || r.headers.get('content-type') || '';
       const cr = r.headers.get('content-range'),
         cl = r.headers.get('content-length');
       size = Number(cr?.match(/\/(\d+)$/)?.[1] || cl || 0);
       mg = magic(await responseHeaderBytes(r, probeBytes));
-    } catch {}
+    } catch {
+    } finally {
+      clearTimeout(timer);
+    }
   }
   ext = mg.ext || ext || mimeExt(mime);
   const hint = String(item.mediaType || item.type || item.sourceMediaType || '').toLowerCase(),
@@ -6133,6 +6230,25 @@ async function queueStats() {
     total: counts.total,
     bytesReceived,
     totalBytes,
+    // XVault 23: what is holding new starts (your pause, the window, Data Saver) and the live transfers, with the
+    // byte counts Chrome reports — nothing is estimated; totalBytes is 0 when the server sent no length.
+    hold: manualHold() || queueHold,
+    pausedByUser: !!manualQueuePause,
+    activeRows: [...active.values()].slice(0, 12).map(row => ({
+      key: row.key,
+      downloadId: Number(row.downloadId) || 0,
+      name: String(row.target?.filename || row.item?.url || '')
+        .split('/')
+        .pop()
+        .slice(0, 160),
+      state: row.state,
+      bytesReceived: Number(row.bytesReceived) || 0,
+      totalBytes: Number(row.totalBytes) || 0,
+      speedBps: Number(row.speedBps) || 0,
+      tweetId: row.item?.tweetId ? String(row.item.tweetId) : '',
+      kind: String(row.target?.kind || row.item?.mediaType || ''),
+      startedAt: Number(row.startedAt) || 0,
+    })),
     completedBytes: null,
     speedBps,
     etaSeconds,
@@ -6162,6 +6278,7 @@ async function pump() {
     moreQueued = false;
   try {
     s = await getSettings();
+    await manualQueuePauseReady;
     const max = downloadGovernor.limit(s.maxConcurrentDownloads || 4, s.adaptiveDownloads !== false);
     // XVault 21: schedule window / Data Saver hold new starts (active downloads continue).
     const held = queueHeld(s);
@@ -7275,6 +7392,13 @@ async function helperFetch(path, options = {}) {
       cache: 'no-store',
       signal: AbortSignal.timeout(1200),
     }).catch(() => null);
+    helperPairing = !boot
+      ? 'unreachable'
+      : boot.ok
+        ? 'paired'
+        : boot.status === 403
+          ? 'refused'
+          : `http-${boot.status}`;
     if (boot?.ok) {
       const data = await boot.json().catch(() => null);
       if (data?.token) {
@@ -7299,13 +7423,36 @@ async function helperPost(path, body) {
   return { ok: r.ok, status: r.status, ...data };
 }
 
+// XVault 23: what the helper must list in config.json to pair with this browser. Chrome/Edge use the extension
+// ID; Firefox uses the per-profile internal UUID that is the moz-extension:// host (not the add-on ID).
+let helperPairing = 'unknown';
+const helperIdentity = () => {
+  const origin = new URL(chrome.runtime.getURL('')).origin;
+  return {
+    pairingId: new URL(origin).host,
+    pairingOrigin: origin,
+    browser: origin.startsWith('moz-extension:') ? 'firefox' : 'chromium',
+  };
+};
 async function helperStatusCore() {
+  const identity = helperIdentity();
   try {
     const r = await helperFetch('/status');
+    if (r.status === 401)
+      // The helper answered, so it is running; it refused to pair because this browser is not in its config.
+      return {
+        ok: true,
+        connected: false,
+        running: true,
+        paired: false,
+        pairing: helperPairing,
+        ...identity,
+        error: 'The helper does not know this browser yet',
+      };
     if (!r.ok) throw Error(`HTTP ${r.status}`);
-    return { ok: true, connected: true, ...(await r.json()) };
+    return { ok: true, connected: true, running: true, paired: true, ...identity, ...(await r.json()) };
   } catch (e) {
-    return { ok: true, connected: false, error: String(e) };
+    return { ok: true, connected: false, running: false, paired: false, ...identity, error: String(e) };
   }
 }
 async function conversionStatus(key = '') {
