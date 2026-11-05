@@ -1122,7 +1122,9 @@
       }
     }
     if (filtered.length && q)
-      window.dispatchEvent(new CustomEvent('xvault:results', { detail: { query: q, count: filtered.length } }));
+      window.dispatchEvent(
+        new CustomEvent('xvault:results', { detail: { query: q, count: filtered.length, rows: filtered } })
+      );
     if (!filtered.length && libraryTotalRecords === 0) {
       const empty = $('#list .empty');
       if (empty) {

@@ -1302,7 +1302,27 @@ async function queryJoinsFor(database, compiled, sort = '') {
     }
   }
   if (needs.clusterIds) joins.clusterIds = await clusterIdMap().catch(() => new Map());
+  if (needs.asOf) {
+    joins.historicText = await historicTextAt(database, needs.asOf);
+    joins.asOfDay = needs.asOf;
+  }
   return joins;
+}
+// XVault 22 asof: the text each post had on a day = `before` of its first revision observed after that day.
+let historicTextCache = { key: '', map: null };
+async function historicTextAt(database, end) {
+  const revision = await readLibraryRevision(database),
+    key = `${revision}:${end}`;
+  if (historicTextCache.key === key && historicTextCache.map) return historicTextCache.map;
+  if (!database.objectStoreNames.contains('revisions')) return new Map();
+  const rows = await new Promise((resolve, reject) => {
+    const request = database.transaction('revisions', 'readonly').objectStore('revisions').getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+  const map = globalThis.XVaultLibrarySearch.historicTextFrom(rows, end);
+  historicTextCache = { key, map };
+  return map;
 }
 function searchIdentity(settings) {
   return [settings.searchSynonyms || '', settings.searchFoldDiacritics !== false, Number(settings.searchHybridWeight)];
@@ -1319,6 +1339,14 @@ function stableRandomOrder(id, seed) {
 function compareLibraryRank(a, b, sort) {
   const compared = globalThis.XVaultLibrarySearch.compareRows(a, b, sort);
   return compared || String(a.id).localeCompare(String(b.id));
+}
+// asof: rows show the day's text; `asOfText` keeps the current one so the card can say it changed later.
+function withHistoricText(row, historic, end) {
+  const id = String(row?.id || '');
+  if (!(historic instanceof Map) || !historic.has(id)) return row;
+  const text = historic.get(id);
+  if (text === String(row.text || '')) return row;
+  return { ...row, text, asOfText: { current: String(row.text || ''), before: Number(end) || 0 } };
 }
 async function scanSortedLibraryPage(database, message, settings, control) {
   const sort = String(message.sort || 'new'),
@@ -1354,6 +1382,7 @@ async function scanSortedLibraryPage(database, message, settings, control) {
     ocrText.revision,
     semanticScores.revision,
     joins.snapshotIds ? joins.snapshotIds.size : -1,
+    joins.historicText ? joins.historicText.size : -1,
     ...searchIdentity(settings),
   ]);
   let downloadsByTweet = new Map(),
@@ -1472,7 +1501,10 @@ async function scanSortedLibraryPage(database, message, settings, control) {
       selected.map(row => row.id)
     ),
     recordsById = new Map(records.map(row => [String(row.id), row])),
-    rows = selected.map(rank => recordsById.get(String(rank.id))).filter(Boolean);
+    rows = selected
+      .map(rank => recordsById.get(String(rank.id)))
+      .filter(Boolean)
+      .map(row => withHistoricText(row, joins.historicText, joins.asOfDay));
   const detailsStarted = performance.now(),
     downloads = await readDownloadRows(
       database,
@@ -1726,6 +1758,9 @@ async function executeLibraryPage(message = {}, control = { cancelled: false }) 
     return {
       ok: true,
       ...page,
+      rows: joins?.historicText
+        ? page.rows.map(row => withHistoricText(row, joins.historicText, joins.asOfDay))
+        : page.rows,
       downloads: downloadRows,
       downloadRowsRead: (Number(page.downloadRowsRead) || 0) + downloadRows.length,
       downloadCursorOperations: Number(page.downloadCursorOperations) || 0,

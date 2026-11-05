@@ -492,6 +492,17 @@
   background: var(--accent-soft, var(--sunk));
   border: 1px solid var(--accent-line, var(--line));
 }
+.xf-asof-mark {
+  display: inline-block;
+  margin: 2px 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--ink-2, inherit);
+  background: var(--sunk);
+  border: 1px dashed var(--line);
+  cursor: help;
+}
 .xf-dym {
   display: flex;
   flex-wrap: wrap;

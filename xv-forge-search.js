@@ -246,7 +246,39 @@
       });
     }
     const label = new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { dateStyle: 'long' });
-    banner.innerHTML = `<span>Viewing your vault as it was on <strong>${html(label)}</strong> — posts archived later are hidden.</span><button type="button" class="quiet" data-asof-clear>Back to now</button>`;
+    banner.innerHTML = `<span>Viewing your vault as it was on <strong>${html(label)}</strong> — posts archived later are hidden and edited posts show the text they had that day.</span><button type="button" class="quiet" data-asof-clear>Back to now</button>`;
+  }
+  // XVault 22: cards whose text changed after the asof: day get a marker with today's text.
+  let asOfChanged = new Map();
+  function markAsOfCards() {
+    if (!asOfChanged.size) return;
+    for (const card of document.querySelectorAll('#list [data-id]')) {
+      const entry = asOfChanged.get(String(card.dataset.id));
+      if (!entry || card.querySelector('.xf-asof-mark')) continue;
+      const mark = document.createElement('span');
+      mark.className = 'xf-asof-mark';
+      mark.textContent = 'Text as it was then · edited later';
+      mark.title = `Current text: ${entry.current.slice(0, 400)}`;
+      mark.setAttribute(
+        'aria-label',
+        `Shown as it was then; edited later. Current text: ${entry.current.slice(0, 200)}`
+      );
+      (card.querySelector('.tweetText, .xv-record-copy p, [data-col="text"], p') || card).after?.(mark);
+    }
+  }
+  const listObserver = new MutationObserver(() => markAsOfCards());
+  function trackAsOf(rows, query) {
+    asOfChanged = new Map(
+      asOfIn(query || '') && Array.isArray(rows)
+        ? rows.filter(row => row?.asOfText).map(row => [String(row.id), row.asOfText])
+        : []
+    );
+    const list = $('#list');
+    listObserver.disconnect();
+    if (asOfChanged.size && list) {
+      markAsOfCards();
+      listObserver.observe(list, { childList: true, subtree: true });
+    }
   }
 
   /* ───────────── Did you mean ───────────── */
@@ -380,12 +412,14 @@
     const { query, container } = event.detail || {};
     settle(query, 0);
     asOfBanner(query);
+    trackAsOf([], query);
     didYouMean(query, container);
   });
   window.addEventListener('xvault:results', event => {
-    const { query, count } = event.detail || {};
+    const { query, count, rows } = event.detail || {};
     settle(query, count);
     asOfBanner(query);
+    trackAsOf(rows, query);
   });
   document.addEventListener(
     'toggle',

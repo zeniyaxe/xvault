@@ -599,9 +599,32 @@
       if (rule.kind === 'flag' && rule.value === 'snapshot') snapshotIds = true;
       if (rule.kind === 'cluster') clusterIds = true;
     };
-    let clusterIds = false;
+    let clusterIds = false,
+      asOf = 0;
+    const visitAsOf = rule => {
+      if (rule.kind === 'any') return rule.rules.forEach(visitAsOf);
+      // XVault 22: asof: also shows (and matches) the text a post had on that day, from its revisions.
+      if (rule.kind === 'range' && rule.asOf && !rule.negate) asOf = asOf ? Math.min(asOf, rule.end) : rule.end;
+    };
     compiled.forEach(visit);
-    return { archivedIds, snapshotIds, clusterIds, sortValue: !!SORT_VALUES[sort] };
+    compiled.forEach(visitAsOf);
+    return { archivedIds, snapshotIds, clusterIds, asOf, sortValue: !!SORT_VALUES[sort] };
+  }
+  /**
+   * asof: text per post as it was before `end` (exclusive). For every post edited at or after `end`, the
+   * earliest such revision's `before.text` is what the archive held then. Posts not edited later keep their
+   * current text (and are left out of the map).
+   */
+  function historicTextFrom(revisions, end) {
+    const earliest = new Map();
+    for (const revision of revisions || []) {
+      const at = Number(revision?.observedAt) || 0,
+        id = String(revision?.tweetId || '');
+      if (!id || at < end || typeof revision?.before?.text !== 'string') continue;
+      const seen = earliest.get(id);
+      if (!seen || at < seen.at) earliest.set(id, { at, text: revision.before.text });
+    }
+    return new Map([...earliest].map(([id, entry]) => [id, entry.text]));
   }
   function hourIn(hour, from, to) {
     return from < to ? hour >= from && hour < to : hour >= from || hour < to;
@@ -887,6 +910,9 @@
   }
 
   function projectPost(post, index = 0, options = {}) {
+    // asof: joins the text each edited post had on that day (historicText: id → text before the next edit).
+    if (options.historicText instanceof Map && options.historicText.has(String(post?.id)))
+      post = { ...post, text: options.historicText.get(String(post.id)) };
     const meta = post.userMeta || {},
       media = post.media || [];
     const mediaNotes = media.map(item => String(item?.xvault?.note || '').toLowerCase()).filter(Boolean);
@@ -1095,6 +1121,7 @@
     keywordScore,
     relevanceScore,
     queryNeeds,
+    historicTextFrom,
     setSearchOptions,
     getSearchOptions,
     parseSynonyms,
