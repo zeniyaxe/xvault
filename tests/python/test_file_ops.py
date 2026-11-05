@@ -1,4 +1,4 @@
-"""XVault 22 helper file operations: no-overwrite renames and duplicate hard links (real files, real HTTP)."""
+"""XVault 22/23 helper file operations: no-overwrite renames, duplicate hard links, recovery and usage (real files, real HTTP)."""
 import http.client
 import importlib.util
 import json
@@ -122,6 +122,62 @@ class LinkDuplicates(unittest.TestCase):
         self.assertEqual(outside.read_bytes(), b'same')
 
 
+class RecoveryAndUsage(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name) / 'XVault'
+        self.root.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_interrupted_move_is_finished_not_refused(self):
+        source = write(self.root / 'Images' / 'a.jpg', b'one')
+        target = self.root / 'nasa' / 'a.jpg'
+        target.parent.mkdir()
+        os.link(source, target)  # the earlier run stopped right after os.link
+        dry = file_ops.rename_files(self.root, [{'key': 'k', 'from': 'Images/a.jpg', 'to': 'nasa/a.jpg'}], dry_run=True)
+        self.assertEqual(dry['results'][0]['state'], 'would-move')
+        self.assertTrue(source.exists())
+        result = file_ops.rename_files(self.root, [{'key': 'k', 'from': 'Images/a.jpg', 'to': 'nasa/a.jpg'}])
+        self.assertEqual(result['results'][0]['state'], 'moved')
+        self.assertEqual(result['results'][0]['how'], 'resumed')
+        self.assertFalse(source.exists())
+        self.assertEqual(target.read_bytes(), b'one')
+        # A different file at the target is still never touched.
+        write(self.root / 'Images' / 'b.jpg', b'two')
+        write(self.root / 'nasa' / 'b.jpg', b'two')
+        again = file_ops.rename_files(self.root, [{'key': 'k2', 'from': 'Images/b.jpg', 'to': 'nasa/b.jpg'}])
+        self.assertEqual(again['results'][0]['state'], 'skipped')
+
+    def test_recover_removes_only_linked_temporaries(self):
+        keep = write(self.root / 'a.jpg', b'x' * 10)
+        os.link(keep, self.root / 'b.jpg.xvault-link')  # interrupted link: an extra name of a kept file
+        write(self.root / 'lonely.jpg.xvault-link', b'only copy')  # never delete the only name of data
+        result = file_ops.recover(self.root)
+        self.assertEqual(result['removed'], 1)
+        self.assertEqual(result['kept'], 1)
+        self.assertFalse((self.root / 'b.jpg.xvault-link').exists())
+        self.assertTrue((self.root / 'lonely.jpg.xvault-link').exists())
+        self.assertEqual(keep.read_bytes(), b'x' * 10)
+
+    def test_disk_usage_counts_hard_links_once(self):
+        first = write(self.root / 'Images' / 'a.jpg', b'a' * 1000)
+        os.link(first, self.root / 'Images' / 'a-copy.jpg')
+        write(self.root / 'Videos' / 'v.mp4', b'v' * 500)
+        usage = file_ops.disk_usage(self.root)
+        self.assertEqual(usage['files'], 3)
+        self.assertEqual(usage['uniqueFiles'], 2)
+        self.assertEqual(usage['bytes'], 2500)
+        self.assertEqual(usage['physicalBytes'], 1500)
+        self.assertEqual(usage['savedBytes'], 1000)
+        self.assertEqual(usage['linkedFiles'], 1)
+        self.assertEqual(usage['linkedNames'], 2)
+        images = next(folder for folder in usage['folders'] if folder['name'] == 'Images')
+        self.assertEqual((images['bytes'], images['physicalBytes']), (2000, 1000))
+        self.assertFalse(usage['truncated'])
+
+
 class HelperHttp(unittest.TestCase):
     """The real helper request handler: auth required, routes to file_ops inside the watched root."""
 
@@ -190,6 +246,19 @@ class HelperHttp(unittest.TestCase):
             body = json.loads(response.read())
         self.assertIn('rename', body['capabilities'])
         self.assertIn('link-duplicates', body['capabilities'])
+        self.assertIn('usage', body['capabilities'])
+
+    def test_usage_over_http_requires_auth(self):
+        first = write(self.root / 'a.jpg', b'z' * 64)
+        os.link(first, self.root / 'b.jpg')
+        request = urllib.request.Request(self.base + '/files/usage', headers={'Authorization': 'Bearer test-token'})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            body = json.loads(response.read())
+        self.assertEqual((body['bytes'], body['physicalBytes'], body['savedBytes']), (128, 64, 64))
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            urllib.request.urlopen(self.base + '/files/usage', timeout=5)
+        self.assertEqual(denied.exception.code, 401)
+        denied.exception.close()
 
 
 if __name__ == '__main__':

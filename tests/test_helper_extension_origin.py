@@ -62,5 +62,38 @@ class HelperExtensionOriginTests(unittest.TestCase):
                 server.shutdown(); server.server_close(); thread.join(timeout=2)
 
 
+
+class HelperFirefoxOriginTests(unittest.TestCase):
+    """XVault 23: the helper pairs with Firefox (moz-extension://<internal UUID>) and with several browsers."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        helper.CFG = pathlib.Path(self.directory.name) / 'config.json'
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def configure(self, **values):
+        helper.CFG.write_text(json.dumps(values), encoding='utf-8')
+
+    def test_firefox_uuid_and_lists(self):
+        uuid = '0f9d3a8e-1b2c-4d5e-8f70-1234567890ab'
+        self.configure(extension_id='a' * 32, extension_ids=[uuid.upper(), f'moz-extension://{uuid}/', 'not-an-id'])
+        self.assertEqual(helper.extension_origins(), [f'chrome-extension://{"a" * 32}', f'moz-extension://{uuid}'])
+        self.assertTrue(helper.allowed_extension_origin(f'moz-extension://{uuid}'))
+        self.assertTrue(helper.allowed_extension_origin(f'chrome-extension://{"a" * 32}'))
+        self.assertFalse(helper.allowed_extension_origin('moz-extension://0f9d3a8e-1b2c-4d5e-8f70-1234567890ac'))
+        self.assertFalse(helper.allowed_extension_origin(f'chrome-extension://{uuid}'))
+        self.assertFalse(helper.allowed_extension_origin(f'moz-extension://{"a" * 32}'))
+        self.assertFalse(helper.allowed_extension_origin(''))
+
+    def test_firefox_only_config(self):
+        uuid = '{0f9d3a8e-1b2c-4d5e-8f70-1234567890ab}'
+        self.configure(extension_id=uuid)
+        self.assertEqual(helper.extension_origins(), ['moz-extension://0f9d3a8e-1b2c-4d5e-8f70-1234567890ab'])
+        self.configure(extension_id='')
+        self.assertEqual(helper.extension_origins(), [])
+        self.assertFalse(helper.allowed_extension_origin('null'))
+
 if __name__ == '__main__':
     unittest.main()

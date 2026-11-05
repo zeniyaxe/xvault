@@ -1,6 +1,7 @@
 {
   "xvault_folder": "XVault",
   "extension_id": "",
+  "extension_ids": [],
   "fps": 20,
   "max_width": 1280,
   "webp_quality": 90,

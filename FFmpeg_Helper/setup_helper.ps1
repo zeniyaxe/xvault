@@ -4,12 +4,21 @@ Write-Host "XVault FFmpeg Helper setup" -ForegroundColor Cyan
 $default = Join-Path $env:USERPROFILE 'Downloads'
 $root = Read-Host "Chrome/Edge Downloads folder [$default]"
 if ([string]::IsNullOrWhiteSpace($root)) { $root = $default }
-$extensionId = (Read-Host 'XVault extension ID (Settings > Remote > Copy extension ID)').Trim()
-if ($extensionId -notmatch '^[a-p]{32}$') { throw 'The extension ID must contain 32 letters from a through p.' }
+# XVault 23: Downloads > Files & health shows the pairing ID for each browser. Chrome/Edge: 32 letters a-p.
+# Firefox: the profile's internal UUID (8-4-4-4-12 hex). Separate several with commas to pair them all.
+$answer = (Read-Host 'Pairing ID(s) from XVault Downloads > Files & health (comma-separated for several browsers)').Trim()
+$ids = @($answer -split '[,\s]+' | Where-Object { $_ } | ForEach-Object { $_.Trim().Trim('{}').ToLowerInvariant() })
+if (-not $ids.Count) { throw 'Paste at least one pairing ID.' }
+foreach ($id in $ids) {
+  if ($id -notmatch '^[a-p]{32}$' -and $id -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { throw "Not a pairing ID: $id" }
+}
+$extensionId = @($ids | Where-Object { $_ -match '^[a-p]{32}$' } | Select-Object -First 1)[0]
+if (-not $extensionId) { $extensionId = '' }
 $cfg = @{
   downloads_root = $root
   xvault_folder = 'XVault'
   extension_id = $extensionId
+  extension_ids = $ids
   gif_folder = 'GIFs'
   original_folder = 'Originals'
   gif_output_folder = 'GIF'

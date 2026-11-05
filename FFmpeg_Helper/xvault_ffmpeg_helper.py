@@ -69,9 +69,22 @@ def load_cfg():
   try:d.update(json.loads(CFG.read_text(encoding='utf-8-sig')))
   except Exception as e:STATE['last_error']=f'config.json: {e}';log('CONFIG ERROR: '+str(e))
  return d
+CHROME_ID=re.compile(r'[a-p]{32}');FIREFOX_UUID=re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+def extension_origins(cfg=None):
+ # XVault 23: one helper can pair with Chrome/Edge (32 letters a-p) and Firefox (the per-profile internal UUID that
+ # Firefox uses as the moz-extension:// host). `extension_id` keeps working; `extension_ids` lists several.
+ cfg=cfg or load_cfg();raw=cfg.get('extension_ids') if isinstance(cfg.get('extension_ids'),list) else []
+ out=[]
+ for value in [cfg.get('extension_id'),*raw]:
+  text=str(value or '').strip().rstrip('/').lower()
+  scheme,_,host=text.rpartition('://')
+  host=host.strip('{}')
+  if CHROME_ID.fullmatch(host) and scheme in ('','chrome-extension'):out.append(f'chrome-extension://{host}')
+  elif FIREFOX_UUID.fullmatch(host) and scheme in ('','moz-extension'):out.append(f'moz-extension://{host}')
+ return list(dict.fromkeys(out))
 def allowed_extension_origin(origin):
- extension_id=str(load_cfg().get('extension_id') or '').strip()
- return bool(re.fullmatch(r'[a-p]{32}',extension_id) and hmac.compare_digest(str(origin or ''),f'chrome-extension://{extension_id}'))
+ supplied=str(origin or '')
+ return any(hmac.compare_digest(supplied,allowed) for allowed in extension_origins())
 def ffmpeg_path():
  p=BASE/'ffmpeg.exe';return str(p) if p.exists() else shutil.which('ffmpeg')
 def output_paths(src,cfg):
@@ -269,12 +282,17 @@ class API(BaseHTTPRequestHandler):
   if u.path!='/media' and not self.allowed(): return self.sendj({'error':'Authentication required'},401)
   if u.path=='/media' and not self.authorized(): return self.sendj({'error':'Authentication required'},401)
   if u.path=='/status':
-   with STATE_LOCK:status={'connected':True,'version':'22.0','capabilities':['convert','rename','link-duplicates'],'ffmpeg':STATE['ffmpeg'],'watching':STATE['watching'],'active':STATE['active'],'converted':STATE['converted'],'failed':STATE['failed'],'lastError':STATE['last_error'],'lastConversion':copy.deepcopy(STATE['last_conversion'])}
+   with STATE_LOCK:status={'connected':True,'version':'23.0','capabilities':['convert','rename','link-duplicates','usage','recover','firefox'],'ffmpeg':STATE['ffmpeg'],'watching':STATE['watching'],'active':STATE['active'],'converted':STATE['converted'],'failed':STATE['failed'],'lastError':STATE['last_error'],'lastConversion':copy.deepcopy(STATE['last_conversion'])}
    return self.sendj(status)
   if u.path=='/conversions':
    key=(q.get('key')or[''])[0]
    with STATE_LOCK:rows=[copy.deepcopy(STATE['conversions'][key])] if key in STATE['conversions'] else copy.deepcopy(list(STATE['conversions'].values())[-100:]);ffmpeg=bool(STATE['ffmpeg'])
    return self.sendj({'rows':rows,'ffmpeg':ffmpeg})
+  if u.path=='/files/usage':
+   # XVault 23: real on-disk usage of the XVault folder, counting each hard-linked file once.
+   root=STATE.get('watching') or ''
+   if not root or not pathlib.Path(root).is_dir():return self.sendj({'ok':False,'error':'The XVault folder is not available'},409)
+   return self.sendj(file_ops.disk_usage(root))
   if u.path=='/media':
    p=resolve_source((q.get('path')or[''])[0])
    if not p:return self.sendj({'error':'Path outside XVault root'},403)
@@ -309,6 +327,8 @@ class API(BaseHTTPRequestHandler):
   if u.path in ('/files/rename','/files/link-duplicates'):
    root=STATE.get('watching') or ''
    if not root or not pathlib.Path(root).is_dir():return self.sendj({'ok':False,'error':'The XVault folder is not available'},409)
+   recovered=file_ops.recover(root)
+   if recovered.get('removed'):log(f"recovered {recovered['removed']} leftover link file(s) from an interrupted run")
    if u.path=='/files/rename':result=file_ops.rename_files(root,body.get('moves'),bool(body.get('dryRun')))
    else:result=file_ops.link_duplicates(root,body.get('pairs'),bool(body.get('dryRun')))
    if result.get('ok') and not result.get('dryRun'):log(f"{u.path}: {sum(1 for r in result['results'] if r['state'] in ('moved','linked'))} done")
@@ -336,6 +356,11 @@ def main():
         STATE['watching']=str(root)
         STATE['ffmpeg']=ffmpeg_path()
     log(f'XVault Animation Helper watching: {root}')
+    if root.is_dir():
+        recovered=file_ops.recover(str(root))
+        if recovered.get('removed'):log(f"Recovered {recovered['removed']} leftover link file(s) from an interrupted run")
+    origins=extension_origins(cfg)
+    log('Paired browsers: '+(', '.join(origins) if origins else 'none — set extension_id (or extension_ids) in config.json'))
     log(f'FFmpeg: {STATE["ffmpeg"] or "NOT FOUND"}')
     threading.Thread(target=api_thread,args=(cfg,),daemon=True).start()
     seen={}
