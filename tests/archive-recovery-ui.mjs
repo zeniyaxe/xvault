@@ -302,7 +302,7 @@ try {
   const csvFile = await csvDownload;
   const csvPath = await csvFile.path();
   const csvText = await fs.readFile(csvPath, 'utf8');
-  assert.match(csvText, /id,createdAt,author,text,url,likes,reposts,replies,mediaCount/);
+  assert.match(csvText, /id,url,createdAt,archivedAt,author,authorName,text,likes,reposts,replies,views,mediaCount/);
   assert.match(csvText, /999999/);
   assert.equal(
     csvText.trim().split(/\r?\n/).length,
