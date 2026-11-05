@@ -80,6 +80,8 @@ jobs:
         run: npm run e2e
       - name: Helper file operations against the real Python helper (rename, hard-link dedupe)
         run: node tests/helper-files-browser.mjs playwright
+      - name: Scheduled backups through the real offscreen document (plaintext, encrypted, retention)
+        run: node tests/auto-backup-browser.mjs playwright
       - name: Accessibility audit (axe-core, WCAG 2.1 A/AA; serious and critical fail)
         run: npm run e2e:a11y
       - uses: actions/upload-artifact@v4

@@ -8,6 +8,8 @@ import {
 } from './reliability.mjs';
 import { createInsightsAccumulator, orderThread, compactPost, previewUrl, mediaKind } from './vault-insights.mjs';
 import { createDerivedService } from './sw/derived-service.mjs';
+import { createAutoBackup, createInlineBackupBuilder, createOffscreenBackupBuilder } from './sw/auto-backup.mjs';
+import { createOffscreenHost, holdOffscreen } from './sw/ocr.mjs';
 import { createSemanticService } from './sw/semantic-service.mjs';
 import { createMessageRouter, DESKTOP, CONTENT } from './sw/router.mjs';
 import { createConcurrencyGovernor } from './sw/adaptive-concurrency.mjs';
@@ -1187,6 +1189,7 @@ async function writeSettingsPatch(p) {
     queueMicrotask(() => syncScheduler.schedule().catch(() => {}));
   if ('watchLists' in p) queueMicrotask(() => watchLists.schedule().catch(() => {}));
   if ('integrityScheduleDays' in p) queueMicrotask(() => scheduleIntegrity().catch(() => {}));
+  if ('autoBackupDays' in p) queueMicrotask(() => autoBackup.schedule().catch(() => {}));
   if (
     ['downloadWindowEnabled', 'downloadWindowStart', 'downloadWindowEnd', 'downloadRespectSaveData'].some(
       key => key in p
@@ -3879,6 +3882,32 @@ async function scheduleIntegrity() {
   else await chrome.alarms.clear(INTEGRITY_ALARM).catch(() => {});
 }
 scheduleIntegrity().catch(() => {});
+// Scheduled recovery-file backups (XVault 22, sw/auto-backup.mjs).
+const autoBackup = createAutoBackup({
+  getSettings,
+  notify: (title, message) => void notify(title, message),
+  builder: chrome.offscreen?.createDocument
+    ? createOffscreenBackupBuilder(chrome, createOffscreenHost(chrome), holdOffscreen)
+    : createInlineBackupBuilder(async (type, payload = {}) => {
+        const out = await router.dispatch({ type, ...payload }, DESKTOP, { id: chrome.runtime.id });
+        if (!out.handled || out.value?.ok === false) throw Error(out.value?.error || `${type} failed`);
+        return out.value;
+      }),
+  currentRevision: async () => {
+    const database = await db();
+    try {
+      const page = await readLibraryBackupPage(database, 'tweets', null, 1, null);
+      return `${page.revision ?? ''}:${page.downloadRevision ?? ''}`;
+    } finally {
+      database.close();
+    }
+  },
+});
+autoBackup.schedule().catch(() => {});
+router.register('AUTO_BACKUP_STATUS', () => autoBackup.status());
+router.register('AUTO_BACKUP_RUN', () => autoBackup.run({ reason: 'manual', force: true }));
+router.register('AUTO_BACKUP_UNLOCK', m => autoBackup.unlock(m.passphrase));
+router.register('AUTO_BACKUP_LOCK', () => autoBackup.lock());
 router.register('INTEGRITY_REVERIFY', async m => ({
   ok: true,
   ...(await reverifyCompletedDownloads({ limit: Math.max(1, Math.min(5000, Number(m.limit) || 400)) })),
@@ -6948,6 +6977,7 @@ chrome.alarms.onAlarm.addListener(async alarm => {
   if (derived.onAlarm(alarm?.name)) return;
   if (syncScheduler.onAlarm(alarm?.name)) return;
   if (watchLists.onAlarm(alarm?.name)) return;
+  if (autoBackup.onAlarm(alarm?.name)) return;
   if (alarm?.name === INTEGRITY_ALARM) {
     const settings = await getSettings(),
       last = (await chrome.storage.local.get('xvIntegrityReverify')).xvIntegrityReverify;

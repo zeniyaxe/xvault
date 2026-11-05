@@ -115,6 +115,20 @@ try:
     time.sleep(14)
     woke = run_async("return await browser.runtime.sendMessage({ type: 'STATS' });")
     check('event page wakes after idle unload', isinstance(woke, dict) and not woke.get('__error') and woke.get('actions') == 60, json.dumps(woke)[:160])
+    # XVault 22 scheduled backups: Firefox has no offscreen document, so the event page builds the recovery
+    # file itself (blob: URL) and saves it with browser.downloads into <media folder>/Backups.
+    backup = run_async("return await browser.runtime.sendMessage({ type: 'AUTO_BACKUP_RUN' });")
+    check('automatic backup built in the event page', isinstance(backup, dict) and backup.get('state') == 'saved', json.dumps(backup)[:300])
+    saved = ''
+    for _ in range(20):
+        hits = [os.path.join(r, f) for r, _, fs in os.walk(download_dir) for f in fs if f.startswith('xvault-auto-') and f.endswith('.jsonl')]
+        if hits:
+            saved = hits[0]
+            break
+        time.sleep(0.5)
+    lines = open(saved, encoding='utf-8').read().strip().split('\n') if saved else []
+    posts = sum(1 for line in lines if '"store":"tweets"' in line.replace(' ', ''))
+    check('backup file on disk in XVault/Backups with every post', saved.replace('\\', '/').endswith('.jsonl') and '/XVault/Backups/' in saved.replace('\\', '/') and posts == 60 and '"type":"end"' in lines[-1].replace(' ', ''), f'{saved} posts={posts}')
     # A real download through the Firefox downloads API (an X CDN image; skipped when offline).
     try:
         urllib.request.urlopen(urllib.request.Request(IMAGE, headers={'User-Agent': 'Mozilla/5.0 XVault-e2e'}), timeout=10)
@@ -131,7 +145,7 @@ try:
         done = None
         for _ in range(30):
             time.sleep(1)
-            rows = run_async("return (await browser.downloads.search({})).map(x => ({ state: x.state, file: x.filename, err: x.error || '' }));")
+            rows = run_async("return (await browser.downloads.search({})).filter(x => !/[\\\\/]Backups[\\\\/]/.test(x.filename)).map(x => ({ state: x.state, file: x.filename, err: x.error || '' }));")
             if isinstance(rows, list) and any(r['state'] == 'complete' for r in rows):
                 done = rows; break
         check('download completes in Firefox', bool(done), json.dumps(done or rows)[:300])
@@ -140,8 +154,12 @@ try:
             check('downloaded file is on disk inside the XVault folder', os.path.exists(f) and os.path.getsize(f) > 1000 and '/XVault/' in f.replace('\\', '/'), f)
         time.sleep(4)
         q = run_async("return await browser.runtime.sendMessage({ type: 'DOWNLOAD_QUEUE_STATS' });")
-        print('queue stats', json.dumps(q)[:600])
-        check('download recorded as complete', isinstance(q, dict) and (q.get('complete') or q.get('completed') or 0) >= 1, json.dumps(q)[:300])
+        recorded = isinstance(q, dict) and (q.get('complete') or q.get('completed') or 0) >= 1
+        if not recorded:
+            # Diagnostics: the live CDN occasionally serves bytes that differ from the probed Content-Length.
+            hist = run_async("return await browser.runtime.sendMessage({ type: 'GET_DOWNLOAD_HISTORY', limit: 5 });")
+            print('history', json.dumps([{k: r.get(k) for k in ('state', 'attempts', 'bytesReceived', 'totalBytes', 'error')} for r in (hist or {}).get('rows', [])]))
+        check('download recorded as complete', recorded, json.dumps(q)[:300])
     # Content scripts on x.com (needs network; skipped when x.com is unreachable).
     reachable = os.environ.get('FF_LIVE_X') == '1'
     if not reachable:
