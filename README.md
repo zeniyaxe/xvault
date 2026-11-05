@@ -40,8 +40,8 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
   Duplicate Lab whose look-alike scan runs and resumes in the background; **Year in Review** with topic drift,
   achievements and a people graph, exportable as a PNG card or Markdown; and **Topics**, automatic meaning clusters you can name, search, save or turn
   into boards.
-- **Reader** — read any archived thread as one continuous page (author spine, optional replies, media, quotes) and
-  copy or save it as Markdown or HTML; edit notes inline and fetch a missing parent on request. Read later,
+- **Reader** — read any archived thread as one continuous page (author spine, optional replies, media, quotes) with
+  a **thread map** of replies and quotes beside the column (click to jump), and copy or save it as Markdown or HTML; edit notes inline and fetch a missing parent on request. Read later,
   highlights with notes and reading progress (`is:later`, `has:highlight`, `highlight:<text>`).
 - **Scheduled sync** — optional, off by default: keep Bookmarks/Likes current from a background X tab and get
   notified about new posts matching watched Smart Collections.
@@ -50,6 +50,8 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
   archive, thread-grouped Markdown/HTML, link lists, integrity scan and file manifest.
 - **Storage & backups** — System → Storage shows quota, persistence, per-store counts, the last backup and safe
   cleanup of derived data, and runs **scheduled automatic backups** (optionally encrypted, with retention).
+- **Feel** — animated view changes, notices that stack, count repeats and offer **Undo** (with **Recent notices**
+  in the command palette), sliding segmented controls, lightbox zoom from the thumbnail; *Calm motion* turns it off.
 - **Accessibility** — high contrast, always-on focus rings, text scaling, remappable shortcuts (`?` lists them).
 - **Remote** — optional phone viewer (PWA) served by the local helper over your LAN, with QR pairing,
   per-device permissions and revocation.

@@ -14,6 +14,9 @@ Library — then fix what the new real-browser tests found.
 | Helper files | `FFmpeg_Helper/file_ops.py`: no-overwrite rename (`os.link` then unlink — fails if the target exists — or `os.rename` after a check where links are unsupported; both paths inside the watched root) and verified hard-link dedupe (same volume, same size and SHA-256 before linking, atomic `os.replace` from a temporary link so the duplicate's path never disappears). Helper 22.0 reports `rename` / `link-duplicates` capabilities. Worker routes `HELPER_RENAME_APPLY` (≤200 per batch, `recordRenames()` updates only confirmed moves) and `DUPLICATE_LINK` (rows get `linkedAt`/`linkedTo`, excluded from later duplicate reports). Pairing uses `POST /bootstrap` (Chromium sends no `Origin` on extension GETs). |
 | Automatic backups | `recovery-backup-core.mjs` (`writeRecoveryBackup`, shared with manual export), `offscreen-backup.mjs` (offscreen target `xv-backup`, build/release with leases shared with OCR), `sw/auto-backup.mjs` (hourly alarm, due logic, `Backups/xvault-auto-*.jsonl|.xvenc`, retention that only deletes downloads it logged itself, after checking the download's filename still matches, skip-unchanged via the library revision, passphrase only in `storage.session`, inline builder on Firefox). Storage page panel in `xv-vault.js`. |
 | Timeline | `sw/timeline.mjs` (`timelineBuckets`, day ≤ 92 days, week ≤ 2 years, month ≤ 10 years, else year; Monday weeks; UTC or local). Route `LIBRARY_TIMELINE` scans matching posts in 1,000-record pages (cap 400k), cached per revision/zone/field/query. `xv-keystone.js` renders the strip (buttons with labels, roving tabindex, click/drag brush → `after:`/`before:` or `archived-after:`/`archived-before:`). |
+| Timeline polish | `xv-keystone.js`: bars morph from their previous heights (FLIP-style `scaleY`), identical recounts are skipped by signature, a zoom stack (`‹ Back`/`Backspace`) restores the previous range and query, drag preview in the summary, axis labels with the peak bucket. `window.XVaultTimeline`. |
+| Thread map | `thread-map.js` (`layout`/`svg`; spine lane 0, replies by depth capped at 6, in-conversation quotes as dashed edges, cycles become roots, ≤ 400 nodes, escaped SVG). `xv-reader.js` paints it beside the column (≥ 1100px), marks the current post, jumps on click/keys (switching to *With replies* for hidden replies); `t` toggles, remembered in `localStorage`. |
+| Motion & notices | `xv-motion-plus.js/.css`: `toast(message, {tone, action, duration})` with stacking ghosts, ×N repeats, countdown, history (`XVaultNotices`, "Recent notices" in the palette); sliding pill for every `.seg`; lightbox FLIP zoom from the clicked thumbnail; favourite spark burst; scroll-driven section reveals (transform only, so contrast never dips mid-animation). All off in calm motion. |
 | asof | `asof:` cards render the text from the newest revision at or before that day and mark "edited later". |
 | Atlas | Year in Review `reviewModel()` feeds the page, a canvas PNG card (text only) and a Markdown summary. |
 | Fixes | `mergeLibraryCapture` replaced the revision-bump `onsuccess` instead of chaining it, so captures never advanced the library revision; rename planner folder templates escaped `XVault/`; CI never ran the 28 top-level Python tests; ESLint 10 → 0 warnings. |
@@ -30,6 +33,10 @@ Library — then fix what the new real-browser tests found.
   only while the browser's record still has the same filename. Media files are not copied — the recovery file is the archive, media stay where they are.
 - **Encrypted schedules need the passphrase once per browser session.** It is kept in `storage.session` (memory),
   never on disk; without it the schedule reports "locked" instead of silently writing plaintext.
+- **Notices keep `#toast` as the newest element.** Older code and tests read `#toast`; the stack adds ghosts
+  beside it instead of replacing it, and `toast(message)` without options behaves as before.
+- **Reveals move, they do not fade.** A half-transparent section fails contrast checks (axe flagged two while
+  entering), so scroll reveals only translate and scale.
 - **Timeline counts on demand.** One worker scan per (query, revision) is cheap enough at 100k posts and keeps the
   numbers exact for any query; a pre-aggregated index was not worth the write cost.
 
@@ -37,8 +44,8 @@ Library — then fix what the new real-browser tests found.
 
 | Check | Result |
 | --- | --- |
-| `npm run verify` (structure check, ESLint, unit tests, Prettier) | pass: ESLint 0 errors / 0 warnings, 150/150 tests |
-| `npm run e2e` (all pages at 4 viewports, seeded Library incl. timeline and Year in Review exports) | pass (Library 14/14) |
+| `npm run verify` (structure check, ESLint, unit tests, Prettier) | pass: ESLint 0 errors / 0 warnings, 154/154 tests |
+| `npm run e2e` (all pages at 4 viewports, seeded Library incl. timeline and Year in Review exports) | pass (Library 24/24 incl. timeline zoom stack, notices, sliding pill, lightbox zoom, favourite burst, thread map) |
 | `node scripts/e2e-a11y.mjs` (axe-core) | 28 surfaces, 0 violations |
 | `npm run e2e:helper` (real Chromium downloads + real Python helper; offscreen automatic backups) | pass: 1 copy linked, differing file untouched; 3 renamed, 1 overwrite refused; plaintext + encrypted backups, retention kept 2 |
 | `scripts/e2e-firefox.py` on the Firefox zip (Firefox + geckodriver) | 19/19 (live x.com check skipped unless `FF_LIVE_X=1`) |
