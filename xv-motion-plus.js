@@ -76,8 +76,22 @@
     document.body.append(copy);
     requestAnimationFrame(() => lift(node, copy));
   }
+  // XVault 26: the shown notice is measured once it has settled, in an idle period, so replacing it never forces a
+  // layout in the middle of the caller's work (≈20 ms in a full Library when a favorite toggled a notice).
+  function rememberRect(node) {
+    node._xtRect = null;
+    clearTimeout(node._xtMeasure);
+    node._xtMeasure = setTimeout(() => {
+      const measure = () => {
+        if (node.classList.contains('show')) node._xtRect = node.getBoundingClientRect();
+      };
+      if (window.requestIdleCallback) requestIdleCallback(measure, { timeout: 1000 });
+      else measure();
+    }, 420);
+  }
   function lift(node, copy) {
-    const box = node.getBoundingClientRect();
+    const box = node._xtRect;
+    if (!box) return void copy.remove();
     Object.assign(copy.style, {
       left: `${box.left}px`,
       top: `${box.top}px`,
@@ -163,6 +177,7 @@
       260,
       { spring: 'snappy' }
     );
+    rememberRect(node);
     history.unshift({ text, tone, at: Date.now(), count: 1 });
     history.length = Math.min(history.length, 40);
     const duration =
