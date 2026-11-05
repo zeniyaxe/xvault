@@ -1,4 +1,4 @@
-# XVault design — "Aurora" system, "Vantage" Library (25.0)
+# XVault design — "Aurora" system, "Vantage" Library, "Lumen" viewer (26.0)
 
 Aurora is the design system for every XVault surface: the dashboard, the side panel, the Command Center, the X
 integration and the Remote phone app. Media carries colour; the interface carries hierarchy and state. It should
@@ -95,7 +95,34 @@ the page's primary action. Pages enter along the navigation direction.
   the sticky header (on phones it is the pinned row) instead of floating over posts.
 - **Paging:** an in-flow footer — status, Load more, Previous/Next page, Back to top. No bar ever overlaps a post.
 
+## Media Viewer (26.0, `xv-viewer.js`, `xv-viewer.css`)
+
+- **Stage first.** The image or video owns the dark stage; chrome is a thin top bar (author · "Post n of N" ·
+  "k of K in this post" · kind chip, then Download, Info, Full screen, Shortcuts and Close as 36 px icon buttons
+  with tooltips) and a filmstrip at the bottom.
+- **Filmstrip:** 56 px thumbnails, ±12 around the current item, a small gap between posts, the current item
+  ringed in the accent and centred; "+N" at either end; video and GIF marks on the thumbnail.
+- **Info panel:** the existing post details plus **Media facts** (decoded resolution and megapixels, aspect,
+  length, variants and best bitrate, what is on disk and the file name, alt text; Download this / All N from post)
+  and **Similar in your vault** — up to six square thumbnails of semantically similar posts with media. `I` hides
+  the panel and the choice is remembered.
+- **Direct manipulation:** Ctrl/⌘ + wheel or pinch zooms at the pointer, drag pans a zoomed image, swipe changes
+  media, double-click toggles 1:1. Moving between items slides 28 px with a slight fade (skipped with Calm motion or
+  reduced motion). `?` opens a shortcut sheet; `Esc` closes the sheet before the viewer.
+
+## Capture inbox (26.0)
+
+- **One banner for what holds everything:** "X is asking you to sign in…" or "X is limiting requests… (in 4 min).
+  Nothing is lost." in a warning tint with **Resume now**; the status pill reads *Sign-in needed* or *Cooling down*.
+- **Progress:** a 4 px accent bar for the current batch (finished / finished + pending).
+- **Rows:** state chip, author, text or link, then one line of facts — reason, "next try in 1 min", "attempt 1 of 3",
+  origin, time — and a folded **Attempt history** (time, outcome, seconds, detail) for unfinished items.
+
 ## Downloads and Atlas additions (25.0)
+
+- **Cooling hosts (26.0):** a host whose breaker is open shows "Refusing downloads · waiting 40 s, other hosts
+  continue" in the warning colour, sorts to the top and offers **Try now**. Failure reasons are sentences ("The
+  disk is full. Free some space, then retry."); the browser's code is in the tooltip and in Copy reason.
 
 - **Media hosts:** one row per source with a label (Images, Video and GIFs, or the host name), facts in one line
   ("Paused · queued files wait · 3 waiting · 120 done"), the most common problem in small text, and Pause/Resume as
@@ -116,6 +143,10 @@ the page's primary action. Pages enter along the navigation direction.
   Send now. Without the permission the view explains how to allow it.
 - **Downloads:** hero status, stat tiles, queue controls, Images / Video host toggles, transfers with Pause/Resume
   and Cancel, Up next with Download next, Recent. Controls only for devices with `downloads.manage`.
+- **Connection (26.0):** the offline banner counts down to the next reconnect try ("Trying again in 8 s") or says the
+  phone itself is offline; a short "Reconnected to your computer" toast after a real outage. The outbox card shows
+  the last try and why it failed. **Recent searches** appear as chips under the focused, empty search box with
+  Clear.
 - **Sheets, viewer and themes:** as in 3.0 (bottom sheets with Share; swipe, swipe-down, double-tap, pinch; Aurora,
   True black and Paper).
 

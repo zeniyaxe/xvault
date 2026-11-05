@@ -5,6 +5,12 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
 
 ## Highlights
 
+- **Lumen (26.0)** — a real **Media Viewer**: filmstrip, post/media position, Media facts (resolution, aspect,
+  length, variants, on-disk state), **Similar in your vault**, Ctrl+wheel zoom at the pointer, pan, swipe and a
+  full keyboard map (`?`). Quick Look and favoriting are faster on big archives; layout switches keep your place
+  and each search remembers its scroll. The capture inbox retries with backoff across browser restarts, holds
+  when X is signed out and cools down after a rate limit, and says so. Downloads stop hammering a failing media
+  host (a per-host cool-down with **Try now**) and explain failures in plain words.
 - **Library 5.0 (25.0)** — one page with one scroller: a collapsible sidebar, the results and an optional
   resizable Inspector side by side, and a two-row header so posts start near the top. Six layouts that each use the
   width on purpose — Feed (Reading / Wide / Full), fluid multi-column Cards, Grid, Wall (masonry), List and Table —
@@ -73,11 +79,12 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
 - **Feel** — animated view changes, notices that stack, count repeats and offer **Undo** (with **Recent notices**
   in the command palette), sliding segmented controls, lightbox zoom from the thumbnail; *Calm motion* turns it off.
 - **Accessibility** — high contrast, always-on focus rings, text scaling, remappable shortcuts (`?` lists them).
-- **Remote 4.0** — optional phone app (PWA) served by the local helper over your LAN, with QR pairing,
+- **Remote 5.0** — optional phone app (PWA) served by the local helper over your LAN, with QR pairing,
   per-device permissions and revocation: rich feed cards with real (locally archived) avatars or a media grid, a
   bottom-sheet preview with Share, a viewer with swipe, pinch, double-tap zoom and swipe-down to close, an archive
   Overview, and **Capture**: paste or share X links from the phone (Web Share Target on Android) into a capture
-  inbox on the computer, with live status, previews, retry and an offline outbox. The Downloads monitor shows
+  inbox on the computer, with live status, previews, retry and an offline outbox that retries on its own; the app reconnects by itself after Wi-Fi drops and keeps
+  your recent searches. The Downloads monitor shows
   Up next with **Download next**, per-transfer Pause/Resume/Cancel and per-host pause for devices allowed to
   manage downloads.
 - **Side panel** — status card, Lucide action tiles and real switches for the capture toggles.

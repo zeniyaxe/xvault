@@ -2,6 +2,86 @@
 
 This file is the hand-off document: another session should be able to resume from here.
 
+## v26 "Lumen" pass
+
+Branch: `xvault-26-lumen`, stacked on `xvault-25-vantage` (PR #8, open and unmerged — this PR targets that branch
+so the diff is only v26). Version 26.0.0. Goal: continuous product evolution on top of Library 5.0 — make the
+Library interactions cheaper, give media a real viewer, make the capture inbox survive rate limits, sign-outs and
+browser restarts, make the phone survive a flaky connection, stop hammering a failing media host, and pay down
+legacy CSS.
+
+| Area | Change |
+| --- | --- |
+| Library perf | Quick Look opens through `XVaultLightModal` (`show()` plus a scrim and its own focus containment, Escape and focus return, instead of `showModal()`, which makes the whole document inert and costs a full-document style recalculation on open and on close); the facet counts are computed in `XVaultIdleTask` (`requestIdleCallback` with a timeout) instead of inside the render; selecting paints only the rows whose state changed; List/Table keep a row-geometry cache (`library-workspace.js`) instead of reading layout per row; toasts measure on idle; the Downloads page paints only while it is visible and the 1 s queue-stats poll skips hidden tabs. Layout switches anchor on the post that was on screen (measured **before** the new layout's classes apply; List/Table pass their anchor in) and each query remembers its scroll position. |
+| Media Viewer | `xv-viewer.js` + `xv-viewer.css` (new) rebuild the lightbox UI around the existing `dashboard.js` model: a top bar with the position (post n of N · media k of K) and icon tools (download, details, full screen, shortcuts) next to the existing zoom controls, filmstrip, **Media facts** (real resolution, aspect, length, variants and best bitrate, on-disk state and file name, alt text, Download this / All from post), **Similar in your vault** (`SEMANTIC_SIMILAR` → `GET_LIBRARY_RECORDS`, six thumbnails; a click jumps inside the current set or opens the similar post's media), Ctrl/⌘+wheel zoom at the cursor, drag to pan, swipe on touch, keyboard (← →, Page Up/Down by post, Home/End, + − 0 1, Space/K, J/L, [ ], M, F, I, D / Shift D, Esc, ?) handled in the capture phase so the Library under it never sees them, preload of the neighbours, a 28 px slide between items (off under Calm / reduced motion), help sheet. Opaque background so the Library does not show through. |
+| Capture inbox | `sw/capture-inbox.mjs`: three attempts with backoff (20 s, 90 s; `nextAttemptAt`), `classifyCapturePage()` reads the opened tab and tells **signed out** (`authBlockedAt`: the whole inbox holds until you resume, no attempts burned), **rate limited** (`cooldownUntil`: 5 min, doubling to 30 min) and **unavailable** (deleted / protected / suspended) apart from a plain failure; per-item attempt log. `background.js` arms the `xv-capture-inbox` alarm for the next due item, so retries survive a service-worker restart and a browser restart. Desktop panel: banner (`#captureInboxBanner`) with **Resume**, progress bar, "next try in 1 m 10 s", "attempt 2 of 3", **Attempt history**. The helper (`remote_companion.py`) forwards `maxAttempts`, `nextAttemptAt`, `cooldownUntil`, `authBlocked` to the phone. |
+| Phone Remote 5.0 | `remote.js`: automatic reconnect (2 s doubling to 30 s, countdown in the offline banner, immediate retry on `online` / tab visible, **Reconnect** button, "Reconnected" toast, Library reloads if it was empty); the capture **outbox** is race-safe across tabs (re-read before write, `storage` event sync), retries itself with backoff (5 s → 2 min), records tries / last try / last error per link and shows refused links; **recent searches** (`xvault.remote.recent-searches.v1`, chips under the search, Clear, wiped on unpair); capture rows show "attempt k of 3", "next try in…", the cooldown and the signed-out hold. |
+| Downloads | `sw/host-breaker.mjs` (new): a per-host circuit breaker — 4 host push-back failures (network, 429, 5xx, timeouts, resets — not a missing file or a full disk) inside a minute open it for 30 s, doubling up to 5 min; the first failure after a cool-down re-opens it at once; a success closes it; Resume resets it. The pump treats an open breaker like a paused host (`hostPaused`), `queueStats().coolingHosts` feeds Downloads › Media hosts ("Refusing downloads · waiting 25 s…" + **Try now**). `explainDownloadError()` (`reliability.mjs`) turns `NETWORK_FAILED`, `SERVER_FORBIDDEN`, `FILE_NO_SPACE`, HTTP 404/410/429/5xx… into one plain sentence stored as `row.errorHelp` (raw error stays in the tooltip and in Copy details). |
+| Tech debt | An override audit (for every `legacy` declaration, is the same property on the same selector always set again by a later layer?): 213 declarations in the `legacy` layer that a later layer always overrides were deleted, plus the dead `.bgfx` / `.notif` rules — legacy CSS 209.6 KB → 202.9 KB (37.0 → 35.9 KB gz). 83 gallery screenshots compared before/after: differences only in the clock and loading timing. |
+| Organization | "Similar in your vault" in the viewer is the only new organization surface; Smart collections, Atlas, duplicates and the meaning index are unchanged from v25. |
+| Tooling | `scripts/ui-gallery.mjs` seeds a capture inbox in cooldown and screenshots it (`capture-inbox-<theme>.png`), shoots the Archive page; `tests/remote-capture-browser.mjs` covers recent searches, Send now and the automatic outbox retry; `tests/host-breaker.test.mjs`; capture-inbox unit tests for backoff, sign-in hold, rate-limit cooldown and the attempt log; three e2e Library checks for the viewer (position line, filmstrip and media facts; Home/End, filmstrip jump and next post; details toggle, Ctrl+wheel zoom at the pointer and the shortcut sheet). |
+
+### Decisions (v26)
+
+- **The viewer is a skin over the existing model.** `dashboard.js` still owns `lightboxItems`, the index and the
+  zoom; `xv-viewer.js` adds tools, filmstrip, gestures and the info panel. Quick Look, the Reader and the Library
+  all keep opening the same viewer, so no second media model exists.
+- **Signed out holds, rate limited cools down, everything else retries.** Burning three attempts against a sign-in
+  wall or a 429 page would mark good links failed; holding the inbox until the user signs in (and cooling down
+  after a rate-limit page) costs only time.
+- **Alarms, not timers, for retries.** A Manifest V3 service worker can be stopped at any time; `chrome.alarms`
+  wakes it for the next due item. The schedule lives on the items (`nextAttemptAt`), so a lost alarm is re-armed
+  at the next start.
+- **The breaker is per host and in memory.** It protects one host from a retry storm without touching stored rows;
+  a restart starts with closed breakers, which is the safe default.
+- **Delete overridden CSS, do not rewrite it.** Removing declarations that can never win is invisible by
+  construction and verifiable by screenshots; merging the legacy modules is still the bigger saving.
+
+### Verification log (v26)
+
+| Check | Result |
+| --- | --- |
+| `npm run verify` (structure, ESLint, unit tests, Prettier) | pass, 172 unit tests |
+| `npm run e2e` (extension + Library e2e, now with three viewer checks) | pass |
+| `npm run e2e:a11y` (axe-core) | 0 serious/critical violations |
+| `npm run e2e:remote` (aurora, product, shell, editor, connection, capture incl. recent searches + outbox retry) | 6/6 pass |
+| `tests/downloads-page-browser.mjs` (real Chromium downloads) | pass |
+| `scripts/e2e-firefox.py` (Firefox 159 + geckodriver 0.37.1, built package) | 22/22 pass (an earlier run failed "download recorded as complete" once on a live CDN size mismatch — the known flake noted in the script) |
+| Python `tests/python`, `tests/test_*.py`, `py_compile FFmpeg_Helper/*.py`; `tests/helper-files-browser.mjs`, `tests/auto-backup-browser.mjs` | pass |
+| Screenshots | gallery (every page/theme/size), viewer, capture inbox in cooldown, phone recent searches + outbox retry at 390 px. Review found and fixed: a double focus ring on the phone search box, the Library showing through the viewer, a duplicate "Dimensions" row, a zoom chosen while the image loaded being reset to fit |
+
+Performance (same sandbox, headless Chromium 1243, v25 and v26 served side by side and interleaved; medians):
+
+| Measure | v25 | v26 |
+| --- | --- | --- |
+| Library first render (50k) | 8.8 ms | 8.5 ms |
+| Library usable (50k) | 14.8 ms | 14.8 ms |
+| Quick Look (right after mount) | 254 ms | **131 ms** (trace: 381 → 88 ms) |
+| Select 1.5k (right after mount) | 100 ms | 108 ms (noisy: 86–123 vs 66–118; trace 192 → 73 ms) |
+| Favorite one post | 161 ms | **133 ms** |
+| Latest of rapid searches | 280 ms | 276 ms |
+| Media elements / rows mounted at start | 4 / 14 | 4 / 14 |
+| Cards page (600 posts) re-render: Cards / Feed / Grid | 65 / 28 / 82 ms | 55 / 45 / 85 ms (repeated in-page medians 73–78 / 56–64 / 89–108 vs 63–68 / 47–63 / 82–109: parity) |
+| Phone first tile (60 posts) | 245 ms | 243 ms |
+| Dashboard CSS | 347 KB / 62.5 KB gz (16 files) | 350 KB / 63.3 KB gz (17 files; legacy −6.8 KB, new viewer +7.8 KB, inbox states +2 KB) |
+
+Not verified: live X (the capture inbox's sign-in / rate-limit / unavailable detection is tested against fixture
+page text, not against a real signed-in x.com tab), the Web Share Target from a real Android phone, Windows/NTFS
+and the PowerShell scripts, Safari, screen readers (axe only), the download breaker against a real failing CDN
+(unit-tested and wired, its in-memory state cannot be seeded for a screenshot).
+
+### Remaining after v26
+
+1. Merge the `legacy` CSS modules (`xv-base`, `xv-pages`, `xv-settings`, `xv-library-panels`) into the design
+   system — deleting overridden declarations has reached diminishing returns (−3 %).
+2. Select-all right after a page mount is still noisy at ~100 ms; defer avatar and media work for rows that just
+   mounted.
+3. Capture inbox: verify the page classifier against real x.com sign-in walls and rate-limit pages; per-item
+   "archive media too"; import many links from a text file.
+4. Viewer: video scrubbing thumbnails, compare two images side by side, persist rotate per media.
+5. Organization: suggested collections from the meaning index, "Similar" in the Inspector and on the phone.
+6. Local neural embeddings, multilingual OCR, Firefox Remote, Windows helper verification, screen-reader passes.
+
 ## v25 "Vantage" pass
 
 Branch: `xvault-25-vantage`, stacked on `xvault-24-aurora` (PR #7, still open and unmerged — this PR targets that
