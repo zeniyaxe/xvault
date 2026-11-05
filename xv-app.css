@@ -1,0 +1,28 @@
+/* XVault 24 "Aurora" — the one stylesheet entry for the dashboard.
+   Cascade layers make the design system authoritative without specificity wars or !important:
+     base    — design-system primitives: element defaults, the button system, fields, menus, layout helpers
+     legacy  — pre-24 module styles, still refining their own components while they are retired file by file
+     aurora  — tokens, the app shell and every redesigned surface
+   A later layer always wins over an earlier one, whatever the selector specificity. Inline styles set by scripts
+   (positions, sizes, custom accents) remain unlayered and still apply. */
+@layer base, legacy, aurora;
+
+@import url('xv-aurora-base.css') layer(base);
+
+@import url('xv-base.css') layer(legacy);
+@import url('xv-library.css') layer(legacy);
+@import url('xv-pages.css') layer(legacy);
+@import url('xv-settings.css') layer(legacy);
+@import url('xv-motion.css') layer(legacy);
+@import url('xv-atlas.css') layer(legacy);
+@import url('xv-reader.css') layer(legacy);
+@import url('xv-search-assist.css') layer(legacy);
+@import url('xv-library3.css') layer(legacy);
+@import url('xv-forge.css') layer(legacy);
+@import url('xv-keystone.css') layer(legacy);
+@import url('xv-motion-plus.css') layer(legacy);
+@import url('xv-downloads.css') layer(legacy);
+
+@import url('xv-aurora.css') layer(aurora);
+@import url('xv-aurora-library.css') layer(aurora);
+@import url('xv-aurora-pages.css') layer(aurora);

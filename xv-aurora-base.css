@@ -1,0 +1,997 @@
+/* XVault 24 "Aurora" — design-system primitives in the lowest cascade layer (`base`).
+   Element defaults (buttons, fields, checkboxes, ranges, menus, switches), layout helpers and shell geometry.
+   Legacy module rules sit above this layer and still refine their own components; redesigned surfaces in
+   xv-aurora.css sit above both. Tokens are defined in xv-aurora.css. */
+
+/* ───────── Buttons ─────────
+   One system for every button. Variants: (default) secondary · .primary · .quiet/.ghost · .danger · .xv-icon-btn
+   (icon-only, needs an accessible name) · .xv-split · .seg (segmented) · .xv-fab (floating) · .xv-toolbar.
+   States: :hover, :active (press), :focus-visible (ring), [aria-busy=true] (loading), [data-state=success|error]. */
+button,
+.xv-btn {
+  --btn-h: 32px;
+  --btn-bg: var(--raised);
+  --btn-bg-hover: var(--raised-hi);
+  --btn-fg: var(--text);
+  --btn-border: var(--line);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: var(--btn-h);
+  padding: 0 12px;
+  border: 1px solid var(--btn-border);
+  border-radius: var(--r-s);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  font: 550 var(--fs-s) / 1 var(--font-ui);
+  letter-spacing: -0.005em;
+  box-shadow: none;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    opacity var(--t-fast),
+    transform var(--t-fast) var(--ease);
+}
+button:hover,
+.xv-btn:hover {
+  background: var(--btn-bg-hover);
+  border-color: var(--line-strong);
+}
+button:active,
+.xv-btn:active {
+  transform: translateY(0.5px) scale(0.975);
+  transition-duration: 60ms;
+}
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--edge), var(--ring);
+  border-color: var(--accent-line);
+}
+button:disabled,
+button[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  box-shadow: none;
+}
+button svg.xv-icon,
+.xv-btn svg.xv-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  stroke-width: 1.75;
+}
+button.primary,
+.xv-btn.primary {
+  --btn-bg: var(--accent);
+  --btn-bg-hover: color-mix(in srgb, var(--accent) 86%, white);
+  --btn-fg: var(--accent-ink);
+  --btn-border: transparent;
+  font-weight: 650;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.22),
+    0 1px 2px rgb(var(--sh-rgb) / 0.3),
+    0 6px 18px -8px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+button.primary:hover {
+  border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.26),
+    0 1px 2px rgb(var(--sh-rgb) / 0.3),
+    0 10px 26px -8px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+button.primary:focus-visible {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.22),
+    var(--ring);
+}
+button.quiet,
+button.ghost,
+.ghost,
+.xv-btn.quiet {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--hover);
+  --btn-fg: var(--soft);
+  --btn-border: transparent;
+  box-shadow: none;
+}
+button.quiet:hover,
+button.ghost:hover {
+  color: var(--text);
+  border-color: transparent;
+}
+button.danger,
+.xv-btn.danger {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--danger-soft);
+  --btn-fg: var(--danger);
+  --btn-border: color-mix(in srgb, var(--danger) 36%, var(--line));
+  box-shadow: none;
+}
+button.danger:hover {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--line));
+}
+button.danger.solid,
+button.primary.danger {
+  --btn-bg: var(--danger);
+  --btn-bg-hover: color-mix(in srgb, var(--danger) 86%, white);
+  --btn-fg: #fff;
+  --btn-border: transparent;
+}
+button.big,
+button.lg {
+  --btn-h: 40px;
+  padding: 0 18px;
+  border-radius: var(--r-m);
+  font-size: var(--fs-m);
+}
+button.sm {
+  --btn-h: 26px;
+  padding: 0 9px;
+  font-size: var(--fs-xs);
+  border-radius: 7px;
+}
+/* icon-only buttons: square, always paired with an accessible name and a tooltip */
+.xv-icon-btn,
+button.icon {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--hover);
+  --btn-fg: var(--soft);
+  --btn-border: transparent;
+  width: var(--btn-h);
+  min-width: var(--btn-h);
+  padding: 0;
+  box-shadow: none;
+}
+.xv-icon-btn:hover,
+button.icon:hover {
+  color: var(--text);
+  border-color: transparent;
+}
+.xv-icon-btn[aria-pressed='true'],
+button.icon[aria-pressed='true'] {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+/* loading: the label stays in place (no layout shift) while a spinner draws over it */
+button[aria-busy='true'] {
+  color: transparent !important;
+  pointer-events: none;
+}
+button[aria-busy='true'] > * {
+  visibility: hidden;
+}
+button[aria-busy='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--btn-fg) 30%, transparent);
+  border-top-color: var(--btn-fg);
+  animation: xvSpin 0.7s linear infinite;
+}
+button[data-state='success'] {
+  --btn-border: color-mix(in srgb, var(--ok) 50%, var(--line));
+  color: var(--ok);
+}
+button.primary[data-state='success'] {
+  --btn-bg: var(--ok);
+  --btn-fg: #04140b;
+  color: var(--btn-fg);
+}
+button[data-state='error'] {
+  --btn-border: color-mix(in srgb, var(--danger) 55%, var(--line));
+  color: var(--danger);
+  animation: xvShake 0.32s var(--ease);
+}
+@keyframes xvSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes xvShake {
+  25% {
+    transform: translateX(-3px);
+  }
+  60% {
+    transform: translateX(3px);
+  }
+}
+/* split button: main action + menu */
+.xv-split {
+  display: inline-flex;
+  isolation: isolate;
+}
+.xv-split > button:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.xv-split > button:last-child,
+.xv-split > details > summary {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+  padding: 0 7px;
+}
+/* floating action button */
+.xv-fab {
+  --btn-h: 48px;
+  border-radius: var(--r-pill);
+  padding: 0 20px;
+  box-shadow: var(--sh-3);
+}
+/* toolbar: a quiet group of related buttons */
+.xv-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--surface);
+}
+.xv-toolbar > button {
+  --btn-bg: transparent;
+  --btn-border: transparent;
+  box-shadow: none;
+  min-height: 28px;
+}
+
+/* segmented control; xv-motion-plus.js adds the sliding .xv-seg-pill behind the active cell */
+.seg {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--sunk);
+}
+.seg button {
+  --btn-bg: transparent;
+  --btn-bg-hover: transparent;
+  --btn-border: transparent;
+  --btn-fg: var(--muted);
+  min-height: 28px;
+  min-width: 30px;
+  padding: 0 9px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+.seg button:hover {
+  color: var(--text);
+}
+.seg button[aria-checked='true'],
+.seg button.active,
+.seg button[aria-pressed='true'] {
+  color: var(--text);
+  background: var(--raised-hi);
+  box-shadow: var(--edge), var(--sh-1);
+}
+.seg.xv-pilled > :is([aria-checked='true'], .active, [aria-pressed='true'], [aria-selected='true']) {
+  background: transparent;
+  box-shadow: none;
+}
+.xv-seg-pill {
+  border-radius: 8px;
+  background: var(--raised-hi);
+  box-shadow: var(--edge), var(--sh-1);
+}
+body.light .seg button[aria-checked='true'],
+body.light .xv-seg-pill {
+  background: var(--surface);
+}
+
+/* ───────── Form controls ───────── */
+input,
+select,
+textarea {
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--sunk);
+  color: var(--text);
+  font: 450 var(--fs-m) / 1.35 var(--font-ui);
+  transition:
+    border-color var(--t-fast),
+    box-shadow var(--t-fast),
+    background-color var(--t-fast);
+}
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--line-strong);
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent-line);
+  box-shadow: var(--ring);
+  background: color-mix(in srgb, var(--sunk) 70%, var(--surface));
+}
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--muted) 85%, transparent);
+}
+select {
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237e8591' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 10px center;
+  background-size: 14px;
+}
+input[type='checkbox'] {
+  width: 17px;
+  height: 17px;
+  min-height: 0;
+  padding: 0;
+  border: 1.5px solid color-mix(in srgb, var(--muted) 80%, transparent);
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  transition:
+    background-color var(--t-fast),
+    border-color var(--t-fast),
+    transform var(--t-fast) var(--spring);
+}
+input[type='checkbox']:hover {
+  border-color: var(--soft);
+}
+input[type='checkbox']:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  animation: xvPop var(--t-med) var(--spring);
+}
+input[type='checkbox']:checked::after {
+  border-color: var(--accent-ink);
+}
+input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+input[type='radio'] {
+  accent-color: var(--accent);
+  min-height: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  box-shadow: none;
+}
+@keyframes xvPop {
+  40% {
+    transform: scale(0.86);
+  }
+}
+input[type='range'] {
+  min-height: 22px;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--fill, 50%),
+    color-mix(in srgb, var(--muted) 30%, transparent) var(--fill, 50%)
+  );
+}
+input[type='range']::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 0.4),
+    0 0 0 1px rgb(0 0 0 / 0.08);
+}
+input[type='range']:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 0.4),
+    var(--ring);
+}
+.switch i {
+  border-radius: var(--r-pill);
+  transition: background-color var(--t-med) var(--ease);
+}
+.switch i::after {
+  transition: transform var(--t-med) var(--spring);
+}
+.switch input:checked + i,
+.toggles input[type='checkbox']:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.field > span {
+  color: var(--soft);
+  font-size: var(--fs-s);
+  font-weight: 500;
+}
+
+/* menus built on <details> */
+details.menu > summary {
+  min-height: 32px;
+  border-radius: var(--r-s);
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--soft);
+  font-weight: 550;
+  font-size: var(--fs-s);
+  box-shadow: var(--edge), var(--sh-1);
+  transition:
+    background-color var(--t-fast),
+    color var(--t-fast),
+    border-color var(--t-fast);
+}
+details.menu > summary:hover,
+details.menu[open] > summary {
+  background: var(--raised-hi);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+details.menu > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+details.menu > .menu-pop,
+.xv-pop {
+  min-width: 230px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background: color-mix(in srgb, var(--raised) 96%, transparent);
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(18px) saturate(1.3);
+  gap: 1px;
+  animation: xvMenuIn var(--t-med) var(--ease-out);
+}
+details.menu > .menu-pop button,
+.xv-pop button.item {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--hover);
+  --btn-border: transparent;
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-s);
+  color: var(--soft);
+  font-weight: 500;
+  box-shadow: none;
+}
+details.menu > .menu-pop button:hover {
+  color: var(--text);
+}
+details.menu > .menu-pop button.danger {
+  color: var(--danger);
+}
+details.menu > .menu-pop button.danger:hover {
+  background: var(--danger-soft);
+}
+details.menu > .menu-pop button svg.xv-icon {
+  color: var(--muted);
+}
+details.menu > .menu-pop hr {
+  margin: 5px 4px;
+  border-top-color: var(--line-soft);
+}
+@keyframes xvMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+}
+
+/* chips, pills, badges */
+.chip,
+.xv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  color: var(--soft);
+  font: 550 var(--fs-xs) / 1 var(--font-ui);
+  box-shadow: none;
+}
+.savebadge,
+.pill {
+  min-height: 22px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  border-color: var(--line);
+  font-weight: 550;
+  font-size: var(--fs-xs);
+}
+.xv-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--soft);
+  font: 650 var(--fs-2xs) / 1 var(--font-ui);
+  letter-spacing: 0.01em;
+}
+.empty {
+  padding: 56px 24px;
+  color: var(--muted);
+  font-size: var(--fs-m);
+}
+
+/* ───────── Shell structure ─────────
+   Geometry only; the look of the rail and top bar lives in xv-aurora.css. */
+.shell {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-columns: var(--xv-rail, 76px) minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+}
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.top {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+.top > div:first-child {
+  display: flex;
+  min-width: 0;
+}
+.top small {
+  display: none;
+}
+.top h1 {
+  white-space: nowrap;
+}
+.subnav {
+  display: flex;
+}
+.subnav:empty {
+  display: none;
+}
+.topactions {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+.page {
+  display: none;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 26px 30px 56px;
+}
+.page.show {
+  display: block;
+  animation: xvPageIn var(--t-slow) var(--ease-out);
+}
+@keyframes xvPageIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.page-narrow {
+  max-width: 1080px;
+}
+@media (max-width: 900px) {
+  .page {
+    padding: 18px 16px 44px;
+  }
+}
+
+/* ───────── Layout helpers, toggles, meters (carried over from the pre-24 base) ───────── */
+.xv-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+button svg {
+  flex: none;
+}
+input,
+select,
+textarea {
+  width: 100%;
+  outline: none;
+}
+textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+select {
+  appearance: none;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+input[type='checkbox'] {
+  appearance: none;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+}
+input[type='checkbox']:checked::after {
+  content: '';
+  width: 8px;
+  height: 4.5px;
+  border: solid var(--accent-ink);
+  border-width: 0 0 2px 2px;
+  transform: translateY(-1px) rotate(-45deg);
+}
+input[type='range'] {
+  appearance: none;
+  padding: 0;
+  cursor: pointer;
+}
+input[type='range']::-webkit-slider-thumb {
+  appearance: none;
+  border: 0;
+  transition: transform var(--t-fast) var(--ease);
+}
+input[type='range']:hover::-webkit-slider-thumb {
+  transform: scale(1.12);
+}
+input[type='range']:focus-visible {
+  outline: none;
+}
+input[type='number'] {
+  font-variant-numeric: tabular-nums;
+}
+.pref {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--sunk);
+  overflow: hidden;
+}
+.pref b {
+  display: grid;
+  place-items: center;
+  padding: 0 0 0 10px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.pref input {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.field {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chips span {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  color: var(--soft);
+  font-size: var(--fs-xs);
+}
+details.menu {
+  position: relative;
+}
+details.menu > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  cursor: pointer;
+  user-select: none;
+}
+details.menu > summary::-webkit-details-marker {
+  display: none;
+}
+details.menu > .menu-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+  display: grid;
+  transform-origin: top right;
+}
+details.menu > .menu-pop button {
+  width: 100%;
+}
+details.menu > .menu-pop hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.savebadge,
+.pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-style: normal;
+}
+.savebadge.saved {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
+}
+.empty {
+  text-align: center;
+  line-height: 1.6;
+}
+.empty button {
+  margin-left: 6px;
+}
+.diag {
+  padding: 10px 12px;
+  border-left: 2px solid var(--line);
+  border-radius: 0 var(--r-s) var(--r-s) 0;
+  background: var(--accent-softer);
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+.diag.ok {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.panel {
+  margin: 0 0 22px;
+}
+.panelhead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.panel h3 {
+  margin: 0 0 4px;
+}
+.panel > small,
+.panelhead small {
+  color: var(--muted);
+}
+.panel p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
+}
+.grid > .panel {
+  margin: 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.formgrid {
+  display: grid;
+  gap: 12px;
+}
+.formgrid.two {
+  grid-template-columns: 1fr 1fr;
+}
+.toggles {
+  display: grid;
+  gap: 0;
+}
+.toggles label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft);
+  cursor: pointer;
+}
+.toggles label:first-child {
+  border-top: 0;
+}
+.toggles b {
+  font-weight: 600;
+}
+.toggles small {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  line-height: 1.45;
+}
+.toggles input[type='checkbox'],
+.switch i {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: 36px;
+  height: 21px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--muted) 38%, transparent);
+  transition: background-color var(--t-med) var(--ease);
+}
+.toggles input[type='checkbox']::after,
+.switch i::after {
+  content: '';
+  position: absolute;
+  top: 2.5px;
+  left: 2.5px;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  transform: none;
+  transition: transform var(--t-med) var(--spring);
+}
+.toggles input[type='checkbox']:checked,
+.switch input:checked + i {
+  background: var(--accent);
+  animation: none;
+}
+.toggles input[type='checkbox']:checked::after,
+.switch input:checked + i::after {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  transform: translateX(15px);
+}
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+.switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+.switch i {
+  display: inline-block;
+}
+.switch input:focus-visible + i {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.progress,
+.bigprogress {
+  height: 5px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  overflow: hidden;
+}
+.progress i,
+.bigprogress i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--aurora);
+  border-radius: inherit;
+  transition: width var(--t-slow) var(--ease-out);
+}
+
+/* ───────── Content primitives ───────── */
+.panel h3 {
+  font: 700 var(--fs-l) / 1.25 var(--font-ui);
+  letter-spacing: -0.015em;
+}
+.panelhead small,
+.panel p {
+  color: var(--muted);
+}
+.xv-card,
+.page > .panel,
+.page > .grid > .panel {
+  padding: 20px 22px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-l);
+  background: var(--surface);
+  box-shadow: var(--edge);
+}
+.page > .panel + .panel {
+  margin-top: 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-soft);
+}
+.page > .panel {
+  margin-bottom: 18px;
+}
+.grid {
+  gap: 18px;
+}
+/* stat tiles */
+.vault-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.vault-stats > div {
+  position: relative;
+  padding: 16px 18px 15px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-l);
+  background: var(--surface);
+  box-shadow: var(--edge);
+  overflow: hidden;
+}
+.vault-stats > div::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--aurora);
+  opacity: 0.5;
+}
+.vault-stats dt {
+  color: var(--muted);
+  font: 600 var(--fs-xs) / 1.2 var(--font-ui);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.vault-stats dd {
+  margin: 6px 0 0;
+  font: 700 var(--fs-2xl) / 1.05 var(--font-ui);
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+/* progress meters */
+.bigprogress,
+.meter,
+progress {
+  border-radius: var(--r-pill);
+}
+.bigprogress i {
+  background: var(--aurora);
+  border-radius: inherit;
+}

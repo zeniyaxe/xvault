@@ -83,8 +83,9 @@
     document.body.dataset.nav = mode;
     const button = $('#railCollapse');
     if (button) {
-      button.setAttribute('aria-pressed', String(mode === 'compact'));
-      button.setAttribute('aria-label', mode === 'compact' ? 'Expand navigation' : 'Collapse navigation');
+      button.setAttribute('aria-pressed', String(mode === 'wide'));
+      button.setAttribute('aria-label', mode === 'wide' ? 'Collapse navigation to icons' : 'Expand navigation labels');
+      button.dataset.tip = button.getAttribute('aria-label');
     }
     if (persist)
       try {
@@ -176,7 +177,7 @@
     }
     if (event.key === '[') {
       event.preventDefault();
-      setNav(document.body.dataset.nav === 'compact' ? 'wide' : 'compact');
+      setNav(document.body.dataset.nav === 'wide' ? 'rail' : 'wide');
       return;
     }
     if (chord && Date.now() < chord && targets[event.key]) {
@@ -213,14 +214,14 @@
       },
       true
     );
-    let saved = 'wide';
+    // XVault 24: the default is the icon rail (icons over short labels); "wide" is the labeled sidebar.
+    // Older saves used "compact" for the icon rail.
+    let saved = 'rail';
     try {
-      saved = localStorage.getItem('xv-nav') || 'wide';
+      saved = localStorage.getItem('xv-nav') || 'rail';
     } catch {}
-    setNav(saved === 'compact' ? 'compact' : 'wide', false);
-    $('#railCollapse')?.addEventListener('click', () =>
-      setNav(document.body.dataset.nav === 'compact' ? 'wide' : 'compact')
-    );
+    setNav(saved === 'wide' ? 'wide' : 'rail', false);
+    $('#railCollapse')?.addEventListener('click', () => setNav(document.body.dataset.nav === 'wide' ? 'rail' : 'wide'));
     document.addEventListener('keydown', keys);
     // Menus built on <details> dismiss on outside press, Escape and after an action.
     document.addEventListener(

@@ -284,7 +284,7 @@ const defaults = {
   inspectorWidth: 'normal',
   startPage: 'last',
   uiFont: 'hanken',
-  readFont: 'newsreader',
+  readFont: 'sans',
   accentCustom: '',
   inboxSince: 0,
   libraryTileSize: 260,

@@ -1,9 +1,6 @@
 /* XVault command center: searchable actions plus safe, local-first shortcuts. */
 (() => {
-  const style = document.createElement('style');
-  style.textContent =
-    '.paletteCommand{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,160px);align-items:baseline;gap:12px;white-space:normal}.paletteCommand b{font-weight:550;overflow-wrap:anywhere;line-height:1.4}.paletteCommand small{color:var(--muted);font-size:11.5px;line-height:1.4;text-align:right}.paletteEmpty{padding:18px;color:var(--muted)}.paletteEmpty b{color:var(--text);font-weight:550}@media(max-width:520px){.paletteCommand{grid-template-columns:minmax(0,1fr)}.paletteCommand small{display:none}}';
-  document.head.append(style);
+  // Palette styles live in xv-aurora.css (XVault 24).
   let activeIndex = 0;
   let visible = [];
   const execute = command => {

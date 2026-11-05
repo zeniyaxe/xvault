@@ -266,7 +266,7 @@
     inspectorWidth: 'normal',
     inspectorPixels: 0,
     uiFont: 'hanken',
-    readFont: 'newsreader',
+    readFont: 'sans',
     startPage: 'last',
     accentCustom: '',
     workspaces: [],

@@ -3,7 +3,8 @@
 (() => {
   const $ = selector => document.querySelector(selector);
   const THEMES = [
-    { id: 'graphite', name: 'Graphite', note: 'The default. Matte dark with a brass accent.' },
+    { id: 'graphite', name: 'Aurora', note: 'The default. Ink dark with an iris accent and a cyan glow.' },
+    { id: 'brass', name: 'Graphite', note: 'The classic XVault look: matte dark with a brass accent.' },
     { id: 'oled', name: 'True black', note: 'Pure black ground for OLED screens and viewing media.' },
     { id: 'midnight', name: 'Midnight', note: 'Blue-ink dark with a cool accent.' },
     { id: 'slate', name: 'Slate', note: 'Neutral cool gray, low saturation.' },
@@ -17,7 +18,7 @@
     { id: 'cloud', name: 'Cloud', note: 'Cool light gray with a blue accent.', light: true },
   ];
   const ALIASES = { glacier: 'slate', aurora: 'forest', rose: 'violet' };
-  const ACCENTS = ['#d6a84e', '#e48a4a', '#e0675c', '#e58aa3', '#b69cf0', '#6ea8fe', '#64cfae', '#a3d35f'];
+  const ACCENTS = ['#8d7dff', '#d6a84e', '#e48a4a', '#e0675c', '#e58aa3', '#b69cf0', '#6ea8fe', '#64cfae', '#a3d35f'];
   const WIDTHS = {
     rail: { narrow: 176, normal: 208, wide: 248 },
     facet: { narrow: 200, normal: 232, wide: 284 },
@@ -305,7 +306,7 @@
         inspectorWidth: 'normal',
         inspectorPixels: 0,
         uiFont: 'hanken',
-        readFont: 'newsreader',
+        readFont: 'sans',
         startPage: 'last',
       });
       toast('Layout and type reset');

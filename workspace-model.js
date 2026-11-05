@@ -7,6 +7,7 @@
   const enums = {
     theme: [
       'graphite',
+      'brass',
       'oled',
       'midnight',
       'slate',

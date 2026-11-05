@@ -36,7 +36,7 @@ try {
     if (!file)
       return route.fulfill({
         contentType: 'text/html; charset=utf-8',
-        body: `<!doctype html><html data-theme="graphite"><head><meta charset="utf-8"><link rel="stylesheet" href="xv-base.css"><link rel="stylesheet" href="xv-settings.css"></head><body style="padding:24px"><main>${html.slice(start, end)}</main><script src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script><script src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script><script src="remote-settings.js"></script></body></html>`,
+        body: `<!doctype html><html data-theme="graphite"><head><meta charset="utf-8"><link rel="stylesheet" href="xv-app.css"></head><body style="padding:24px"><main>${html.slice(start, end)}</main><script src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script><script src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script><script src="remote-settings.js"></script></body></html>`,
       });
     try {
       return await route.fulfill({
