@@ -8,6 +8,7 @@ import {
 } from './reliability.mjs';
 import { createInsightsAccumulator, orderThread, compactPost, previewUrl, mediaKind } from './vault-insights.mjs';
 import { createDerivedService } from './sw/derived-service.mjs';
+import { timelineBuckets } from './sw/timeline.mjs';
 import { createAutoBackup, createInlineBackupBuilder, createOffscreenBackupBuilder } from './sw/auto-backup.mjs';
 import { createOffscreenHost, holdOffscreen } from './sw/ocr.mjs';
 import { createSemanticService } from './sw/semantic-service.mjs';
@@ -4558,6 +4559,76 @@ route('GET_LIBRARY_RECORDS', async m => {
 });
 route('QUERY_LIBRARY_PAGE', async m => {
   return await queryLibraryPage(m);
+});
+// Library timeline (XVault 22): a histogram of every matching post by posting (or archiving) date.
+// Scans the whole archive once per (query, revision) in 1,000-record pages; cached for repeat paints.
+const timelineCache = new Map();
+route('LIBRARY_TIMELINE', async m => {
+  const query = String(m.query || '').slice(0, 1000),
+    field = m.field === 'archived' ? 'archived' : 'posted';
+  const Search = globalThis.XVaultLibrarySearch;
+  if (Search.queryIssues(query).length) return { ok: true, buckets: [], unit: null, invalid: true };
+  const settings = await getSettings(),
+    database = await db();
+  try {
+    const revision = await readLibraryRevision(database),
+      zone = Search.getCalendarTimeZone?.() || 'utc',
+      key = `${revision}|${zone}|${field}|${query}`;
+    if (timelineCache.has(key)) return timelineCache.get(key);
+    const compiled = Search.compileQuery(query);
+    if (Search.usesRuleKind(compiled, ['downloaded', 'missing', 'size']))
+      return { ok: true, buckets: [], unit: null, unsupported: 'Download filters are not charted on the timeline' };
+    const ocrText = await ocrTextFor(compiled),
+      semanticScores = await semanticFor(compiled),
+      boardNames = boardNamesOf(settings),
+      joins = await queryJoinsFor(database, compiled);
+    const stamps = [];
+    let scanned = 0,
+      after = null,
+      truncated = false;
+    for (;;) {
+      const range = after == null ? null : IDBKeyRange.lowerBound(after, true);
+      const batch = await new Promise((resolve, reject) => {
+        const request = database.transaction('tweets', 'readonly').objectStore('tweets').getAll(range, 1000);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      for (const post of batch) {
+        scanned++;
+        if (query) {
+          const projection = Search.projectPost(post, 0, {
+            inboxSince: settings.inboxSince,
+            ocrText: ocrText.map?.get(String(post.id)),
+            semanticScores: semanticScoresFor(semanticScores, String(post.id)),
+            boardNames,
+            ...joins,
+          });
+          if (!Search.matchesCompiledQuery(projection, compiled)) continue;
+        }
+        stamps.push(field === 'archived' ? Number(post.archivedAt || 0) : new Date(post.createdAt || 0).getTime());
+      }
+      if (batch.length < 1000) break;
+      after = batch.at(-1).id;
+      if (scanned >= 400000) {
+        truncated = true;
+        break;
+      }
+    }
+    const result = {
+      ok: true,
+      revision,
+      field,
+      scanned,
+      matched: stamps.length,
+      truncated,
+      ...timelineBuckets(stamps, { zone }),
+    };
+    timelineCache.set(key, result);
+    while (timelineCache.size > 24) timelineCache.delete(timelineCache.keys().next().value);
+    return result;
+  } finally {
+    database.close();
+  }
 });
 route('GET_LIBRARY_QUERY_PROGRESS', async m => {
   const queryId = String(m.queryId || '');

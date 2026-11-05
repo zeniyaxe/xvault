@@ -92,6 +92,45 @@ try {
   check('type:video', vids > 0 && vids < all, `${vids}`);
   await count('');
 
+  // XVault 22 timeline: whole-archive counts, click a bar → after:/before: and exactly that many posts.
+  // Wait for the empty search's counts (the previous search's bars may still be on screen).
+  await page
+    .waitForFunction(
+      total => (document.querySelector('#xkTimeline .xk-summary')?.textContent || '').startsWith(`${total} posts`),
+      tweets.length,
+      { timeout: 8000 }
+    )
+    .catch(() => {});
+  const bars = await page.$$eval('#xkTimeline .xk-bar', nodes =>
+    nodes.map(node => Number(/: ([\d,]+) posts$/.exec(node.getAttribute('aria-label'))?.[1].replace(/,/g, '') || 0))
+  );
+  check(
+    'timeline counts every post',
+    bars.reduce((sum, value) => sum + value, 0) === tweets.length,
+    `${bars.length} bars, ${bars.reduce((sum, value) => sum + value, 0)} posts`
+  );
+  const pick = bars.findIndex(value => value > 0);
+  await page.keyboard.press('Escape'); // close the search suggestions that overlay the results
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.locator('#xkTimeline .xk-bar').nth(pick).click();
+  await page.waitForTimeout(1200);
+  const ranged = await page.inputValue('#search');
+  const rangedCards = await page.evaluate(
+    () => document.querySelectorAll('#list [data-id], #list article, #list .card').length
+  );
+  check(
+    'timeline bar narrows the search to its dates',
+    /after:\d{4}-\d\d-\d\d before:\d{4}-\d\d-\d\d/.test(ranged) && rangedCards === bars[pick],
+    `${ranged} → ${rangedCards} (bar ${bars[pick]})`
+  );
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.locator('#xkTimeline [data-xk="clear"]').click();
+  await page.waitForTimeout(1200);
+  check('timeline "All dates" removes the range', !/after:|before:/.test(await page.inputValue('#search')));
+  await page.screenshot({ path: join(out, 'library-timeline.png') });
+  await count('');
+
   // Exporters with an in-memory save picker.
   await page.evaluate(() => {
     window.__exports = {};
