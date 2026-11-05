@@ -42,6 +42,38 @@ export function createOffscreenHost(chromeApi = globalThis.chrome) {
   return { ensure, send, close, has };
 }
 
+/**
+ * Firefox (XVault 21): there are no offscreen documents, but Firefox runs MV3 background scripts as an
+ * event page that has a DOM, so the same engine (offscreen-ocr.js) is loaded into the background page and
+ * called directly. Chrome and Edge keep the offscreen document.
+ */
+export function createInlineHost(scope = globalThis, load = () => import('../offscreen-ocr.js')) {
+  async function ensure() {
+    if (!scope.XVaultOcrEngine) await load();
+    if (!scope.XVaultOcrEngine) throw Error('The local OCR engine could not start in this browser');
+  }
+  return {
+    ensure,
+    async send(message) {
+      await ensure();
+      return scope.XVaultOcrEngine.handle(message);
+    },
+    close: async () => scope.XVaultOcrEngine?.release?.(),
+    has: async () => !!scope.XVaultOcrEngine,
+  };
+}
+
+/** Offscreen document where available, the background page itself on Firefox, otherwise a clear error. */
+export function createOcrHost(chromeApi = globalThis.chrome, scope = globalThis, load) {
+  if (chromeApi?.offscreen?.createDocument) return createOffscreenHost(chromeApi);
+  if (scope.document?.createElement) return createInlineHost(scope, load);
+  const unavailable = async () => ({
+    ok: false,
+    error: 'Local OCR needs an offscreen document (Chrome, Edge) or a background page (Firefox)',
+  });
+  return { ensure: async () => {}, send: unavailable, close: async () => {}, has: async () => false };
+}
+
 /** Pick the rendition OCR reads: 'medium' (≈1200px) reads small print far better than thumbnails. */
 export function ocrSource(item) {
   const url = String(item.fallback || item.thumb || '');

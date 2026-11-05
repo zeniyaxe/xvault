@@ -31,7 +31,7 @@ const worker = compactSource(readSource('background.js'));
 const manifest = JSON.parse(readSource('manifest.json'));
 
 assert.match(dashboard, /type: 'QUERY_LIBRARY_PAGE'/, 'the dashboard requests bounded Library pages');
-assert.match(worker, /m\.type==='QUERY_LIBRARY_PAGE'/, 'the current worker must serve bounded Library pages');
+assert.match(worker, /route\('QUERY_LIBRARY_PAGE'/, 'the current worker must serve bounded Library pages');
 assert.match(
   dashboard,
   /workerMismatch = \/unknown message\/i[\s\S]*Reload XVault extension/i,
@@ -75,7 +75,7 @@ if (!fs.existsSync(new URL(archive, root))) {
   );
   assert.match(
     packagedWorker,
-    /m\.type==='QUERY_LIBRARY_PAGE'/,
+    /route\('QUERY_LIBRARY_PAGE'/,
     'the packaged worker must match the current dashboard protocol'
   );
 }

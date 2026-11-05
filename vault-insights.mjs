@@ -498,6 +498,8 @@ export function readerPost(post) {
       playbackUrl: String(item?.playbackUrl || ''),
       width: Number(item?.width) || null,
       height: Number(item?.height) || null,
+      altText: item?.altText ? String(item.altText).slice(0, 4000) : '',
+      durationMs: Number(item?.durationMs) || null,
     })),
     replyToId: post.replyToId ? String(post.replyToId) : null,
     replyToHandle: post.replyToHandle ? String(post.replyToHandle).toLowerCase() : null,
@@ -512,6 +514,16 @@ export function readerPost(post) {
     readAt: Number(post.userMeta?.readAt) || 0,
     readProgress: post.userMeta?.readProgress || null,
     highlights: Array.isArray(post.userMeta?.highlights) ? post.userMeta.highlights.slice(0, 200) : [],
+    // XVault 21: post extras and change tracking shown by the Reader.
+    poll: post.poll || null,
+    card: post.card || null,
+    space: post.space || null,
+    communityNote: post.communityNote || null,
+    edit: post.edit || null,
+    availability: post.availability || null,
+    revisionCount: Number(post.revisionCount) || 0,
+    textRevisionCount: Number(post.textRevisionCount) || 0,
+    archiveDeletedAt: post.archiveDeletedAt || null,
   };
 }
 

@@ -46,6 +46,27 @@
     ['thread:', 'a conversation by post ID', 'thread:1234567890'],
     ['quotes:', 'posts quoting a post ID', 'quotes:1234567890'],
     ['id:', 'a post ID', 'id:1234567890'],
+    // XVault 21 "Forge"
+    ['quality:', 'archive completeness score (incomplete < 70)', 'quality:<70'],
+    ['asof:', 'what the vault held on a day', 'asof:2026-01-01'],
+    ['edits:', 'times the text changed', 'edits:>0'],
+    ['revisions:', 'saved versions', 'revisions:>1'],
+    ['words:', 'word count', 'words:>200'],
+    ['duration:', 'video length', 'duration:>2m'],
+    ['res:', 'video or image height', 'res:>=1080'],
+    ['engagement:', 'likes + reposts per view', 'engagement:>5%'],
+    ['aspect:', 'media shape', 'aspect:portrait'],
+    ['weekday:', 'posted on a weekday', 'weekday:sat'],
+    ['hour:', 'posted at an hour (calendar zone)', 'hour:22-6'],
+    ['label:', 'color label', 'label:red'],
+    ['status:', 'still on X?', 'status:deleted'],
+    ['alt:', 'image description text', 'alt:diagram'],
+    ['poll:', 'poll option text', 'poll:yes'],
+    ['card:', 'link card title or text', 'card:"release notes"'],
+    ['cnote:', 'Community Note text', 'cnote:misleading'],
+    ['link:', 'expanded link URL', 'link:youtube.com/watch'],
+    ['name:', 'display name', 'name:"jane doe"'],
+    ['topic:', 'an Atlas topic cluster', 'topic:c3'],
   ];
   const KEY_INFO = new Map(KEYS.map(([key, hint, example]) => [key.slice(0, -1), { hint, example }]));
   const BOOL = ['true', 'false'];
@@ -59,6 +80,22 @@
       ['tag', 'tagged posts'],
       ['download', 'downloaded files'],
       ['ocr', 'images with recognised text'],
+      ['highlight', 'posts with highlights'],
+      ['board', 'pinned to a board'],
+      ['poll', 'polls'],
+      ['card', 'link cards'],
+      ['space', 'Spaces'],
+      ['community-note', 'Community Notes'],
+      ['alt', 'images with alt text'],
+      ['revisions', 'more than one saved version'],
+      ['link', 'external links'],
+      ['hashtag', 'hashtags'],
+      ['mention', 'mentions'],
+      ['gap', 'missing parent posts'],
+      ['missing-quote', 'quoted post not archived'],
+      ['label', 'a color label'],
+      ['snapshot', 'saved web pages'],
+      ['imported-media', 'media imported from an X archive ZIP'],
     ],
     type: [
       ['video', 'videos'],
@@ -76,6 +113,19 @@
       ['sensitive', 'marked sensitive'],
       ['media', 'with media'],
       ['text', 'text only'],
+      ['edited', 'text changed since first archived'],
+      ['deleted', 'gone from X'],
+      ['unavailable', 'deleted, suspended, protected or withheld'],
+      ['available', 'confirmed still on X'],
+      ['unchecked', 'never checked on X'],
+      ['incomplete', 'quality below 70'],
+      ['complete', 'quality 70 or more'],
+      ['gap', 'thread has a missing parent'],
+      ['poll', 'polls'],
+      ['space', 'Spaces'],
+      ['labeled', 'has a color label'],
+      ['unread', 'not opened yet'],
+      ['later', 'read later'],
     ],
     fav: BOOL,
     favorite: BOOL,
@@ -100,9 +150,102 @@
     views: ['>1k', '>10k', '>100k'],
     reposts: ['>10', '>100', '>1k'],
     size: ['>10mb', '>100mb', '>1gb'],
+    quality: [
+      ['<70', 'incomplete'],
+      ['<50', 'badly incomplete'],
+      ['>=90', 'nearly everything kept'],
+      ['100', 'perfect'],
+    ],
+    completeness: [
+      ['<70', 'incomplete'],
+      ['>=90', 'nearly everything kept'],
+    ],
+    edits: [
+      ['>0', 'edited at least once'],
+      ['>2', 'edited several times'],
+    ],
+    revisions: [
+      ['>1', 'more than one version'],
+      ['>3', 'many versions'],
+    ],
+    words: [
+      ['>100', 'long posts'],
+      ['>300', 'very long posts'],
+      ['<5', 'very short posts'],
+    ],
+    duration: [
+      ['<15', 'clips under 15 s'],
+      ['>60', 'over a minute'],
+      ['>10m', 'over ten minutes'],
+    ],
+    res: [
+      ['>=720', 'HD or better'],
+      ['>=1080', 'Full HD or better'],
+      ['4k', '2160p and up'],
+      ['<480', 'low resolution'],
+    ],
+    engagement: [
+      ['>1%', 'some interaction'],
+      ['>5%', 'high interaction'],
+      ['>10%', 'very high interaction'],
+    ],
+    aspect: [
+      ['portrait', 'taller than wide'],
+      ['landscape', 'wider than tall'],
+      ['square', 'about 1:1'],
+      ['wide', '2:1 or wider'],
+      ['tall', '1:2 or taller'],
+    ],
+    weekday: [
+      ['weekend', 'Saturday or Sunday'],
+      ['weekday', 'Monday to Friday'],
+      ['mon', 'Monday'],
+      ['tue', 'Tuesday'],
+      ['wed', 'Wednesday'],
+      ['thu', 'Thursday'],
+      ['fri', 'Friday'],
+      ['sat', 'Saturday'],
+      ['sun', 'Sunday'],
+    ],
+    hour: [
+      ['9-17', 'working hours'],
+      ['22-6', 'late at night'],
+      ['6-9', 'early morning'],
+    ],
+    label: [
+      ['red', 'red label'],
+      ['amber', 'amber label'],
+      ['green', 'green label'],
+      ['blue', 'blue label'],
+      ['violet', 'violet label'],
+      ['any', 'any label'],
+      ['none', 'no label'],
+    ],
+    status: [
+      ['deleted', 'deleted on X'],
+      ['unavailable', 'any reason it is gone'],
+      ['suspended', 'account suspended'],
+      ['protected', 'account went private'],
+      ['withheld', 'withheld in a country'],
+      ['available', 'still on X'],
+      ['unchecked', 'never checked'],
+    ],
   };
+  STATIC.availability = STATIC.status;
+  STATIC.color = STATIC.label;
+  STATIC.orientation = STATIC.aspect;
+  STATIC.resolution = STATIC.res;
   STATIC['archived-within'] = STATIC.within;
-  const DATE_KEYS = new Set(['on', 'archived-on', 'after', 'before', 'archived-after', 'archived-before']);
+  const DATE_KEYS = new Set([
+    'on',
+    'archived-on',
+    'after',
+    'before',
+    'archived-after',
+    'archived-before',
+    'asof',
+    'as-of',
+  ]);
   const ALIASES = {
     artist: 'from',
     author: 'from',
@@ -110,6 +253,14 @@
     language: 'lang',
     mentions: 'mention',
     'image-text': 'ocr',
+    'as-of': 'asof',
+    cluster: 'topic',
+    completeness: 'quality',
+    availability: 'status',
+    resolution: 'res',
+    orientation: 'aspect',
+    color: 'label',
+    colour: 'label',
   };
 
   let input = null,
@@ -144,6 +295,8 @@
   function remember(query) {
     const value = String(query || '').trim();
     if (value.length < 2) return;
+    // Settings › Library › Search history off: nothing about searches is written (XVault 21).
+    if (typeof settings === 'object' && settings?.searchHistoryEnabled === false) return;
     const list = [value, ...read().filter(entry => entry !== value)].slice(0, 10);
     try {
       localStorage.setItem(RECENT_KEY, JSON.stringify(list));
@@ -164,7 +317,22 @@
     try {
       data = (await window.XVaultInsights?.()) || data;
     } catch {}
+    topicList().catch(() => {});
     return data;
+  }
+  // topic: values come from the last Atlas › Topics build (XVault 21).
+  let topics = [],
+    topicsAt = 0;
+  async function topicList() {
+    if (Date.now() - topicsAt < 120000 || !globalThis.chrome?.runtime?.sendMessage) return topics;
+    topicsAt = Date.now();
+    const result = await chrome.runtime.sendMessage({ type: 'CLUSTERS_GET' });
+    topics = (result?.clusters || []).map(cluster => [
+      cluster.id,
+      `${cluster.name || (cluster.terms || []).slice(0, 3).join(' · ')} · ${fmt(cluster.size)} posts`,
+      `${cluster.id} ${String(cluster.name || '').toLowerCase()} ${(cluster.terms || []).join(' ')}`,
+    ]);
+    return topics;
   }
 
   const pad = value => String(value).padStart(2, '0');
@@ -212,6 +380,7 @@
     else if (name === 'hashtag') pool = (data?.hashtags || []).map(counted);
     else if (DATE_KEYS.has(name)) pool = dateValues();
     else if (name === 'year') pool = yearValues('posted').map(year => [year, 'posted that year']);
+    else if (name === 'topic' || name === 'cluster') pool = topics;
     else if (name === 'archived-year') pool = yearValues('archived').map(year => [year, 'archived that year']);
     else pool = (STATIC[name] || []).map(entry => (Array.isArray(entry) ? entry : [entry, '']));
     const entries = pool.map(([value, hint, haystack]) => ({

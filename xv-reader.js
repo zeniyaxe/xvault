@@ -389,7 +389,173 @@
     if (item.type === 'gif')
       return `<figure class="xr-media is-gif"><video class="xr-gif" muted loop playsinline preload="none"${poster ? ` poster="${poster}"` : ''} src="${html(item.playbackUrl || item.url)}"></video><figcaption>GIF</figcaption></figure>`;
     const ratio = item.width && item.height ? ` style="aspect-ratio:${item.width}/${item.height}"` : '';
-    return `<figure class="xr-media is-photo"><button type="button" class="xr-zoom" data-act="zoom" aria-label="Enlarge image ${index + 1}"><img src="${html(item.preview || item.url)}" data-full="${html(item.url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"${ratio}></button></figure>`;
+    const alt = item.altText ? html(item.altText) : '';
+    return `<figure class="xr-media is-photo"><button type="button" class="xr-zoom" data-act="zoom" aria-label="Enlarge image ${index + 1}"><img src="${html(item.preview || item.url)}" data-full="${html(item.url)}" alt="${alt}" loading="lazy" decoding="async" referrerpolicy="no-referrer"${ratio}></button>${alt ? `<figcaption class="xr-alt"><details><summary>ALT</summary><p>${alt}</p></details></figcaption>` : ''}</figure>`;
+  }
+
+  /* XVault 21: polls, link cards, Spaces, Community Notes, availability and change history. */
+  const ago = stamp => (stamp ? new Date(stamp).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '');
+  const AVAILABILITY = {
+    deleted: 'Deleted on X',
+    suspended: 'Author suspended on X',
+    protected: 'Now protected on X',
+    withheld: 'Withheld on X',
+    unavailable: 'No longer available on X',
+  };
+  function extrasMarkup(post) {
+    const parts = [];
+    const poll = post.poll;
+    if (poll?.choices?.length) {
+      const total = Math.max(
+        1,
+        Number(poll.totalVotes) || poll.choices.reduce((sum, choice) => sum + (choice.count || 0), 0)
+      );
+      const top = Math.max(...poll.choices.map(choice => choice.count || 0));
+      parts.push(
+        `<section class="xr-poll" aria-label="Poll"><ol>${poll.choices
+          .map(choice => {
+            const share = Math.round(((choice.count || 0) / total) * 1000) / 10;
+            return `<li class="${choice.count === top && top ? 'is-top' : ''}"><span class="xr-poll-bar" style="width:${share}%"></span><b>${html(choice.label)}</b><span>${share}%</span></li>`;
+          })
+          .join(
+            ''
+          )}</ol><small>${number(poll.totalVotes || 0)} votes · ${poll.final ? 'final results' : poll.endsAt ? `ends ${html(ago(poll.endsAt))}` : 'results when archived'}</small></section>`
+      );
+    }
+    const card = post.card;
+    if (card && (card.url || card.title))
+      parts.push(
+        `<a class="xr-card" href="${html(card.url || statusUrl(post))}" target="_blank" rel="noopener noreferrer">${card.image?.url ? `<img src="${html(card.image.url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span><small>${html(card.domain || '')}</small><b>${html(card.title || card.url || '')}</b>${card.description ? `<em>${html(String(card.description).slice(0, 240))}</em>` : ''}</span></a>`
+      );
+    if (post.space?.url)
+      parts.push(
+        `<a class="xr-card is-space" href="${html(post.space.url)}" target="_blank" rel="noopener noreferrer"><span><small>X Space</small><b>Listen on X ↗</b></span></a>`
+      );
+    if (post.communityNote?.text)
+      parts.push(
+        `<aside class="xr-cnote"><b>${html(post.communityNote.title || 'Readers added context')}</b><p>${html(post.communityNote.text)}</p>${post.communityNote.url ? `<a href="${html(post.communityNote.url)}" target="_blank" rel="noopener noreferrer">Community note ↗</a>` : ''}</aside>`
+      );
+    const state = post.availability?.state;
+    if ((state && state !== 'available') || post.archiveDeletedAt)
+      parts.push(
+        `<p class="xr-gone" role="note"><b>${html(AVAILABILITY[state] || 'Deleted by you on X')}</b> · ${post.availability?.checkedAt ? `noticed ${html(ago(post.availability.checkedAt))}` : `deleted ${html(ago(post.archiveDeletedAt))}`} · your archived copy is kept${state ? ' <button type="button" class="quiet" data-act="availability-clear">It is back on X</button>' : ''}</p>`
+      );
+    const versions = Number(post.revisionCount) || 0,
+      edited = post.edit?.edited || Number(post.textRevisionCount) > 0;
+    const links = (post.links || []).length;
+    const tools = [
+      versions || edited
+        ? `<button type="button" class="quiet" data-act="history" aria-expanded="false">${edited ? 'Edited · ' : ''}History${versions ? ` (${number(versions)} change${versions === 1 ? '' : 's'})` : ''}</button>`
+        : '',
+      links
+        ? `<button type="button" class="quiet" data-act="snapshot" aria-expanded="false">Saved page${links > 1 ? 's' : ''}</button>`
+        : '',
+    ].filter(Boolean);
+    if (tools.length)
+      parts.push(`<div class="xr-forge-tools">${tools.join('')}</div><div class="xr-forge-panel" hidden></div>`);
+    return parts.join('');
+  }
+
+  function historyMarkup(result, post) {
+    const Diff = window.XVaultRevisionDiff;
+    if (!Diff) return '<p>History view unavailable.</p>';
+    const { steps } = Diff.timeline(result.revisions || [], null);
+    if (!steps.length)
+      return `<p class="xr-forge-empty">${post.edit?.edited ? 'X marks this post as edited, but XVault only kept one version. Earlier versions appear here when XVault sees the post change.' : 'No changes recorded yet.'}</p>`;
+    return `<ol class="xr-history">${steps
+      .slice()
+      .reverse()
+      .map(step => {
+        const stats = step.textOps ? Diff.diffStats(step.textOps) : null;
+        const text = step.textOps
+          ? `<p class="xr-diff">${step.textOps
+              .map(op =>
+                op.type === 'same'
+                  ? html(op.text)
+                  : `<${op.type === 'add' ? 'ins' : 'del'}>${html(op.text)}</${op.type === 'add' ? 'ins' : 'del'}>`
+              )
+              .join('')}</p>`
+          : '';
+        const fields = step.fields
+          .filter(field => field.key !== 'text')
+          .map(field =>
+            field.key === 'metrics'
+              ? `<li>Engagement: ${field.deltas.map(delta => `${html(delta.key)} ${number(delta.from)} → ${number(delta.to)}`).join(', ')}</li>`
+              : `<li>${html(field.label)} changed</li>`
+          )
+          .join('');
+        return `<li><header><time>${html(new Date(step.at).toLocaleString())}</time>${stats ? `<span>+${number(stats.added)} / −${number(stats.removed)} words</span>` : ''}</header>${text}${fields ? `<ul>${fields}</ul>` : ''}</li>`;
+      })
+      .join('')}</ol>`;
+  }
+
+  function snapshotMarkup(result) {
+    const rows = result.snapshots || [];
+    if (!rows.length)
+      return `<p class="xr-forge-empty">No copy of the linked page yet.</p><button type="button" data-act="snapshot-now">Save a readable copy now</button>`;
+    return (
+      rows
+        .slice(0, 4)
+        .map(row =>
+          row.status === 'ok'
+            ? `<article class="xr-snapshot"><header><b>${html(row.title || row.finalUrl || row.url)}</b><small>${html(row.siteName || new URL(row.finalUrl || row.url).hostname)} · saved ${html(ago(row.fetchedAt))}${row.truncated ? ' · trimmed' : ''}</small></header>${row.description ? `<p><em>${html(row.description)}</em></p>` : ''}<div class="xr-snapshot-text" dir="auto">${html(String(row.text || '').slice(0, 6000))}${String(row.text || '').length > 6000 ? '…' : ''}</div><a href="${html(row.finalUrl || row.url)}" target="_blank" rel="noopener noreferrer">Open the live page ↗</a></article>`
+            : `<p class="xr-forge-empty">${html(row.url)} could not be saved: ${html(row.error || 'unknown error')}</p>`
+        )
+        .join('') + '<button type="button" class="quiet" data-act="snapshot-now">Save again</button>'
+    );
+  }
+
+  async function forgePanel(name, element, { refresh = false } = {}) {
+    const article = element.closest('.xr-post'),
+      panel = article?.querySelector('.xr-forge-panel'),
+      id = article?.dataset.id,
+      post = thread?.posts.find(entry => entry.id === id);
+    if (!panel || !post) return;
+    if (name === 'availability-clear') {
+      const result = await call({ type: 'AVAILABILITY_SET', id, state: 'clear' }).catch(() => null);
+      if (result?.ok) {
+        post.availability = null;
+        element.closest('.xr-gone')?.remove();
+        say('Marked as available');
+      }
+      return;
+    }
+    if (name === 'snapshot-now') {
+      const granted = await chrome.permissions
+        ?.request?.({ origins: ['https://*/*', 'http://*/*'] })
+        .catch(() => false);
+      if (!granted) return say('XVault needs permission to read linked websites');
+      const result = await call({ type: 'SNAPSHOT_LINKS', ids: [id], force: true }).catch(() => null);
+      if (!result?.ok) return say(result?.error || 'Could not save the page');
+      say(result.queued ? 'Saving a readable copy…' : 'Already saved');
+      setTimeout(
+        () => forgePanel('snapshot', article.querySelector('[data-act="snapshot"]'), { refresh: true }).catch(() => {}),
+        2500
+      );
+      return;
+    }
+    const button = article.querySelector(`[data-act="${name}"]`);
+    const open = !refresh && panel.dataset.kind === name && !panel.hidden && element === button;
+    article
+      .querySelectorAll('.xr-forge-tools [aria-expanded]')
+      .forEach(other => other.setAttribute('aria-expanded', 'false'));
+    if (open) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    panel.dataset.kind = name;
+    panel.innerHTML = '<p class="xr-forge-empty">Loading…</p>';
+    button?.setAttribute('aria-expanded', 'true');
+    const result =
+      name === 'history'
+        ? await call({ type: 'REVISIONS_FOR', id }).catch(() => null)
+        : await call({ type: 'SNAPSHOT_FOR_POST', id }).catch(() => null);
+    if (!result?.ok) {
+      panel.innerHTML = `<p class="xr-forge-empty">${html(result?.error || 'Could not load')}</p>`;
+      return;
+    }
+    panel.innerHTML = name === 'history' ? historyMarkup(result, post) : snapshotMarkup(result);
   }
 
   function quoteMarkup(quoted, missingId) {
@@ -418,6 +584,7 @@ ${reply ? '' : `<span class="xr-index" aria-hidden="true">${spineIndex}</span>`}
 <div class="xr-text" dir="auto"${post.language ? ` lang="${html(post.language)}"` : ''}>${linkify(post.text)}</div>
 ${post.media.length ? `<div class="xr-gallery" data-count="${post.media.length}">${post.media.map(mediaMarkup).join('')}</div>` : ''}
 ${quoteMarkup(post.quoted, post.quotedPostId && !post.quoted ? post.quotedPostId : '')}
+${extrasMarkup(post)}
 ${post.note ? `<aside class="xr-note"><b>Your note</b><span class="xr-note-text">${html(post.note)}</span><button type="button" class="quiet xr-note-edit" data-act="note" aria-label="Edit your note on this post">Edit</button></aside>` : ''}
 ${highlightsMarkup(post)}
 <footer class="xr-meta"><time datetime="${html(post.createdAt || '')}">${html(when(post.createdAt))}</time>${metrics ? `<span>${metrics}</span>` : ''}${post.favorite ? '<span class="xr-fav">★ Favorite</span>' : ''}${
@@ -599,6 +766,7 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
       close();
       return window.XVaultOpenLibrarySearch?.(query);
     }
+    if (['history', 'snapshot', 'snapshot-now', 'availability-clear'].includes(name)) return forgePanel(name, element);
     if (name === 'note') return editNote(element.closest('.xr-post'));
     if (name === 'later') return toggleLater();
     if (name === 'read') return toggleRead();

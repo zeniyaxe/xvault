@@ -6,24 +6,38 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
 ## Highlights
 
 - **Capture** — passive capture while you browse, one-click archive/download on posts, bulk Bookmarks / Likes /
-  profile / timeline / thread collection with resumable checkpoints.
+  profile / timeline / thread collection with resumable checkpoints, presets, live rate/ETA and run history. Polls,
+  link cards, Spaces, Community Notes, edit history and alt text are kept as structured data.
+- **Archive quality** — a completeness score per post, and polite background queues (daily caps, pause/resume) that
+  repair incomplete posts, fill thread gaps and quote chains, and optionally check whether favourites are still on
+  X. Edits are tracked with a word-level diff timeline in the Reader; deleted/suspended/withheld posts are marked.
+  Opt-in watch lists capture chosen accounts or searches on a schedule; opt-in link snapshots keep the readable
+  text of linked pages.
 - **Verified downloads** — one identity per physical media asset (no duplicate files across URL spellings),
   retry with classified failure reasons, crash recovery, content verification, optional GIF/WebP conversion, and
-  adaptive parallelism that backs off when X's media servers push back.
-- **Import your X archive** — drop the ZIP from X's "Download an archive of your data" to add every tweet, like and
-  bookmark it contains; read in the browser without unpacking, and live captures always keep their richer data.
+  adaptive parallelism that backs off when X's media servers push back. Video quality (globally or per rule), a
+  download window, Data Saver/cellular holds and a bandwidth cap; filename and folder templates with a live preview;
+  per-host health, duplicate reclaim, scheduled re-verification and safe renames (Downloads › Files & health).
+- **Import your X archive** — drop the ZIP from X's "Download an archive of your data" to add every tweet (long posts
+  with their full text), like, bookmark, community post and recently deleted post it contains, and save the media
+  files inside it as local downloads; read in the browser without unpacking, direct messages are never read, and
+  live captures always keep their richer data.
 - **Library** — fast ranked search with filters (`from:`, `has:`, `tag:`, `likes:>1k`, `after:`, `on:`, `year:`,
   `is:thread`, `#hashtag`, `@mention`, `domain:`, `thread:ID`…), negation (`-from:bot`), alternatives
   (`has:video|gif`), usage-ranked suggestions with inline filter help (`Ctrl`+`Space`), text inside images
   (`ocr:receipt`, `has:ocr`, read on-device by a bundled OCR engine), **meaning search** (`about:cooking`,
-  `similar:<id>`, learned on-device from your own archive), search by image, smart collections, tags, notes,
-  favorites, Inbox review, workspaces, Trash with undo, lightbox and inspector.
+  `similar:<id>`, learned on-device from your own archive, multilingual), typo tolerance (`word~`), your own
+  synonyms, "did you mean", a keyword ↔ meaning blend, search history with time travel (`asof:2024-05-01`), filters
+  for quality, edits, availability, polls, alt text, duration, resolution, aspect, engagement, weekday and hour, 25+
+  sorts, search by image, smart collections with "new since last visit" counts, tags, notes, favorites, Inbox
+  review, workspaces, Trash with undo, lightbox and inspector.
 - **Organise** — boards (`board:`), a bulk editor with undo (`Ctrl`+`Z`), Select by, a context menu, a sortable
   Table layout and auto-tag rules written in the search language (`from:nasa has:video` → `space`).
 - **Atlas** — an overview of the whole archive: growth, media mix, rhythm, people, conversations, languages,
   hashtags and linked sites; a posting/archiving calendar (local time or UTC) with streaks; author profiles; a
-  Duplicate Lab whose look-alike scan runs and resumes in the background; and **Year in Review** with topic drift,
-  achievements and a people graph.
+  Duplicate Lab whose look-alike scan runs and resumes in the background; **Year in Review** with topic drift,
+  achievements and a people graph; and **Topics**, automatic meaning clusters you can name, search, save or turn
+  into boards.
 - **Reader** — read any archived thread as one continuous page (author spine, optional replies, media, quotes) and
   copy or save it as Markdown or HTML; edit notes inline and fetch a missing parent on request. Read later,
   highlights with notes and reading progress (`is:later`, `has:highlight`, `highlight:<text>`).
@@ -66,11 +80,14 @@ python -m unittest discover -s tests/python   # Remote pairing/security tests
 
 `npm install` copies the OCR engine and English model from `node_modules` into `vendor/ocr/` (git-ignored; the build
 includes it). Releases: push a `v<version>` tag matching `manifest.json` and the Release workflow verifies, builds and
-publishes the zip with its SHA-256 and the CHANGELOG section as notes.
+publishes the Chrome, Edge and Firefox zips with SHA-256 checksums and the CHANGELOG section as notes. CI also lints
+the Firefox build with Mozilla's `web-ext lint`.
 
 Project layout: `background.js` (service worker: queue, capture, storage orchestration), `library-*.{js,mjs}`
 (storage, search, collections, exporters), `sw/` (worker modules: message router, background jobs, OCR host, sync
-scheduler, meaning index, boards/rules, adaptive downloads), `x-archive-import.mjs` and `backup-crypto.mjs`,
+scheduler, meaning index, boards/rules, adaptive downloads, archive quality and visit queue, watch lists, link
+snapshots, topic clusters, download policy), `x-archive-import.mjs`, `x-post-extras.js`, `revision-diff.js`,
+`filename-template.js` and `backup-crypto.mjs`,
 `dashboard.html` + `xv-*.js` (app shell and pages; they extend `dashboard.js` through `dashboard-hooks.js`), `content.js` /
 `instant-actions.js` / `page-hook.js` (X integration), `FFmpeg_Helper/` (Python helper + Remote PWA).
 See `XVAULT_ROADMAP.md` for architecture notes, decisions and the current plan.

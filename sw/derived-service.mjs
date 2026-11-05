@@ -1,7 +1,7 @@
 // Service-worker wiring for derived-data jobs: message handling, alarms and progress broadcast.
 import { createDerivedStore } from './derived-store.mjs';
 import { fingerprintBlob, fromHex, hamming } from './image-hash.mjs';
-import { createOcrProcessor, createOffscreenHost, createOcrIndex } from './ocr.mjs';
+import { createOcrProcessor, createOcrHost, createOcrIndex } from './ocr.mjs';
 import {
   createDerivedJobs,
   createPhashProcessor,
@@ -19,7 +19,7 @@ export function createDerivedService({ listPage, extraProcessors = {}, chromeApi
   } catch {}
   const processors = {
     phash: createPhashProcessor({ store, fetchImage: fetchCdnImage, fingerprintBlob }),
-    ocr: createOcrProcessor({ store, host: createOffscreenHost(chromeApi) }),
+    ocr: createOcrProcessor({ store, host: createOcrHost(chromeApi) }),
     ...Object.fromEntries(Object.entries(extraProcessors).map(([kind, factory]) => [kind, factory({ store })])),
   };
   const jobs = createDerivedJobs({

@@ -32,6 +32,29 @@ jobs:
           name: xvault-extension
           path: dist/*.zip
           if-no-files-found: error
+  firefox:
+    # Experimental Firefox package: build it and run Mozilla's linter (errors fail; warnings are reported).
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build -- --target=firefox
+      - name: web-ext lint
+        run: |
+          mkdir -p output/firefox && unzip -q dist/XVault-*-firefox.zip -d output/firefox
+          npx --yes web-ext@8 lint --source-dir output/firefox --output json > web-ext-lint.json || true
+          node -e "const r=require('./web-ext-lint.json');console.log(r.summary);for(const e of r.errors)console.log('::error file='+(e.file||'manifest.json')+'::'+e.code+' '+e.message);if(r.errors.length)process.exit(1)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xvault-firefox
+          path: |
+            dist/*-firefox.zip
+            web-ext-lint.json
   e2e:
     runs-on: ubuntu-latest
     needs: verify

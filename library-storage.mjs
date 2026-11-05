@@ -4032,3 +4032,97 @@ function transferLibraryRows(database, ids, restoring) {
 
 export const moveLibraryToTrash = (database, ids) => transferLibraryRows(database, ids, false);
 export const restoreLibraryFromTrash = (database, ids) => transferLibraryRows(database, ids, true);
+
+// ───────────────────────── XVault 21: system fields on posts ─────────────────────────
+// Capture-derived state that is not personal metadata (availability on X, change counters, repair
+// stamps). Only these fields can be written here; archived content and userMeta are untouched.
+const SYSTEM_FIELDS = new Set([
+  'availability',
+  'revisionCount',
+  'textRevisionCount',
+  'lastRevisionAt',
+  'repairAttemptAt',
+  'importedMedia',
+]);
+const AVAILABILITY_STATES = new Set(['available', 'deleted', 'suspended', 'protected', 'withheld', 'unavailable']);
+export function validAvailability(value) {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || !AVAILABILITY_STATES.has(String(value.state)))
+    throw new TypeError('Invalid availability');
+  const out = {
+    state: String(value.state),
+    checkedAt: Number(value.checkedAt) > 0 ? Number(value.checkedAt) : Date.now(),
+  };
+  if (value.reason) out.reason = String(value.reason).slice(0, 300);
+  if (value.source) out.source = String(value.source).slice(0, 40);
+  if (value.previous && AVAILABILITY_STATES.has(String(value.previous))) out.previous = String(value.previous);
+  if (Number(value.since) > 0) out.since = Number(value.since);
+  return out;
+}
+
+/** entries: [{ id, patch }] or a function (post) => patch|null applied to each listed id. */
+export function patchLibrarySystemFields(database, entries = [], updater = null) {
+  const list = (Array.isArray(entries) ? entries : []).filter(entry => /^\d{1,32}$/.test(String(entry?.id || '')));
+  if (!list.length) return Promise.resolve({ ok: true, updated: 0, ids: [] });
+  return new Promise((resolve, reject) => {
+    const names = ['tweets'];
+    if (database.objectStoreNames.contains('checkpoints')) names.push('checkpoints');
+    const tx = database.transaction(names, 'readwrite'),
+      store = tx.objectStore('tweets'),
+      ids = [];
+    tx.oncomplete = () => resolve({ ok: true, updated: ids.length, ids });
+    tx.onabort = () => reject(tx.error || new Error('System field update aborted'));
+    tx.onerror = () => reject(tx.error || new Error('System field update failed'));
+    for (const entry of list) {
+      const request = store.get(String(entry.id));
+      request.onsuccess = () => {
+        const post = request.result;
+        const patch = post ? (updater ? updater(post, entry) : entry.patch) : null;
+        if (post && patch && typeof patch === 'object') {
+          const next = { ...post };
+          let changed = false;
+          for (const [field, value] of Object.entries(patch)) {
+            if (!SYSTEM_FIELDS.has(field)) continue;
+            const clean = field === 'availability' ? validAvailability(value) : value;
+            if (JSON.stringify(next[field] ?? null) === JSON.stringify(clean ?? null)) continue;
+            if (clean == null) delete next[field];
+            else next[field] = clean;
+            changed = true;
+          }
+          if (changed) {
+            store.put(next);
+            ids.push(String(post.id));
+            // One revision bump per transaction, on the first changed post.
+            if (ids.length === 1) bumpLibraryRevision(tx);
+          }
+        }
+      };
+    }
+  });
+}
+
+/** One-time backfill of revisionCount / textRevisionCount / lastRevisionAt from the revisions store. */
+export function readRevisionCounters(database) {
+  if (!database.objectStoreNames.contains('revisions')) return Promise.resolve(new Map());
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction('revisions', 'readonly'),
+      counters = new Map();
+    const request = tx.objectStore('revisions').openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      const row = cursor.value || {},
+        id = String(row.tweetId || '');
+      if (/^\d{1,32}$/.test(id)) {
+        const entry = counters.get(id) || { revisionCount: 0, textRevisionCount: 0, lastRevisionAt: 0 };
+        entry.revisionCount++;
+        if ((row.before?.text || '') !== (row.after?.text || '')) entry.textRevisionCount++;
+        entry.lastRevisionAt = Math.max(entry.lastRevisionAt, Number(row.observedAt) || 0);
+        counters.set(id, entry);
+      }
+      cursor.continue();
+    };
+    tx.oncomplete = () => resolve(counters);
+    tx.onerror = () => reject(tx.error || new Error('Revision scan failed'));
+  });
+}

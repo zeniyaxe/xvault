@@ -1,6 +1,6 @@
 {
   "name": "xvault",
-  "version": "20.0.0",
+  "version": "21.0.0",
   "private": true,
   "description": "Local-first X/Twitter archive and media manager (Chrome and Edge MV3 extension; experimental Firefox build).",
   "scripts": {
@@ -22,6 +22,7 @@
     "@tesseract.js-data/eng": "^1.0.0",
     "axe-core": "^4.14.0",
     "eslint": "^9.39.0",
+    "fake-indexeddb": "^6.2.7",
     "globals": "^15.15.0",
     "prettier": "^3.6.0",
     "tesseract.js": "^7.0.0",

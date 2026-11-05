@@ -1,7 +1,11 @@
 /* Shell behavior: grouped section tabs, collapsible navigation, go-to shortcuts and the shortcut sheet. */
 (() => {
   const GROUPS = [
-    { pages: ['home', 'archive', 'sessions'], labels: { home: 'Overview', archive: 'New archive', sessions: 'Runs' } },
+    {
+      pages: ['home', 'archive', 'sessions', 'quality'],
+      labels: { home: 'Overview', archive: 'New archive', sessions: 'Runs', quality: 'Quality' },
+    },
+    { pages: ['media', 'files'], labels: { media: 'Queue', files: 'Files & health' } },
     {
       pages: ['health', 'integrity', 'activity', 'vault'],
       labels: { health: 'Health', integrity: 'Integrity', activity: 'Activity', vault: 'Storage & backups' },
@@ -52,7 +56,9 @@
           'home',
           'archive',
           'sessions',
+          'quality',
           'media',
+          'files',
           'studio',
           'health',
           'integrity',

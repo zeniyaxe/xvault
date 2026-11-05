@@ -104,6 +104,34 @@ export async function readZipEntry(blob, entry) {
   throw Error(`${entry.name} uses an unsupported ZIP compression method (${entry.method})`);
 }
 
+const MEDIA_TYPES = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+};
+/**
+ * One ZIP entry as a Blob without reading it into memory when it is stored (media in X archives
+ * usually is): stored entries are a slice of the original file; deflated ones are inflated.
+ */
+export async function zipEntryBlob(blob, entry) {
+  const header = await bytes(blob, entry.offset, entry.offset + 30),
+    view = new DataView(header.buffer);
+  if (u32(view, 0) !== SIG_LOCAL) throw Error(`Damaged ZIP entry ${entry.name}`);
+  const start = entry.offset + 30 + u16(view, 26) + u16(view, 28),
+    ext = /\.([a-z0-9]{2,5})$/i.exec(entry.name || '')?.[1]?.toLowerCase() || '',
+    type = MEDIA_TYPES[ext] || 'application/octet-stream';
+  if (entry.method === 0) return blob.slice(start, start + entry.size, type);
+  if (entry.method === 8) {
+    if (entry.size > MAX_ENTRY) throw Error(`${entry.name} is too large to unpack in the browser`);
+    return new Blob([await inflateRaw(await bytes(blob, start, start + entry.compressedSize))], { type });
+  }
+  throw Error(`${entry.name} uses an unsupported ZIP compression method (${entry.method})`);
+}
+
 /** Parses `window.YTD.tweets.part0 = [...]` (or plain JSON) into an array. */
 export function parseYtd(text) {
   const source = String(text || '').replace(/^\uFEFF/, ''),
@@ -238,8 +266,123 @@ export function savedFromArchive(item, kind = 'likes') {
   };
 }
 
+// XVault 21: long posts (note-tweet.js), community posts, your recently deleted posts, and the media
+// files X ships inside the ZIP (data/tweets_media/<postId>-<file>). Direct messages are never read.
+const NOTE_WINDOW_MS = 10 * 60000;
+const squash = text =>
+  String(text || '')
+    .replace(/\s*(?:…|\.\.\.)?\s*https:\/\/t\.co\/\w+\s*$/u, '')
+    .replace(/\s*…$/u, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+/** Maps one note-tweet.js item to { noteId, createdAt, text }. */
+export function noteFromArchive(item) {
+  const note = item?.noteTweet || item;
+  const text = String(note?.core?.text || '').slice(0, 100000);
+  if (!text) return null;
+  return { noteId: String(note.noteTweetId || ''), createdAt: iso(note.createdAt || note.updatedAt), text };
+}
+/**
+ * Long posts appear in tweets.js truncated (ending in "… https://t.co/…"); X keeps the full text in
+ * note-tweet.js without the post id. Match by creation time (±10 min) and text prefix, closest first.
+ */
+export function attachNotes(tweets, notes) {
+  const byTime = notes
+    .filter(note => note && note.createdAt)
+    .map(note => ({ ...note, at: Date.parse(note.createdAt), plain: squash(note.text) }));
+  const used = new Set();
+  let attached = 0;
+  for (const tweet of tweets) {
+    const at = Date.parse(tweet.createdAt || '');
+    if (!Number.isFinite(at)) continue;
+    const prefix = squash(tweet.text);
+    if (prefix.length < 12) continue;
+    let best = null;
+    for (const note of byTime) {
+      if (used.has(note) || Math.abs(note.at - at) > NOTE_WINDOW_MS) continue;
+      if (!note.plain.startsWith(prefix.slice(0, Math.min(prefix.length, 200)))) continue;
+      if (note.plain.length <= prefix.length) continue;
+      if (!best || Math.abs(note.at - at) < Math.abs(best.at - at)) best = note;
+    }
+    if (!best) continue;
+    used.add(best);
+    tweet.text = best.text;
+    tweet.noteTweetId = best.noteId || null;
+    tweet.sourceFlags = [...new Set([...(tweet.sourceFlags || []), 'x-archive-note'])];
+    attached++;
+  }
+  return { attached, unmatched: byTime.length - used.size };
+}
+/** Maps one deleted-tweets.js item: a normal post plus when you deleted it. */
+export function deletedFromArchive(item, account = {}) {
+  const row = tweetFromArchive(item, account);
+  if (!row) return null;
+  const tweet = item?.tweet || item;
+  row.archiveDeletedAt = iso(tweet.deleted_at) || null;
+  row.sourceFlags = [...new Set([...row.sourceFlags, 'x-archive-deleted'])];
+  return row;
+}
+const MEDIA_DIR = /(?:^|\/)(tweets?_media|community_tweet_media|deleted_tweets_media)\/(\d{1,32})-([^/]+)$/i;
+const fileBase = url => {
+  try {
+    return decodeURIComponent(new URL(String(url)).pathname.split('/').pop() || '').toLowerCase();
+  } catch {
+    return '';
+  }
+};
+/**
+ * Pairs ZIP media files with archived media. Returns [{ tweetId, mediaId, index, type, url, entry, size, ext }].
+ * `url` is X's CDN address (the download identity); the bytes come from the ZIP entry.
+ */
+export function matchMediaFiles(entries, tweets) {
+  const byId = new Map(tweets.map(tweet => [String(tweet.id), tweet]));
+  const out = [];
+  for (const entry of entries) {
+    const match = MEDIA_DIR.exec(entry.name || '');
+    if (!match || entry.directory || !(entry.size > 0)) continue;
+    const [, , tweetId, name] = match;
+    const tweet = byId.get(tweetId);
+    if (!tweet) continue;
+    const lower = name.toLowerCase(),
+      stem = lower.replace(/\.[a-z0-9]+$/, '');
+    const index = (tweet.media || []).findIndex(media => {
+      const candidates = [
+        media.url,
+        media.preview,
+        media.playbackUrl,
+        ...(media.variants || []).map(variant => variant.url),
+      ]
+        .map(fileBase)
+        .filter(Boolean);
+      return candidates.some(base => base === lower || base.replace(/\.[a-z0-9]+$/, '') === stem);
+    });
+    if (index < 0) continue;
+    const media = tweet.media[index];
+    const ext = /\.([a-z0-9]{2,5})$/.exec(lower)?.[1] || '';
+    out.push({
+      tweetId,
+      mediaId: media.id || null,
+      index: index + 1,
+      type: media.type,
+      url: media.type === 'photo' ? media.url : media.playbackUrl || media.url,
+      entry,
+      size: entry.size,
+      ext,
+      name,
+    });
+  }
+  return out;
+}
+
 const kindOf = name => {
   const base = String(name).split('/').pop().toLowerCase();
+  if (/^note-tweet(-part\d+)?\.js$/.test(base)) return 'notes';
+  if (/^community-tweet(-part\d+)?\.js$/.test(base)) return 'community';
+  if (/^deleted-tweets?(-part\d+)?\.js$/.test(base)) return 'deleted';
+  if (/^direct-message/.test(base)) return 'dms';
   if (/^(tweets?|tweet)(-part\d+)?\.js$/.test(base)) return 'tweets';
   if (/^like(-part\d+)?\.js$/.test(base)) return 'likes';
   if (/^bookmarks?(-part\d+)?\.js$/.test(base)) return 'bookmarks';
@@ -253,8 +396,26 @@ const kindOf = name => {
  * { account, generatedAt, tweets, likes, bookmarks, mediaFiles, files }.
  * onProgress({ phase, done, total, file }) is called between files.
  */
-export async function readXArchive(file, { onProgress = () => {}, include = ['tweets', 'likes', 'bookmarks'] } = {}) {
-  const out = { account: {}, generatedAt: null, tweets: [], likes: [], bookmarks: [], mediaFiles: 0, files: [] };
+export async function readXArchive(
+  file,
+  { onProgress = () => {}, include = ['tweets', 'likes', 'bookmarks', 'notes', 'community', 'deleted'] } = {}
+) {
+  const out = {
+    account: {},
+    generatedAt: null,
+    tweets: [],
+    likes: [],
+    bookmarks: [],
+    community: [],
+    deleted: [],
+    notes: { found: 0, attached: 0, unmatched: 0 },
+    media: [],
+    mediaFiles: 0,
+    skippedPrivate: { files: 0, bytes: 0 },
+    files: [],
+  };
+  const notes = [];
+  let zipEntries = [];
   const decoder = new TextDecoder();
   const sources = [];
   const isZip =
@@ -262,11 +423,19 @@ export async function readXArchive(file, { onProgress = () => {}, include = ['tw
     (await bytes(file, 0, 4)).every((value, index) => value === [0x50, 0x4b, 0x03, 0x04][index]);
   if (isZip) {
     const entries = await listZip(file);
+    zipEntries = entries;
+    // Media folders XVault can import (direct-message media is private and never read).
     out.mediaFiles = entries.filter(entry =>
-      /\/(tweets?|community_tweet|direct_messages?)_media\//i.test(entry.name)
+      /\/(tweets?|community_tweet|deleted_tweets)_media\//i.test(entry.name)
     ).length;
     for (const entry of entries) {
       const kind = kindOf(entry.name);
+      // Direct messages (and their media) are private conversations; XVault never reads them.
+      if (kind === 'dms' || /\/direct_messages?(_group)?_media\//i.test(entry.name)) {
+        out.skippedPrivate.files++;
+        out.skippedPrivate.bytes += Number(entry.size) || 0;
+        continue;
+      }
       if (kind && (kind === 'account' || kind === 'manifest' || include.includes(kind)))
         sources.push({ kind, name: entry.name, read: () => readZipEntry(file, entry) });
     }
@@ -293,6 +462,24 @@ export async function readXArchive(file, { onProgress = () => {}, include = ['tw
         const row = tweetFromArchive(item, out.account);
         if (row) out.tweets.push(row);
       }
+    else if (source.kind === 'community')
+      for (const item of items) {
+        const row = tweetFromArchive(item, out.account);
+        if (row) {
+          row.sourceFlags = [...new Set([...row.sourceFlags, 'x-archive-community'])];
+          out.community.push(row);
+        }
+      }
+    else if (source.kind === 'deleted')
+      for (const item of items) {
+        const row = deletedFromArchive(item, out.account);
+        if (row) out.deleted.push(row);
+      }
+    else if (source.kind === 'notes')
+      for (const item of items) {
+        const note = noteFromArchive(item);
+        if (note) notes.push(note);
+      }
     else
       for (const item of items) {
         const row = savedFromArchive(item, source.kind);
@@ -300,6 +487,13 @@ export async function readXArchive(file, { onProgress = () => {}, include = ['tw
       }
     done++;
   }
+  out.notes.found = notes.length;
+  if (notes.length) {
+    const result = attachNotes([...out.tweets, ...out.community, ...out.deleted], notes);
+    out.notes.attached = result.attached;
+    out.notes.unmatched = result.unmatched;
+  }
+  if (zipEntries.length) out.media = matchMediaFiles(zipEntries, [...out.tweets, ...out.community, ...out.deleted]);
   onProgress({ phase: 'parsed', done, total: sources.length });
   return out;
 }

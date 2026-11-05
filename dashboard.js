@@ -472,6 +472,8 @@ function builtinPage(n) {
       activity: 'System',
       vault: 'System',
       sessions: 'Capture',
+      quality: 'Capture',
+      files: 'Downloads',
       studio: 'Tools',
       settings: 'Settings',
     }[n] || 'XVault';
@@ -1757,7 +1759,7 @@ function esc(s) {
   );
 }
 async function sessions(home = false) {
-  const r = await call({ type: 'GET_SESSIONS', limit: home ? 6 : 80 }),
+  const r = await call({ type: 'GET_SESSIONS', limit: home ? 6 : Number(settings.captureHistoryLimit) || 80 }),
     rows = r?.rows || [],
     target = $(home ? '#homeSessions' : '#sessionList');
   if (!target) return;
@@ -1766,7 +1768,12 @@ async function sessions(home = false) {
       .map(x => {
         const pct =
           x.state === 'complete' || x.state === 'verified' ? 100 : Math.min(95, Math.max(6, (x.page || 0) % 100));
-        return `<article class="sessionCard"><small>${esc((x.context?.scope || x.source || 'archive').toUpperCase())}${x.context?.profileHandle ? ` · @${esc(x.context.profileHandle)}` : ''}</small><strong>${fmt(x.posts || 0)}</strong><b>${esc(x.phase || x.state || 'unknown')}</b><div class="sessionBar"><i style="width:${pct}%"></i></div><small>${x.page || 0} pages/steps · ${new Date(x.updatedAt || Date.now()).toLocaleString()}</small>${x.error ? `<small style="color:#ff7d88">${esc(x.error)}</small>` : ''}</article>`;
+        // XVault 21: run length, rate and a one-click "run again" for bookmarks / likes / profiles.
+        const took = x.createdAt && x.updatedAt ? Math.max(0, x.updatedAt - x.createdAt) : 0,
+          perMinute = took > 60000 ? Math.round((x.posts || 0) / (took / 60000)) : 0,
+          scope = x.context?.scope || x.source || '',
+          rerun = ['bookmarks', 'likes', 'profile'].includes(scope) && !home;
+        return `<article class="sessionCard"><small>${esc((scope || 'archive').toUpperCase())}${x.context?.profileHandle ? ` · @${esc(x.context.profileHandle)}` : ''}</small><strong>${fmt(x.posts || 0)}</strong><b>${esc(x.phase || x.state || 'unknown')}</b><div class="sessionBar"><i style="width:${pct}%"></i></div><small>${x.page || 0} pages/steps · ${new Date(x.updatedAt || Date.now()).toLocaleString()}${took > 60000 ? ` · ${fmt(Math.round(took / 60000))} min${perMinute ? ` · ${fmt(perMinute)}/min` : ''}` : ''}</small>${x.error ? `<small style="color:#ff7d88">${esc(x.error)}</small>` : ''}${rerun ? `<button type="button" class="quiet" data-rerun="${esc(scope)}" data-handle="${esc(x.context?.profileHandle || '')}">Run again</button>` : ''}</article>`;
       })
       .join('') || '<div class="empty">No archive sessions yet.</div>';
 }

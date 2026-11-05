@@ -89,7 +89,7 @@ try {
 
   const pages = (
     process.env.A11Y_PAGES ||
-    'home,library,atlas,explorer,archive,sessions,media,studio,health,integrity,activity,vault,settings'
+    'home,library,atlas,explorer,archive,sessions,quality,media,files,studio,health,integrity,activity,vault,settings'
   ).split(',');
   for (const name of pages) {
     await page.evaluate(target => window.page(target), name);
@@ -100,11 +100,35 @@ try {
   await audit(page, 'dashboard:shell', '.rail, nav, header');
 
   // Atlas sub-views.
-  for (const view of ['review', 'calendar', 'people', 'duplicates']) {
+  for (const view of ['review', 'calendar', 'people', 'duplicates', 'topics']) {
     await page.evaluate(target => window.XVaultAtlas?.open(target), view);
     await page.waitForTimeout(900);
     await audit(page, `atlas:${view}`, '#page-atlas');
   }
+
+  // XVault 21: search history / time travel menu and the Best match blend slider.
+  await page.evaluate(() => window.page('library'));
+  await page.waitForTimeout(600);
+  await page.evaluate(() => {
+    const sort = document.querySelector('#sort');
+    if (sort) {
+      sort.value = 'relevance';
+      sort.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    const menu = document.querySelector('.xf-history-menu');
+    if (menu) menu.open = true;
+  });
+  await page.waitForTimeout(600);
+  await audit(page, 'library:history+blend', '#page-library .searchWrap, .xf-blend');
+  await page.evaluate(() => {
+    const menu = document.querySelector('.xf-history-menu');
+    if (menu) menu.open = false;
+    const sort = document.querySelector('#sort');
+    if (sort) {
+      sort.value = 'new';
+      sort.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
 
   // Search suggestions open.
   await page.evaluate(() => window.page('library'));

@@ -5,7 +5,8 @@
 // words it shares posts with. A post's embedding mixes exact-term evidence (index vectors) with
 // context evidence, so `about:cooking` also finds posts about recipes and dinner when those words keep
 // company in this vault. No model download and no network: plain arithmetic, fully rebuildable.
-export const SEMANTIC_VERSION = 1;
+// v2 (XVault 21): diacritic folding, Cyrillic/Greek transliteration aliases and multilingual stopwords.
+export const SEMANTIC_VERSION = 2;
 export const DIM = 128;
 const NONZERO = 6;
 const MAX_VOCAB = 30000;
@@ -25,8 +26,52 @@ const STOPWORDS = new Set(
   their theirs them themselves then there these they this those through to too under until up very was we were
   what when where which while who whom why will with would you your yours yourself yourselves rt amp https http
   co www com via im dont didnt doesnt isnt cant wont ive youre thats theres lol yeah oh ok okay also really
-  get got gonna just even still much many lot let one two us its`.split(/\s+/)
+  get got gonna just even still much many lot let one two us its
+  de la le les des du un une et est en que qui pour pas sur au aux avec ce cette dans il elle ils nous vous mais ou
+  el los las del lo por con para una uno es son se su sus al como mas pero muy ya esta este eso yo tu
+  der die das den dem des ein eine einer und ist nicht mit von zu auf fur sich auch es ich du wir ihr sie im am
+  o os um uma com nao mais na no nos ao da do das dos e
+  il lo gli di che per non con una sono ma come anche si
+  het een en van ik je dat niet op te zijn
+  и в во не что он на я с со как а то все она так его но да ты к у же вы за бы по только ее мне было вот от меня
+  еще нет о из ему теперь когда даже ну ли если уже или ни быть был него до вас нибудь опять уж вам ведь там потом
+  себя ничего ей может они тут где есть надо ней для мы тебя их чем была сам чтоб без будто чего раз тоже себе под
+  και το να η ο του τα της με σε για που την των στο θα`.split(/\s+/)
 );
+// Latin and Greek accents fold away (café = cafe, ελλάδα = ελλαδα); Cyrillic letters such as й are kept.
+const FOLDABLE = /[\u00c0-\u024f\u1e00-\u1eff\u0386-\u03ce\u1f00-\u1fff]/;
+const MARKS = /[\u0300-\u036f]/g;
+const fold = word =>
+  FOLDABLE.test(word)
+    ? word
+        .normalize('NFD')
+        .replace(MARKS, '')
+        .replace(/ß/g, 'ss')
+        .replace(/æ/g, 'ae')
+        .replace(/œ/g, 'oe')
+        .replace(/ø/g, 'o')
+        .replace(/ł/g, 'l')
+        .replace(/đ/g, 'd')
+    : word;
+const CYRILLIC = /[\u0400-\u04ff]/;
+const GREEK = /[\u0370-\u03ff]/;
+const TRANSLIT = Object.fromEntries(
+  [
+    ...'а:a б:b в:v г:g д:d е:e ё:e ж:zh з:z и:i й:i к:k л:l м:m н:n о:o п:p р:r с:s т:t у:u ф:f х:kh ц:ts ч:ch ш:sh щ:shch ъ: ы:y ь: э:e ю:yu я:ya і:i ї:yi є:ye ґ:g'.split(
+      ' '
+    ),
+    ...'α:a β:v γ:g δ:d ε:e ζ:z η:i θ:th ι:i κ:k λ:l μ:m ν:n ξ:x ο:o π:p ρ:r σ:s ς:s τ:t υ:y φ:f χ:ch ψ:ps ω:o'.split(
+      ' '
+    ),
+  ].map(pair => pair.split(':'))
+);
+/** Latin spelling of a Cyrillic or Greek word (москва → moskva), or '' when the word has neither. */
+export function transliterate(word) {
+  if (!CYRILLIC.test(word) && !GREEK.test(word)) return '';
+  let out = '';
+  for (const character of word) out += TRANSLIT[character] ?? character;
+  return /^[a-z0-9'-]+$/.test(out) ? out : '';
+}
 const SPLIT = /[^\p{L}\p{N}_'’-]+/u;
 const PUNCT = /[_'’-]/;
 const EDGE = /^[_'’-]+|['’-]+$/g;
@@ -49,7 +94,7 @@ export function stem(word) {
   return word;
 }
 
-export function tokenize(text) {
+export function tokenize(text, surfaces = null) {
   const clean = String(text || '')
     .toLowerCase()
     .replace(/https?:\/\/\S+/g, ' ')
@@ -71,9 +116,19 @@ export function tokenize(text) {
       continue;
     }
     if (word.length < 2 || word.length > 40) continue;
-    const bare = word.includes("'") || word.includes('’') ? word.replace(QUOTES, '') : word;
+    const bare = fold(word.includes("'") || word.includes('’') ? word.replace(QUOTES, '') : word);
     if (STOPWORDS.has(bare) || (bare.length < 4 && DIGITS.test(bare))) continue;
-    terms.push(stem(bare));
+    const term = stem(bare);
+    terms.push(term);
+    // Display forms for "did you mean": the shortest surface word seen for each stem.
+    if (surfaces && /^[\p{L}][\p{L}'-]*$/u.test(bare)) {
+      const known = surfaces.get(term);
+      if (!known || bare.length < known.length) surfaces.set(term, bare);
+    }
+    if (bare.charCodeAt(0) >= 0x370) {
+      const latin = transliterate(bare);
+      if (latin && latin.length >= 3 && !STOPWORDS.has(latin)) terms.push(stem(latin));
+    }
   }
   return terms;
 }
@@ -135,9 +190,10 @@ const counted = terms => {
 function* buildSteps(docs, { now = Date.now(), revision = 0 } = {}) {
   const count = docs.length,
     termCounts = new Array(count),
-    frequency = new Map();
+    frequency = new Map(),
+    surfaceForms = new Map();
   for (let index = 0; index < count; index++) {
-    const counts = counted(tokenize(docs[index].text));
+    const counts = counted(tokenize(docs[index].text, surfaceForms));
     termCounts[index] = counts;
     for (const term of counts.keys()) frequency.set(term, (frequency.get(term) || 0) + 1);
     if (index % YIELD_EVERY === YIELD_EVERY - 1) yield;
@@ -178,7 +234,19 @@ function* buildSteps(docs, { now = Date.now(), revision = 0 } = {}) {
     if (!normalize(context, offset)) continue;
     for (let d = 0; d < DIM; d++) contexts[offset + d] = Math.round(context[offset + d] * 127);
   }
-  const model = { version: SEMANTIC_VERSION, dim: DIM, terms, idf, contexts, documents: count, builtAt: now, revision };
+  const surfaces = terms.map(term => surfaceForms.get(term) || term);
+  surfaceForms.clear();
+  const model = {
+    version: SEMANTIC_VERSION,
+    dim: DIM,
+    terms,
+    surfaces,
+    idf,
+    contexts,
+    documents: count,
+    builtAt: now,
+    revision,
+  };
   const ids = [],
     vectors = new Int8Array(count * DIM);
   const embedder = createEmbedder(model);
@@ -371,4 +439,23 @@ export function documentText(post, ocrText = '') {
     .filter(Boolean)
     .join('\n')
     .slice(0, 6000);
+}
+
+/** Closest vocabulary words to `word` within `distance` edits, most frequent first (for "did you mean"). */
+export function nearestTerms(index, word, { distance = 1, limit = 3, editDistance } = {}) {
+  const target = String(word || '').toLowerCase();
+  if (!index?.terms?.length || target.length < 3 || typeof editDistance !== 'function') return [];
+  const forms = index.surfaces || index.terms,
+    hits = [];
+  for (let position = 0; position < forms.length; position++) {
+    const form = forms[position];
+    if (form === target) return [];
+    if (Math.abs(form.length - target.length) > distance || (form[0] !== target[0] && distance < 2)) continue;
+    const edits = editDistance(form, target, distance);
+    if (edits <= distance) hits.push({ word: form, edits, idf: index.idf[position] });
+  }
+  return hits
+    .sort((a, b) => a.edits - b.edits || a.idf - b.idf)
+    .slice(0, limit)
+    .map(hit => hit.word);
 }

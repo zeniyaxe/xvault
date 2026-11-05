@@ -1,3 +1,5 @@
+import './x-post-extras.js';
+
 // The X page and its content scripts cannot invoke desktop/archive-management
 // commands. Keep the smaller capture/action capability explicit at this boundary.
 const CONTENT_ACTIONS = new Set([
@@ -9,6 +11,7 @@ const CONTENT_ACTIONS = new Set([
   'GET_ARCHIVE_INDICATORS',
   'INJECT_HOOK',
   'STORE_RECORDS',
+  'STORE_AVAILABILITY',
   'STORE_CAPTURE',
   'STORE_JOB',
   'STORE_ACTION',
@@ -56,6 +59,9 @@ function context(value) {
   )
     throw Error('Invalid archive context');
 }
+
+/** Message types an X content script may send (the service worker's router uses the same list). */
+export const isContentAction = type => CONTENT_ACTIONS.has(type);
 
 export function authorizeMessage(message, sender, extensionId) {
   if (!plain(message) || typeof message.type !== 'string' || message.type.length > 80)
@@ -176,6 +182,7 @@ export function authorizeMessage(message, sender, extensionId) {
             row[field].some(value => typeof value !== 'string' || !pattern.test(value)))
         )
           throw Error(`Invalid post ${field}`);
+      globalThis.XVaultPostExtras.validExtras(row);
       for (const media of row.media || []) {
         if (!plain(media) || (media.variants != null && (!Array.isArray(media.variants) || media.variants.length > 32)))
           throw Error('Invalid captured media');
@@ -188,6 +195,14 @@ export function authorizeMessage(message, sender, extensionId) {
           if (!mediaUrl(value)) throw Error('Captured media requires an HTTPS X CDN URL');
       }
     }
+  }
+  if (message.type === 'STORE_AVAILABILITY') {
+    if (
+      !Array.isArray(message.entries) ||
+      message.entries.length > 500 ||
+      message.entries.some(entry => !globalThis.XVaultPostExtras.validAvailability(entry))
+    )
+      throw Error('Invalid post availability report');
   }
   if (message.type === 'STORE_CAPTURE') {
     if (

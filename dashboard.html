@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="xv-reader.css" />
     <link rel="stylesheet" href="xv-search-assist.css" />
     <link rel="stylesheet" href="xv-library3.css" />
+    <link rel="stylesheet" href="xv-forge.css" />
     <script defer src="link-utils.js"></script>
     <script defer src="link-export.js"></script>
     <script defer src="media-asset.js"></script>
@@ -35,6 +36,8 @@
     <script defer src="download-diagnostics.js"></script>
     <script defer src="xv-home.js"></script>
     <script defer src="xv-settings.js"></script>
+    <script defer src="revision-diff.js"></script>
+    <script defer src="filename-template.js"></script>
     <script defer src="xv-reader.js"></script>
     <script defer src="xv-atlas.js"></script>
     <script defer src="search-ranking.js"></script>
@@ -43,6 +46,8 @@
     <script defer src="xv-library3.js"></script>
     <script defer src="xv-shortcuts.js"></script>
     <script defer src="xv-vault.js"></script>
+    <script defer src="xv-forge.js"></script>
+    <script defer src="xv-forge-search.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script>
   </head>
@@ -57,8 +62,8 @@
           <button class="nav active" data-page="library"><span>Library</span></button>
           <button class="nav" data-page="atlas"><span>Atlas</span></button>
           <button class="nav" data-page="explorer"><span>Explore</span></button>
-          <button class="nav" data-page="home" data-pages="home archive sessions"><span>Capture</span></button>
-          <button class="nav" data-page="media"><span>Downloads</span></button>
+          <button class="nav" data-page="home" data-pages="home archive sessions quality"><span>Capture</span></button>
+          <button class="nav" data-page="media" data-pages="media files"><span>Downloads</span></button>
           <button class="nav" data-page="studio"><span>Tools</span></button>
           <button class="nav" data-page="health" data-pages="health integrity activity vault">
             <span>System</span>
@@ -364,7 +369,31 @@
                   <option value="replies">Most replied</option>
                   <option value="media">Most media</option>
                   <option value="author">Author A–Z</option>
-                  <option value="relevance">Best match (about:/similar:)</option>
+                  <option value="relevance">Best match (keywords + meaning)</option>
+                  <optgroup label="Posted">
+                    <option value="posted">Newest posted</option>
+                    <option value="posted-old">Oldest posted</option>
+                    <option value="thread">Conversation order</option>
+                  </optgroup>
+                  <optgroup label="Engagement">
+                    <option value="engagement">Engagement rate</option>
+                    <option value="quotes">Most quoted</option>
+                    <option value="highlights">Most highlights</option>
+                  </optgroup>
+                  <optgroup label="Content">
+                    <option value="longest">Longest text</option>
+                    <option value="shortest">Shortest text</option>
+                    <option value="duration">Longest video</option>
+                    <option value="resolution">Highest resolution</option>
+                  </optgroup>
+                  <optgroup label="Archive">
+                    <option value="quality">Most complete</option>
+                    <option value="quality-low">Least complete</option>
+                    <option value="edited">Most edited</option>
+                    <option value="seen">Recently seen on X</option>
+                    <option value="checked-old">Longest since checked</option>
+                    <option value="read-recent">Recently read</option>
+                  </optgroup>
                 </select>
                 <select id="libraryView" class="sr" tabindex="-1" aria-hidden="true">
                   <option value="timeline">Timeline</option>
@@ -949,6 +978,56 @@
                       /></label>
                     </div>
                   </section>
+                  <section class="settinggroup" id="g-search">
+                    <h3>Search</h3>
+                    <p class="settingHint">
+                      How the Library search reads what you type. Synonyms expand plain words (one group per line, words
+                      separated by commas), folding lets <code>cafe</code> find <code>café</code>, and a trailing
+                      <code>~</code> (<code>nebula~</code>) tolerates typos.
+                    </p>
+                    <div class="toggles">
+                      <label>
+                        <span><b>Ignore accents</b><small>café = cafe, Ångström = angstrom.</small></span>
+                        <input type="checkbox" data-setting="searchFoldDiacritics" />
+                      </label>
+                      <label>
+                        <span><b>Did you mean…</b><small>Suggest close words when a search finds nothing.</small></span>
+                        <input type="checkbox" data-setting="searchDidYouMean" />
+                      </label>
+                      <label>
+                        <span
+                          ><b>Search history</b
+                          ><small>Kept only in this browser; time travel replays a search “as of” a day.</small></span
+                        >
+                        <input type="checkbox" data-setting="searchHistoryEnabled" />
+                      </label>
+                    </div>
+                    <div class="formgrid two">
+                      <label class="field">
+                        <span>Best match blend</span>
+                        <select data-setting="searchHybridWeight">
+                          <option value="0">Keywords only</option>
+                          <option value="0.2">Mostly keywords</option>
+                          <option value="0.35">Balanced</option>
+                          <option value="0.6">Mostly meaning</option>
+                          <option value="1">Meaning only</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>History entries kept</span>
+                        <input type="number" min="10" max="500" step="10" data-setting="searchHistoryLimit" />
+                      </label>
+                      <label class="field xv-wide">
+                        <span>Synonyms (one group per line)</span>
+                        <textarea
+                          data-setting="searchSynonyms"
+                          rows="4"
+                          spellcheck="false"
+                          placeholder="photo, picture, pic&#10;nyc, new york"
+                        ></textarea>
+                      </label>
+                    </div>
+                  </section>
                   <section class="settinggroup advancedOnly" id="g-viewer">
                     <h3>Image viewer</h3>
                     <div class="formgrid two">
@@ -1045,6 +1124,92 @@
                           <b>Verification pass</b>
                         </span>
                         <input type="checkbox" data-setting="completionVerification" />
+                      </label>
+                    </div>
+                  </section>
+                  <section class="settinggroup" id="g-quality">
+                    <h3>Quality, changes and watch lists</h3>
+                    <p class="settingHint">
+                      Background visits open one X tab at a time, at most a few times per day, to repair incomplete
+                      posts, fill thread gaps and check whether posts are still on X. Manage the queues and watch lists
+                      in Capture › Quality.
+                    </p>
+                    <div class="toggles">
+                      <label>
+                        <span
+                          ><b>Check whether posts are still on X</b
+                          ><small>Marks deleted, withheld or protected posts; never removes anything.</small></span
+                        >
+                        <input type="checkbox" data-setting="availabilityChecks" />
+                      </label>
+                      <label>
+                        <span
+                          ><b>Snapshot linked pages</b
+                          ><small
+                            >Keeps a readable text copy of linked articles (asks for site access once).</small
+                          ></span
+                        >
+                        <input type="checkbox" data-setting="linkSnapshots" />
+                      </label>
+                    </div>
+                    <div class="formgrid two">
+                      <label class="field">
+                        <span>Availability checks cover</span>
+                        <select data-setting="availabilityScope">
+                          <option value="favorites">Favorites</option>
+                          <option value="favorites-labeled">Favorites and labeled posts</option>
+                          <option value="all">Everything (oldest checks first)</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>Checks per day</span>
+                        <input type="number" min="1" max="300" data-setting="availabilityDailyCap" />
+                      </label>
+                      <label class="field">
+                        <span>Re-check after (days)</span>
+                        <input type="number" min="1" max="365" data-setting="availabilityRecheckDays" />
+                      </label>
+                      <label class="field">
+                        <span>Repair visits per day</span>
+                        <input type="number" min="1" max="500" data-setting="repairDailyCap" />
+                      </label>
+                      <label class="field">
+                        <span>Watch-list runs per day</span>
+                        <input type="number" min="1" max="50" data-setting="watchDailyCap" />
+                      </label>
+                      <label class="field">
+                        <span>Quote chain depth</span>
+                        <input type="number" min="0" max="5" data-setting="quoteChainDepth" />
+                      </label>
+                      <label class="field">
+                        <span>Largest page snapshot (KB)</span>
+                        <input type="number" min="32" max="4096" step="32" data-setting="linkSnapshotMaxKB" />
+                      </label>
+                      <label class="field">
+                        <span>Capture history kept</span>
+                        <input type="number" min="10" max="400" step="10" data-setting="captureHistoryLimit" />
+                      </label>
+                    </div>
+                  </section>
+                  <section class="settinggroup" id="g-import">
+                    <h3>X archive import</h3>
+                    <div class="toggles">
+                      <label>
+                        <span
+                          ><b>Save media from the ZIP</b
+                          ><small
+                            >Files in tweets_media are copied to your download folder instead of re-downloaded from
+                            X.</small
+                          ></span
+                        >
+                        <input type="checkbox" data-setting="importMediaFromZip" />
+                      </label>
+                      <label>
+                        <span
+                          ><b>Never read direct messages</b
+                          ><small>DM files in the archive are skipped without being opened.</small></span
+                        >
+                        <input type="checkbox" data-setting="importSkipDirectMessages" disabled checked />
                       </label>
                     </div>
                   </section>
@@ -1186,7 +1351,14 @@
                         <input data-setting="customFilenameTemplate" />
                       </label>
                     </div>
-                    <div id="filenamePreview" class="pathpreview"></div>
+                    <div id="filenamePreview" class="pathpreview" aria-live="polite"></div>
+                    <p class="settingHint" id="filenameTokens">
+                      Tokens: <code>{author}</code> <code>{name}</code> <code>{tweetId}</code> <code>{index}</code>
+                      <code>{date}</code> <code>{year}</code> <code>{month}</code> <code>{day}</code>
+                      <code>{time}</code> <code>{mediaId}</code> <code>{type}</code> <code>{source}</code>
+                      <code>{width}</code> <code>{height}</code> <code>{quality}</code> <code>{text:40}</code>. Rename
+                      existing files to a new template from Downloads › Files &amp; health.
+                    </p>
                     <div class="toggles">
                       <label>
                         <span>
@@ -1280,6 +1452,73 @@
                       </label>
                     </div>
                     <div class="row"><button id="testDownload">Run a test download</button></div>
+                  </section>
+                  <section class="settinggroup" id="g-dlpolicy">
+                    <h3>Quality, schedule and bandwidth</h3>
+                    <p class="settingHint">
+                      Held downloads stay queued and start on their own when the window opens or the connection allows.
+                      Host health, duplicates and file re-checks live in Downloads › Files &amp; health.
+                    </p>
+                    <div class="formgrid two">
+                      <label class="field">
+                        <span>Video quality</span>
+                        <select data-setting="videoQuality">
+                          <option value="highest">Highest available</option>
+                          <option value="1080">Up to 1080p</option>
+                          <option value="720">Up to 720p</option>
+                          <option value="480">Up to 480p (data saver)</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>Bandwidth cap (MB/s, 0 = none)</span>
+                        <input type="number" min="0" max="500" step="0.5" data-setting="downloadMaxMBps" />
+                      </label>
+                      <label class="field">
+                        <span>Window opens</span>
+                        <input type="time" data-setting="downloadWindowStart" />
+                      </label>
+                      <label class="field">
+                        <span>Window closes</span>
+                        <input type="time" data-setting="downloadWindowEnd" />
+                      </label>
+                      <label class="field">
+                        <span>Re-check files every (days, 0 = off)</span>
+                        <input type="number" min="0" max="90" data-setting="integrityScheduleDays" />
+                      </label>
+                      <label class="field xv-wide">
+                        <span>Video quality rules (one per line: search =&gt; quality; first match wins)</span>
+                        <textarea
+                          data-setting="videoQualityRules"
+                          rows="3"
+                          spellcheck="false"
+                          placeholder="source:likes => 720&#10;from:nasa => highest&#10;tag:reference => 1080"
+                        ></textarea>
+                        <small id="videoRulesPreview" class="settingHint" aria-live="polite"></small>
+                      </label>
+                    </div>
+                    <div class="toggles">
+                      <label>
+                        <span
+                          ><b>Only download inside the window</b
+                          ><small>For example overnight; everything else waits in the queue.</small></span
+                        >
+                        <input type="checkbox" data-setting="downloadWindowEnabled" />
+                      </label>
+                      <label>
+                        <span
+                          ><b>Respect Data Saver and metered connections</b
+                          ><small>Holds the queue while the browser asks to save data.</small></span
+                        >
+                        <input type="checkbox" data-setting="downloadRespectSaveData" />
+                      </label>
+                      <label>
+                        <span
+                          ><b>Re-download files that fail a re-check</b
+                          ><small>Missing or corrupt files go back into the queue.</small></span
+                        >
+                        <input type="checkbox" data-setting="integrityAutoRedownload" />
+                      </label>
+                    </div>
                   </section>
                   <section class="settinggroup advancedOnly" id="g-conversion">
                     <h3>Animation conversion</h3>
@@ -1437,6 +1676,25 @@
                         ><button type="button" class="quiet" data-sync="pause" aria-pressed="false">Pause</button
                         ><button type="button" class="quiet" data-sync="stop" hidden>Stop</button>
                       </div>
+                    </div>
+                  </section>
+                  <section class="settinggroup" id="g-xbadges">
+                    <h3>Badges on x.com</h3>
+                    <div class="toggles">
+                      <label>
+                        <span
+                          ><b>“Edited since archived”</b
+                          ><small>Shown on posts whose text changed after XVault kept them.</small></span
+                        >
+                        <input type="checkbox" data-setting="xBadgeEdits" />
+                      </label>
+                      <label>
+                        <span
+                          ><b>“Media not downloaded”</b
+                          ><small>Shown on archived posts whose files are not on disk yet.</small></span
+                        >
+                        <input type="checkbox" data-setting="xBadgeMissingMedia" />
+                      </label>
                     </div>
                   </section>
                   <section class="settinggroup" id="g-floating">

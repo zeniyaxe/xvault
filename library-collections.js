@@ -11,8 +11,26 @@
     'media',
     'author',
     'random',
+    // XVault 21: every Library sort can be saved with a collection.
+    'quotes',
+    'relevance',
+    'posted',
+    'posted-old',
+    'engagement',
+    'longest',
+    'shortest',
+    'quality',
+    'quality-low',
+    'edited',
+    'read-recent',
+    'highlights',
+    'duration',
+    'resolution',
+    'seen',
+    'checked-old',
+    'thread',
   ]);
-  const VIEWS = new Set(['timeline', 'cards', 'gallery', 'masonry', 'compact']);
+  const VIEWS = new Set(['timeline', 'cards', 'gallery', 'masonry', 'compact', 'table']);
   const ICONS = new Set([
     'search',
     'bookmark',

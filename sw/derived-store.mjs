@@ -2,7 +2,8 @@
 // never touches archive records, exports or backups. Everything here can be deleted and recomputed.
 export const DERIVED_DB = 'xvault-derived';
 // v1 (XVault 18): phash. v2 (XVault 19): + ocr (by postId) + meta (revisions).
-export const DERIVED_VERSION = 2;
+// v3 (XVault 21): + snapshots (opt-in readable copies of linked pages, by postId).
+export const DERIVED_VERSION = 3;
 
 export function upgradeDerived(database, transaction) {
   if (!database.objectStoreNames.contains('phash')) database.createObjectStore('phash', { keyPath: 'key' });
@@ -14,6 +15,10 @@ export function upgradeDerived(database, transaction) {
     if (!ocr.indexNames.contains('postId')) ocr.createIndex('postId', 'postId', { unique: false });
   }
   if (!database.objectStoreNames.contains('meta')) database.createObjectStore('meta', { keyPath: 'key' });
+  if (!database.objectStoreNames.contains('snapshots')) {
+    const snapshots = database.createObjectStore('snapshots', { keyPath: 'key' });
+    snapshots.createIndex('postId', 'postId', { unique: false });
+  }
 }
 
 export function createDerivedStore(idb = globalThis.indexedDB) {
