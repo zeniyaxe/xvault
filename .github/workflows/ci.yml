@@ -86,6 +86,8 @@ jobs:
         run: node tests/helper-files-browser.mjs playwright
       - name: Scheduled backups through the real offscreen document (plaintext, encrypted, retention)
         run: node tests/auto-backup-browser.mjs playwright
+      - name: Downloads page against real Chromium downloads (honest progress, persistent pause, filters, retry)
+        run: node tests/downloads-page-browser.mjs playwright
       - name: Accessibility audit (axe-core, WCAG 2.1 A/AA; serious and critical fail)
         run: npm run e2e:a11y
       - uses: actions/upload-artifact@v4

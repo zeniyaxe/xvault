@@ -4004,12 +4004,32 @@ function ensureBandwidthSampling() {
       await bandwidthGovernor.resumeAll().catch(() => {});
       return;
     }
+    // While you have paused the queue, the cap must not resume a transfer it had throttled.
+    if (manualQueuePause) return;
     await bandwidthGovernor.sample().catch(() => {});
   }, 2000);
 }
 let queueHoldTimer = 0,
   queueHold = null;
+// XVault 23: a pause you choose holds new starts and survives service-worker and browser restarts (it is kept
+// in storage.local); the window / Data Saver holds below only apply while it is off.
+let manualQueuePause = null;
+const manualQueuePauseReady = chrome.storage.local
+  .get('downloadQueuePause')
+  .then(value => {
+    manualQueuePause = value?.downloadQueuePause || null;
+  })
+  .catch(() => {});
+const manualHold = () =>
+  manualQueuePause
+    ? { code: 'paused', message: 'Paused by you — resume to continue', since: manualQueuePause.at }
+    : null;
 function queueHeld(settings) {
+  const paused = manualHold();
+  if (paused) {
+    queueHold = paused;
+    return paused;
+  }
   const hold = holdReason(settings);
   queueHold = hold;
   if (hold && !queueHoldTimer)
@@ -4816,6 +4836,8 @@ route('CANCEL_DOWNLOAD', async m => {
   }
 });
 route('PAUSE_ALL_DOWNLOADS', async m => {
+  manualQueuePause = { at: Date.now() };
+  await chrome.storage.local.set({ downloadQueuePause: manualQueuePause });
   let n = 0;
   for (const r of active.values())
     if (r.downloadId)
@@ -4835,6 +4857,10 @@ route('RESUME_ALL_DOWNLOADS', async m => {
         await setDownloadStateById(r.downloadId, 'downloading');
         n++;
       } catch {}
+  manualQueuePause = null;
+  queueHold = null;
+  await chrome.storage.local.remove('downloadQueuePause');
+  void pump();
   return { ok: true, resumed: n };
 });
 route('OPEN_DOWNLOAD_SOURCE', async m => {
@@ -5382,18 +5408,25 @@ async function probe(item, s) {
     mg = {};
   const probeBytes = Math.max(65536, Math.min(1048576, Number(s.probeMediaBytes) || 524288));
   if (/^https?:/i.test(item.url || '')) {
+    // XVault 23: a server that stalls during the probe used to hold the download slot forever.
+    const controller = new AbortController(),
+      timer = setTimeout(() => controller.abort(), 12000);
     try {
       const r = await fetch(item.url, {
         headers: { Range: `bytes=0-${probeBytes - 1}` },
         cache: 'no-store',
         credentials: 'omit',
+        signal: controller.signal,
       });
       mime = mime || r.headers.get('content-type') || '';
       const cr = r.headers.get('content-range'),
         cl = r.headers.get('content-length');
       size = Number(cr?.match(/\/(\d+)$/)?.[1] || cl || 0);
       mg = magic(await responseHeaderBytes(r, probeBytes));
-    } catch {}
+    } catch {
+    } finally {
+      clearTimeout(timer);
+    }
   }
   ext = mg.ext || ext || mimeExt(mime);
   const hint = String(item.mediaType || item.type || item.sourceMediaType || '').toLowerCase(),
@@ -6197,6 +6230,25 @@ async function queueStats() {
     total: counts.total,
     bytesReceived,
     totalBytes,
+    // XVault 23: what is holding new starts (your pause, the window, Data Saver) and the live transfers, with the
+    // byte counts Chrome reports — nothing is estimated; totalBytes is 0 when the server sent no length.
+    hold: manualHold() || queueHold,
+    pausedByUser: !!manualQueuePause,
+    activeRows: [...active.values()].slice(0, 12).map(row => ({
+      key: row.key,
+      downloadId: Number(row.downloadId) || 0,
+      name: String(row.target?.filename || row.item?.url || '')
+        .split('/')
+        .pop()
+        .slice(0, 160),
+      state: row.state,
+      bytesReceived: Number(row.bytesReceived) || 0,
+      totalBytes: Number(row.totalBytes) || 0,
+      speedBps: Number(row.speedBps) || 0,
+      tweetId: row.item?.tweetId ? String(row.item.tweetId) : '',
+      kind: String(row.target?.kind || row.item?.mediaType || ''),
+      startedAt: Number(row.startedAt) || 0,
+    })),
     completedBytes: null,
     speedBps,
     etaSeconds,
@@ -6226,6 +6278,7 @@ async function pump() {
     moreQueued = false;
   try {
     s = await getSettings();
+    await manualQueuePauseReady;
     const max = downloadGovernor.limit(s.maxConcurrentDownloads || 4, s.adaptiveDownloads !== false);
     // XVault 21: schedule window / Data Saver hold new starts (active downloads continue).
     const held = queueHeld(s);

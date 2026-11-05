@@ -59,9 +59,7 @@ const fmt = n => (n == null ? '—' : new Intl.NumberFormat().format(n)),
       i++;
     }
     return `${v.toFixed(i ? 1 : 0)} ${u[i]}`;
-  },
-  eta = s =>
-    s == null ? '—' : s < 60 ? `${Math.ceil(s)}s` : s < 3600 ? `${Math.ceil(s / 60)}m` : `${(s / 3600).toFixed(1)}h`;
+  };
 document.addEventListener(
   'DOMContentLoaded',
   () => {
@@ -1336,98 +1334,25 @@ async function clearLibrary() {
   stats();
   toast('Library cleared');
 }
-function verificationText(r) {
-  const state = r.verification?.state || r.verificationState || '';
-  const conversion = r.conversionState
-    ? `Conversion ${r.conversionState}${r.conversionProgress != null ? ` ${Math.round(Number(r.conversionProgress) * 100)}%` : ''}`
-    : '';
-  return (
-    conversion ||
-    {
-      verified: 'Verified',
-      'verified-with-warning': 'Verified with warning',
-      mismatch: 'Wrong content returned',
-      corrupt: 'Corrupt or too small',
-      missing: 'Source file missing',
-      'verification-unavailable': 'Verification unavailable',
-      'verification-pending': 'Verification pending',
-    }[state] ||
-    state
-  );
+async function queueStats(...args) {
+  const q = await dashboardHooks.invoke('queueStats', builtinQueueStats, this, args);
+  if (q?.ok) queueSnapshot = q;
+  return q;
 }
-function queueStats(...args) {
-  return dashboardHooks.invoke('queueStats', builtinQueueStats, this, args);
-}
+// Minimal fallback; the Downloads page itself (progress, live transfers, history) is owned by xv-downloads.js.
+// No invented percentages: without known sizes the bar stays empty instead of showing 35% or 8%.
 async function builtinQueueStats() {
   if (!$('#qQueued')) return;
   const q = await call({ type: 'DOWNLOAD_QUEUE_STATS' });
-  if (!q?.ok) return;
-  queueSnapshot = q;
+  if (!q?.ok) return q;
   $('#qQueued').textContent = fmt(q.queued);
   $('#qActive').textContent = fmt(q.downloading);
   $('#qDone').textContent = fmt(q.complete);
   $('#qFailed').textContent = fmt(q.failed);
-  const pct =
-    q.totalBytes > 0
-      ? Math.min(100, Math.round((q.bytesReceived / q.totalBytes) * 100))
-      : q.downloading
-        ? 35
-        : q.queued
-          ? 8
-          : 0;
-  $('#qPercent').textContent = `${pct}%`;
-  $('#qBar').style.width = `${pct}%`;
-  const queueIndexProgress = Number(q.bookkeeping?.assetLookupIndex?.processed) || 0;
-  $('#qTitle').textContent = q.downloading
-    ? `Downloading ${q.downloading}${q.countsReady ? '' : ' · totals rebuilding'}`
-    : !q.countsReady
-      ? queueIndexProgress
-        ? `Rebuilding queue totals · ${fmt(queueIndexProgress)} scanned`
-        : 'Rebuilding queue totals…'
-      : q.retryWait
-        ? `${q.retryWait} waiting to retry`
-        : q.queued
-          ? `${q.queued} queued`
-          : q.failed
-            ? 'Finished with errors'
-            : 'Idle';
-  $('#qBytes').textContent = `${bytes(q.bytesReceived)} / ${q.totalBytes ? bytes(q.totalBytes) : '—'}`;
-  $('#qCount').textContent = q.countsReady
-    ? `${q.complete} complete · ${q.failed} failed${q.verificationFailures ? ` · ${q.verificationFailures} verification failures` : ''}`
-    : 'Queue history is being indexed; active transfer progress remains live.';
-  $('#qSpeed').textContent = `${bytes(q.speedBps)}/s`;
-  $('#qEta').textContent = `ETA ${eta(q.etaSeconds)}`;
-  queueStats.n = (queueStats.n || 0) + 1;
-  if (queueStats.n === 1 || queueStats.n % 3 === 0) {
-    const h = await call({ type: 'GET_DOWNLOAD_HISTORY', limit: 60 });
-    $('#downloadHistory').innerHTML =
-      (h.rows || [])
-        .map(r => {
-          const source =
-            r.recoveryAction === 'open-source-post' && r.item?.sourcePostUrl
-              ? `<button class="mini" data-source-post="${esc(r.item.sourcePostUrl)}">Open source post</button>`
-              : '';
-          const conversionAction =
-            r.conversionState === 'failed' ||
-            ['mismatch', 'corrupt', 'missing'].includes(r.conversionVerification?.state)
-              ? `<button class="mini" data-retry-conversion="${esc(r.key)}">Regenerate derivative</button>`
-              : r.conversionState === 'running'
-                ? `<button class="mini" data-cancel-conversion="${esc(r.key)}">Cancel conversion</button>`
-                : '';
-          const reason = r.verification?.reason || r.error;
-          return `<div class="dlrow ${r.state}"><div><b>${esc((r.target?.filename || r.item?.url || 'media').split('/').pop())}</b><small>${esc(r.target?.kind || 'media')} · ${esc(r.state)}${verificationText(r) ? ` · ${esc(verificationText(r))}` : ''}${reason ? ` · ${esc(reason).slice(0, 100)}` : ''}</small>${source}${conversionAction}</div><span>${r.totalBytes ? bytes(r.totalBytes) : ''}</span></div>`;
-        })
-        .join('') || '<div class="empty">No downloads yet.</div>';
-    $$('#downloadHistory [data-source-post]').forEach(
-      b => (b.onclick = () => call({ type: 'OPEN_DOWNLOAD_SOURCE', url: b.dataset.sourcePost }))
-    );
-    $$('#downloadHistory [data-cancel-conversion]').forEach(
-      b => (b.onclick = () => call({ type: 'CANCEL_CONVERSION', key: b.dataset.cancelConversion }))
-    );
-    $$('#downloadHistory [data-retry-conversion]').forEach(
-      b => (b.onclick = () => call({ type: 'RETRY_CONVERSION', key: b.dataset.retryConversion }))
-    );
-  }
+  const pct = q.totalBytes > 0 ? Math.min(100, Math.round((q.bytesReceived / q.totalBytes) * 100)) : null;
+  $('#qPercent').textContent = pct == null ? '—' : `${pct}%`;
+  $('#qBar').style.width = `${pct || 0}%`;
+  return q;
 }
 async function health() {
   const h = await call({ type: 'HEALTH_CHECK' });

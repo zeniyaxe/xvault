@@ -361,7 +361,8 @@
   }
   function mountQueueTools() {
     const history = document.querySelector('#downloadHistory');
-    if (!history || document.querySelector('#xvQueueTools')) return;
+    // XVault 23: the Downloads page (xv-downloads.js) owns filters, search and the queue pause.
+    if (!history || document.querySelector('#xvQueueTools') || window.XVaultDownloads) return;
     const tools = document.createElement('div');
     tools.id = 'xvQueueTools';
     tools.className = 'xv-queue-tools';

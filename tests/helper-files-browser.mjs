@@ -185,7 +185,9 @@ try {
   assert.equal(media.physicalBytes, media.bytes - bodies['/same-1.jpg'].length);
   assert.equal(media.helper?.ok, true, JSON.stringify(media.helper));
   assert.equal(media.helper.savedBytes, bodies['/same-1.jpg'].length, 'the hard link is counted once on disk');
-  console.log(`helper files: linked ${linked.linked} identical copy, left the differing file alone; disk usage counts it once`);
+  console.log(
+    `helper files: linked ${linked.linked} identical copy, left the differing file alone; disk usage counts it once`
+  );
 
   // Rename: one destination is occupied by a stranger's file; it must survive and its move must not be recorded.
   const plan = await send({ type: 'RENAME_PLAN', fileTemplate: 'renamed_{tweetId}', folderTemplate: '{author}' });
