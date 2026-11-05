@@ -1,5 +1,63 @@
 # Changelog
 
+## XVault 25.0.0 "Vantage" - 2026-11-05
+
+- **Library 5.0 — rebuilt, not restyled.** The Library is now one page with a single scroller (`.lib-main`): a
+  collapsible sidebar, the results and an optional resizable Inspector side by side, so nothing scrolls inside
+  something else. The header is two rows (~96 px on desktop): sidebar toggle, title and count, search, layout
+  switch, **View** menu, sort and actions on the first; the filter chips on the second. On phones only the search
+  (or the selection bar) stays pinned and the rest scrolls away. Six intentionally different layouts — **Feed**
+  (one reading column, Reading / Wide / Full width), **Cards** (a fluid multi-column grid sized by container
+  queries), **Grid** (even media tiles), **Wall** (masonry at natural proportions), **List** and **Table** (windowed
+  fixed-height rows) — and four card styles (**Compact, Comfortable, Media first, Detailed**), media **Fill / Whole
+  image**, and tile size, all remembered. A 1,440 px window shows three to four columns of cards instead of one
+  narrow column.
+- **Pagination that cannot cover a post.** The old fixed bottom pager is gone. Results end in an in-flow footer
+  (what is shown, **Load N more**, Previous / Next page, Back to top) that is part of the scrolling content, and
+  Load more can happen automatically as you reach the end (setting). A window keeps at most 1,500 posts; past that
+  you continue on the next page so scrolling stays light.
+- **A new card renderer.** `library-feed.js` replaces the string-template renderer `dashboard.js` carried since
+  v12: one delegated listener instead of thousands of per-card handlers, incremental mounting (only the blocks
+  near the viewport are in the DOM, blocks far above become one measured spacer), keyed in-place refresh (no image
+  reload, no lost scroll), aspect-ratio media boxes, lazy decoding, click-to-play video (no `<video>` until asked),
+  GIFs that play only while visible, missing-media and broken-avatar fallbacks, sensitive media veiled until
+  revealed, and FLIP motion between layouts (skipped under reduced motion).
+- **Real avatars, archived locally.** Author pictures from `pbs.twimg.com` are kept in their own small database
+  (`xvault-avatars`, 96 px, at most two fetches at a time, refreshed after 30 days, retried after 12 hours) and
+  shown in the Library, the Reader and on the phone. Turn it off in Settings › Library ("Keep local copies of
+  avatars"); a monogram is shown until a copy exists.
+- **Phone Remote 4.0 — send posts from the phone.** A new **Capture** tab: paste one or many X links (up to 20),
+  or **share** a post from the X app straight to XVault (Web Share Target, Android/Chromium with the installed
+  app). Each link joins a **capture inbox** on the computer, which opens the post in one reused background tab
+  next to your signed-in x.com tab (one must be open), archives it through the normal capture path and reports
+  back: queued → opening → saved / already archived / problem, with a rich preview (avatar, author,
+  text) once saved, **Show in Library**, **Retry**, **Open on X** and **Remove/Cancel**, filters (All, Pending,
+  Saved, Problems) and a tab badge. Links sent while the computer is unreachable wait in an **outbox** on the
+  phone and go out when it is back. Needs the new device permission **"Send posts to capture"**; requests are
+  rate-limited and only canonical `x.com/<user>/status/<id>` links are accepted.
+- **Phone downloads you can steer.** **Up next** shows the next files the queue will take with **Download next**
+  (moves that post's files to the front) and **Show post**; running transfers get **Pause / Resume / Cancel**;
+  and **Images** / **Video** buttons pause one media host while the other keeps downloading.
+- **Capture inbox on the desktop.** The Capture page lists everything sent from the phone or pasted there, with
+  pause, retry problems and clear finished.
+- **Per-host download controls.** Downloads › **Media hosts** shows each source (images on `pbs.twimg.com`,
+  video on `video.twimg.com`, any other host) with active / waiting / done / failed counts from recent history,
+  the most common failure reason, **Pause / Resume** for that host only (queued files wait in the database,
+  running transfers finish, the choice survives restarts) and **Retry failed** for that host.
+- **Atlas: threads and quotes.** A new section draws the largest conversations in your archive (a spine with one
+  dot per archived post, how many people took part) and the most-quoted posts (a fan with one spoke per quoting
+  post). Each opens the Reader; a quoted post you never archived opens on X instead.
+- **Faster where it shows.** Library first render on 50,000 posts 24.7 ms (v23) / 24.3 ms (v24) → 9.5 ms and
+  usable 33.7 / 35.0 → 17.3 ms; a 600-post Cards page re-renders in 43 ms instead of ~600 ms and mounts ~1,500 list
+  nodes instead of ~50,000; phone first tile 254–282 ms (v24) → 210–241 ms. Forced synchronous layouts were
+  removed from notices, the segmented-control pill and the Library title swap. See `XVAULT_ROADMAP.md` for the
+  full table and what got slower.
+- **Phone polish.** The bottom tab bar always fits all eight destinations (icons only below 360 px, names kept
+  for screen readers); before, System and Settings fell off the right edge at 320 px. The sideways-scrolling
+  filter row fades at its edges, and small Grid tiles show the video length instead of a clipped "Video ·" label.
+- **Removed:** `xv-library.css`, `xv-library3.css`, `xv-aurora-library.css` and `xv-keystone.css` (replaced by
+  `xv-library5.css` and `xv-library-panels.css`), and the v12 card renderer and per-card bindings in `dashboard.js`.
+
 ## XVault 24.0.0 "Aurora" - 2026-11-05
 
 - **A new look, everywhere.** XVault 24 replaces the matte-brass workbench with **Aurora**: an ink-dark ground, an

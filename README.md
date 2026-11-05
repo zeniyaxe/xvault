@@ -5,6 +5,13 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
 
 ## Highlights
 
+- **Library 5.0 (25.0)** — one page with one scroller: a collapsible sidebar, the results and an optional
+  resizable Inspector side by side, and a two-row header so posts start near the top. Six layouts that each use the
+  width on purpose — Feed (Reading / Wide / Full), fluid multi-column Cards, Grid, Wall (masonry), List and Table —
+  with Compact, Comfortable, Media-first and Detailed card styles, Fill / Whole-image media and tile size in a
+  View menu. Results end in an in-flow footer with **Load more** and page navigation (never a bar over a post);
+  cards mount incrementally around the viewport, so a 1,500-post window stays light. Author avatars are archived
+  locally and shown everywhere, including on the phone.
 - **Aurora design (24.0)** — an ink-dark interface with an iris accent, a compact icon rail, one button system
   with loading/success/error states, Lucide icons (vendored, no network), tooltips that also name icon-only
   controls, a shared type/spacing/motion scale and 16 themes (the classic brass look is the **Graphite** theme).
@@ -24,15 +31,17 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
   per-host health, duplicate reclaim, scheduled re-verification and safe renames (Downloads › Files & health) —
   with the helper running (Chrome, Edge or Firefox), XVault renames files itself, replaces identical copies with
   hard links and measures real disk use. The Downloads page shows honest progress, live transfers with their own
-  controls, a pause that survives restarts, and a filterable history with Retry and Copy reason.
+  controls, a pause that survives restarts, **per-host pause** (hold images or video while the rest continues,
+  with per-host counts, the most common failure and Retry failed), and a filterable history with Retry and Copy
+  reason.
 - **Import your X archive** — drop the ZIP from X's "Download an archive of your data" to add every tweet (long posts
   with their full text), like, bookmark, community post and recently deleted post it contains, and save the media
   files inside it as local downloads; read in the browser without unpacking, direct messages are never read, and
   live captures always keep their richer data.
-- **Library 4.0** — a heading that names the current view, a filter builder (media, dates, author, tag, likes,
-  status, kind) that writes ordinary search syntax, removable filter chips with Save view, and cards with
-  avatars, reply/thread context, media grids, quoted posts, link cards, polls and notes. Cards, Gallery, Masonry,
-  Compact, Table and Timeline layouts, facets, an inspector and a floating selection bar.
+- **Filters and cards** — a heading that names the current view, a filter builder (media, dates, author, tag,
+  likes, status, kind) that writes ordinary search syntax, removable filter chips with Save view, and cards with
+  avatars, reply/thread context, media grids, quoted posts, link cards, polls and notes; Select all matching, a
+  bulk bar that never covers content, and keyboard navigation (`j`/`k`, arrows, `\` for the sidebar).
 - **Search** — fast ranked search with filters (`from:`, `has:`, `tag:`, `likes:>1k`, `after:`, `on:`, `year:`,
   `is:thread`, `#hashtag`, `@mention`, `domain:`, `thread:ID`…), negation (`-from:bot`), alternatives
   (`has:video|gif`), usage-ranked suggestions with inline filter help (`Ctrl`+`Space`), text inside images
@@ -46,7 +55,8 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
 - **Organise** — boards (`board:`), a bulk editor with undo (`Ctrl`+`Z`), Select by, a context menu, a sortable
   Table layout and auto-tag rules written in the search language (`from:nasa has:video` → `space`).
 - **Atlas** — an overview of the whole archive: growth, media mix, rhythm, people, conversations, languages,
-  hashtags and linked sites; a posting/archiving calendar (local time or UTC) with streaks; author profiles; a
+  hashtags and linked sites; **threads and quotes** (the largest conversations and most-quoted posts, drawn as
+  small graphs); a posting/archiving calendar (local time or UTC) with streaks; author profiles; a
   Duplicate Lab whose look-alike scan runs and resumes in the background; **Year in Review** with topic drift,
   achievements and a people graph, exportable as a PNG card or Markdown; and **Topics**, automatic meaning clusters you can name, search, save or turn
   into boards.
@@ -63,10 +73,13 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
 - **Feel** — animated view changes, notices that stack, count repeats and offer **Undo** (with **Recent notices**
   in the command palette), sliding segmented controls, lightbox zoom from the thumbnail; *Calm motion* turns it off.
 - **Accessibility** — high contrast, always-on focus rings, text scaling, remappable shortcuts (`?` lists them).
-- **Remote 3.0** — optional phone viewer (PWA) served by the local helper over your LAN, with QR pairing,
-  per-device permissions and revocation: rich feed cards or a media grid, a bottom-sheet preview with Share, a
-  Downloads monitor (Pause/Resume/Retry for devices allowed to manage downloads), an archive Overview, and a
-  viewer with swipe, pinch, double-tap zoom and swipe-down to close.
+- **Remote 4.0** — optional phone app (PWA) served by the local helper over your LAN, with QR pairing,
+  per-device permissions and revocation: rich feed cards with real (locally archived) avatars or a media grid, a
+  bottom-sheet preview with Share, a viewer with swipe, pinch, double-tap zoom and swipe-down to close, an archive
+  Overview, and **Capture**: paste or share X links from the phone (Web Share Target on Android) into a capture
+  inbox on the computer, with live status, previews, retry and an offline outbox. The Downloads monitor shows
+  Up next with **Download next**, per-transfer Pause/Resume/Cancel and per-host pause for devices allowed to
+  manage downloads.
 - **Side panel** — status card, Lucide action tiles and real switches for the capture toggles.
 
 ## Install (unpacked)
@@ -95,7 +108,7 @@ npm run e2e        # loads the real extension in Chromium (needs `npm i --no-sav
 npm run e2e:a11y   # axe-core accessibility audit of every page (serious/critical fail)
 npm run e2e:helper # real helper process + real downloads (renames, hard links) and automatic backups
 npm run e2e:downloads # Downloads page against real Chromium downloads
-npm run e2e:remote # every Remote PWA browser test (shell, connection, Aurora feed/sheet/downloads/overview/viewer)
+npm run e2e:remote # every Remote PWA browser test (shell, connection, feed/sheet/downloads/overview/viewer, capture)
 node scripts/ui-gallery.mjs --out=shots   # seeded screenshots of every layout/page (--only, --themes, --viewports)
 python3 scripts/e2e-firefox.py dist/XVault-<version>-firefox.zip   # real Firefox (FIREFOX_BIN, GECKODRIVER)
 python -m unittest discover -s tests/python   # Remote pairing/security and helper file-operation tests
@@ -113,9 +126,11 @@ scheduler, meaning index, boards/rules, adaptive downloads, archive quality and 
 snapshots, topic clusters, download policy, automatic backups, timeline buckets), `x-archive-import.mjs`, `x-post-extras.js`, `revision-diff.js`,
 `filename-template.js`, `backup-crypto.mjs` and `recovery-backup-core.mjs` (+ `offscreen-backup.mjs`),
 `dashboard.html` + `xv-*.js` (app shell and pages; they extend `dashboard.js` through `dashboard-hooks.js`),
-`xv-app.css` (the dashboard stylesheet: cascade layers `base` → `legacy` → `aurora`), `xv-aurora*.css` / `xv-aurora.js` /
-`xv-library4.js` (the Aurora design system and Library 4.0), `xv-icon-set.js` (vendored Lucide icons), `content.js` /
+`xv-app.css` (the dashboard stylesheet: cascade layers `base` → `legacy` → `aurora`), `xv-aurora*.css` / `xv-aurora.js`
+(the design system), `library-workspace.js` + `library-feed.js` + `xv-library5.css` (Library 5.0: query/paging/selection
+and the card renderer), `xv-icon-set.js` (vendored Lucide icons), `content.js` /
 `instant-actions.js` / `page-hook.js` (X integration), `FFmpeg_Helper/` (Python helper + Remote PWA).
-See `XVAULT_ROADMAP.md` for architecture notes, decisions and the current plan.
+See `ARCHITECTURE.md` for how the pieces fit together and `XVAULT_ROADMAP.md` for decisions, verification and the
+current plan.
 
 Personal configuration, credentials, state, logs and browser profiles are excluded from the repository.

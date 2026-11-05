@@ -1,6 +1,6 @@
 {
   "name": "xvault",
-  "version": "24.0.0",
+  "version": "25.0.0",
   "private": true,
   "description": "Local-first X/Twitter archive and media manager (Chrome and Edge MV3 extension; experimental Firefox build).",
   "scripts": {
@@ -19,7 +19,7 @@
     "verify": "npm run check && npm run lint && npm test && npm run format:check",
     "e2e:downloads": "node tests/downloads-page-browser.mjs playwright \"$CHROMIUM_PATH\"",
     "e2e:helper": "node tests/helper-files-browser.mjs playwright \"$CHROMIUM_PATH\" && node tests/auto-backup-browser.mjs playwright \"$CHROMIUM_PATH\"",
-    "e2e:remote": "node tests/remote-aurora-browser.mjs playwright \"$CHROMIUM_PATH\" && node tests/remote-product-browser.mjs playwright \"$CHROMIUM_PATH\" && node tests/remote-shell-browser.mjs playwright \"$CHROMIUM_PATH\" && node tests/remote-editor-browser.mjs playwright \"$CHROMIUM_PATH\" && node tests/remote-connection-browser.mjs playwright \"$CHROMIUM_PATH\"",
+    "e2e:remote": "node tests/remote-aurora-browser.mjs playwright \"$CHROMIUM_PATH\" && node tests/remote-product-browser.mjs playwright \"$CHROMIUM_PATH\" && node tests/remote-shell-browser.mjs playwright \"$CHROMIUM_PATH\" && node tests/remote-editor-browser.mjs playwright \"$CHROMIUM_PATH\" && node tests/remote-connection-browser.mjs playwright \"$CHROMIUM_PATH\" && node tests/remote-capture-browser.mjs playwright \"$CHROMIUM_PATH\"",
     "vendor:icons": "node scripts/vendor-icons.mjs"
   },
   "devDependencies": {
