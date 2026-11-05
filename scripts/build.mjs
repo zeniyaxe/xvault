@@ -29,6 +29,7 @@ const EXCLUDE = new Set([
   '.gitignore',
   'XVAULT_ROADMAP.md',
   '.editorconfig',
+  '.local',
 ]);
 const SKIP = [/\.log$/, /__pycache__/, /^FFmpeg_Helper\/config\.json$/, /^FFmpeg_Helper\/\.xvault/, /\.zip$/];
 
