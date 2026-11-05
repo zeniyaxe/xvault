@@ -752,3 +752,130 @@
   width: 96px;
   accent-color: var(--accent, currentColor);
 }
+
+/* ───────── XVault 23: Disk & helper ───────── */
+.xf-disk {
+  display: grid;
+  gap: 12px;
+  transition: opacity var(--t-fast) linear;
+}
+.xf-disk.is-busy {
+  opacity: 0.6;
+}
+.xf-disk-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.xf-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.xf-caps li {
+  padding: 1px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.8em;
+}
+.xf-pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.xf-pair > span {
+  color: var(--muted);
+}
+.xf-pair code {
+  padding: 3px 8px;
+  border-radius: var(--r-s);
+  background: var(--sunk);
+  font-size: 0.92em;
+  user-select: all;
+}
+.xf-disk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px 28px;
+}
+.xf-disk-total {
+  margin: 0 0 8px;
+}
+.xf-disk-total b {
+  font-size: 1.25em;
+  font-variant-numeric: tabular-nums;
+}
+.xf-bars {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+.xf-bars li {
+  display: grid;
+  grid-template-columns: 7.5em 1fr auto 3.5em;
+  align-items: center;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.xf-bars li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.xf-bars li small {
+  color: var(--muted);
+  text-align: right;
+}
+.xf-bars i {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--sunk);
+}
+.xf-bars i::before,
+.xf-bars i em {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  transform-origin: left center;
+  animation: xf-bar-grow 620ms var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 50ms);
+}
+.xf-bars i::before {
+  content: '';
+  width: var(--w);
+  background: var(--accent);
+  opacity: 0.85;
+}
+/* Measured folders: the faint bar is every name, the solid one what is physically on disk. */
+.xf-disk-measured .xf-bars i::before {
+  opacity: 0.3;
+}
+.xf-bars i em {
+  width: var(--p, 0);
+  background: var(--accent);
+}
+@keyframes xf-bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+html.xv-calm .xf-bars i::before,
+html.xv-calm .xf-bars i em {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .xf-bars i::before,
+  .xf-bars i em {
+    animation: none;
+  }
+}

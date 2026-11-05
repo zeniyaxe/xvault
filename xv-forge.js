@@ -325,6 +325,7 @@ ${reasons.length ? `<p class="xf-reasons">Most often missing: ${reasons.map(([re
     root.innerHTML = `<h2 class="xv-sr-only">Download files and health</h2>
 <div class="xf-grid">
 <section class="panel xf-wide" aria-labelledby="xfHoldTitle"><div class="panelhead"><div><h3 id="xfHoldTitle">Queue policy</h3><p>Video quality, the download window, Data Saver and the bandwidth cap are in Settings › Downloads.</p></div><button type="button" data-ff="refresh">Refresh</button></div><div id="xfHold" aria-live="polite"></div></section>
+<section class="panel xf-wide" aria-labelledby="xfDiskTitle"><div class="panelhead"><div><h3 id="xfDiskTitle">Disk &amp; helper</h3><p>What your media files take on disk, and whether the local helper can rename, link and measure them for this browser.</p></div></div><div id="xfDisk" class="xf-disk" aria-live="polite"></div></section>
 <section class="panel xf-wide" aria-labelledby="xfHostsTitle"><div class="panelhead"><div><h3 id="xfHostsTitle">Host health</h3><p>Success rate, speed and the most common failure for each server XVault downloads from.</p></div></div><div id="xfHosts"></div></section>
 <section class="panel" aria-labelledby="xfDupTitle"><div class="panelhead"><div><h3 id="xfDupTitle">Duplicate files</h3><p>Completed downloads with identical bytes (or the same media at the same size). XVault keeps one copy and can delete the rest from disk.</p></div></div><div id="xfDup"></div></section>
 <section class="panel" aria-labelledby="xfVerifyTitle"><div class="panelhead"><div><h3 id="xfVerifyTitle">Re-check files</h3><p>Confirms each completed file is still on disk and still the right type. Schedule it in Settings › Downloads.</p></div></div><div id="xfVerify"></div></section>
@@ -360,8 +361,13 @@ ${reasons.length ? `<p class="xf-reasons">Most often missing: ${reasons.map(([re
       ask({ type: 'INTEGRITY_REVERIFY_STATUS' }),
     ]);
     // File operations the local helper can do (22.0+); without it the script / trash paths remain.
-    const helper = await ask({ type: 'HELPER_STATUS' }).catch(() => null);
+    const [helper, media] = await Promise.all([
+      ask({ type: 'HELPER_STATUS' }).catch(() => null),
+      ask({ type: 'MEDIA_STORAGE' }).catch(() => null),
+    ]);
     filesState.helper = helper?.connected ? helper.capabilities || [] : [];
+    filesState.helperStatus = helper;
+    paintDisk(helper, media);
     const hold = health?.hold || null,
       band = health?.bandwidth || {};
     const policy = [
@@ -404,6 +410,66 @@ ${reasons.length ? `<p class="xf-reasons">Most often missing: ${reasons.map(([re
       `<p>${last ? `Last run ${html(when(last.at))}: ${n(last.checked)} files checked, ${n(last.problems)} problems${last.requeued ? `, ${n(last.requeued)} re-queued` : ''}.` : 'Never run.'} ${Number(settings.integrityScheduleDays) > 0 ? `Runs every ${n(settings.integrityScheduleDays)} days.` : 'Not scheduled.'}</p><div class="row"><button type="button" data-ff="reverify">Re-check all files now</button><button type="button" class="quiet" data-ff="settings">Schedule…</button></div>`;
   }
 
+  // ── XVault 23: disk usage (hard links counted once) and helper pairing for this browser ──
+  function paintDisk(helper, media) {
+    const box = $('#xfDisk');
+    if (!box) return;
+    const state = helper?.connected ? 'connected' : helper?.running ? 'unpaired' : 'off';
+    const pill = {
+      connected: `<span class="xf-status is-good">Helper ${html(helper?.version || '')} connected</span>`,
+      unpaired: '<span class="xf-status is-fair">Helper running — not paired with this browser</span>',
+      off: '<span class="xf-status">Helper not running</span>',
+    }[state];
+    const caps = helper?.connected
+      ? `<ul class="xf-caps" aria-label="Helper capabilities">${(helper.capabilities || []).map(cap => `<li>${html(cap)}</li>`).join('')}</ul>`
+      : '';
+    const id = helper?.pairingId || '';
+    const snippet = helper?.browser === 'firefox' ? `"extension_ids": ["${id}"]` : `"extension_id": "${id}"`;
+    const pairing = id
+      ? `<div class="xf-pair"><span>Pairing ID for ${helper?.browser === 'firefox' ? 'this Firefox profile' : 'this browser'}</span><code id="xfPairId">${html(id)}</code><button type="button" class="quiet" data-ff="copy-pair" data-copy="${html(id)}">Copy</button></div>${
+          state === 'unpaired'
+            ? `<p class="xf-hold" role="status">The helper refused to pair. Add <code>${html(snippet)}</code> to <code>FFmpeg_Helper/config.json</code> (keep other IDs in the list to pair several browsers), then restart the helper.</p>`
+            : state === 'off'
+              ? '<p class="xf-muted">Start <code>FFmpeg_Helper/run_helper.bat</code> (or <code>python3 xvault_ffmpeg_helper.py</code>) to rename, link and measure files from here.</p>'
+              : ''
+        }`
+      : '';
+    const kinds = media?.kinds || [],
+      most = Math.max(1, ...kinds.map(kind => kind.bytes));
+    const records = media?.ok
+      ? `<div class="xf-disk-records"><p class="xf-disk-total"><b>${bytes(media.physicalBytes)}</b> in ${n(media.files)} files${media.linkedFiles ? ` <span class="xf-muted">· ${n(media.linkedFiles)} hard-linked copies share ${bytes(media.linkedBytes)} with the files they point to</span>` : ''}</p><ul class="xf-bars">${kinds
+          .map(
+            (kind, index) =>
+              `<li style="--w:${((kind.bytes / most) * 100).toFixed(1)}%;--i:${index}"><span>${html(kind.kind)}</span><i aria-hidden="true"></i><b>${bytes(kind.bytes)}</b><small>${n(kind.files)}</small></li>`
+          )
+          .join('')}</ul><p class="xf-muted">From XVault's download records.</p></div>`
+      : '';
+    const usage = media?.helper;
+    const measured = usage?.ok
+      ? `<div class="xf-disk-measured"><p class="xf-disk-total"><b>${bytes(usage.physicalBytes)}</b> on disk <span class="xf-muted">· ${bytes(usage.bytes)} if every name were a separate file${usage.savedBytes ? ` · <b>${bytes(usage.savedBytes)}</b> saved by ${n(usage.linkedFiles)} linked files` : ''}</span></p><ul class="xf-bars">${(
+          usage.folders || []
+        )
+          .slice(0, 8)
+          .map((folder, index) => {
+            const max = Math.max(1, ...(usage.folders || []).map(item => item.bytes));
+            return `<li style="--w:${((folder.bytes / max) * 100).toFixed(1)}%;--p:${((folder.physicalBytes / max) * 100).toFixed(1)}%;--i:${index}"><span>${html(folder.name)}</span><i aria-hidden="true"><em></em></i><b>${bytes(folder.physicalBytes)}</b><small>${n(folder.files)}</small></li>`;
+          })
+          .join(
+            ''
+          )}</ul><p class="xf-muted">Measured by the helper ${html(when(usage.measuredAt))}${usage.truncated ? ' · stopped early on a very large folder' : ''} · ${n(usage.files)} files, ${n(usage.uniqueFiles)} physical.</p></div>`
+      : usage && usage.ok === false
+        ? `<p class="xv-import-error" role="alert">${html(usage.error || 'The helper could not measure the folder')}</p>`
+        : '';
+    const canMeasure = (helper?.capabilities || []).includes('usage');
+    box.innerHTML = `<div class="xf-disk-head">${pill}${caps}</div>${pairing}<div class="xf-disk-grid">${records}${measured}</div><div class="row">${
+      canMeasure
+        ? `<button type="button" data-ff="measure">${usage?.ok ? 'Measure again' : 'Measure on disk'}</button>`
+        : helper?.connected
+          ? '<p class="xf-muted">Update the helper to 23.0 to measure real disk usage (hard links counted once).</p>'
+          : ''
+    }</div>`;
+  }
+
   async function planRename(event) {
     event.preventDefault();
     const form = event.currentTarget,
@@ -441,6 +507,28 @@ ${filesState.helper.includes('rename') ? `<div class="xf-helper-rename"><p>The X
     if (!target || target.disabled) return;
     const act = target.dataset.ff;
     if (act === 'refresh') return paintFiles();
+    if (act === 'copy-pair') {
+      await navigator.clipboard?.writeText(target.dataset.copy || '').catch(() => {});
+      return window.toast?.('Pairing ID copied', { tone: 'success' });
+    }
+    if (act === 'measure') {
+      target.disabled = true;
+      target.textContent = 'Measuring…';
+      $('#xfDisk')?.classList.add('is-busy');
+      const media = await ask({ type: 'MEDIA_STORAGE', measure: true }).catch(error => ({
+        ok: false,
+        error: String(error),
+      }));
+      $('#xfDisk')?.classList.remove('is-busy');
+      paintDisk(filesState.helperStatus, media);
+      const usage = media?.helper;
+      return window.toast?.(
+        usage?.ok
+          ? `${bytes(usage.physicalBytes)} on disk${usage.savedBytes ? ` · ${bytes(usage.savedBytes)} saved by links` : ''}`
+          : usage?.error || 'Could not measure',
+        { tone: usage?.ok ? 'success' : 'error' }
+      );
+    }
     if (act === 'settings') {
       page('settings');
       return setTimeout(() => document.getElementById('g-dlpolicy')?.scrollIntoView({ block: 'start' }), 80);

@@ -178,7 +178,14 @@ try {
   assert.equal(afterLink.filter(row => row.linkedAt).length, 1, 'the linked row is marked');
   const reportAfter = await send({ type: 'DUPLICATE_REPORT' });
   assert.equal(reportAfter.groups[0]?.remove.length || 0, 1, 'only the differing file is still reported');
-  console.log(`helper files: linked ${linked.linked} identical copy, left the differing file alone`);
+  // XVault 23: records count the linked copy separately, and the helper measures it once on disk.
+  const media = await send({ type: 'MEDIA_STORAGE', measure: true });
+  assert.equal(media.ok, true, JSON.stringify(media));
+  assert.equal(media.linkedFiles, 1);
+  assert.equal(media.physicalBytes, media.bytes - bodies['/same-1.jpg'].length);
+  assert.equal(media.helper?.ok, true, JSON.stringify(media.helper));
+  assert.equal(media.helper.savedBytes, bodies['/same-1.jpg'].length, 'the hard link is counted once on disk');
+  console.log(`helper files: linked ${linked.linked} identical copy, left the differing file alone; disk usage counts it once`);
 
   // Rename: one destination is occupied by a stranger's file; it must survive and its move must not be recorded.
   const plan = await send({ type: 'RENAME_PLAN', fileTemplate: 'renamed_{tweetId}', folderTemplate: '{author}' });
