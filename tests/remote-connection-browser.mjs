@@ -1,11 +1,13 @@
 // Isolated desktop Remote setup states; never registers or starts a native host.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url),
   { chromium } = require(process.argv[2] || 'playwright');
 const html = await fs.readFile('dashboard.html', 'utf8');
+const temp = process.env.TEMP || os.tmpdir(); // TEMP is Windows-only; CI runs on Linux
 const start = html.indexOf('<section class="remote-panel'),
   end = html.indexOf('</section>', start) + 10;
 const browser = await chromium.launch({
@@ -68,12 +70,12 @@ try {
   await page.locator('#remotePairStage').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#remotePairCode').textContent(), '123456');
   assert.equal(await page.evaluate(() => window.__starts), 1);
-  await page.screenshot({ path: path.join(process.env.TEMP, 'xvault-remote-connection-ready.png') });
+  await page.screenshot({ path: path.join(temp, 'xvault-remote-connection-ready.png') });
   await page.setViewportSize({ width: 390, height: 1100 });
   await page.evaluate(() => {
     document.querySelector('#remoteSetupHint').hidden = false;
   });
-  await page.screenshot({ path: path.join(process.env.TEMP, 'xvault-remote-connection-narrow.png') });
+  await page.screenshot({ path: path.join(temp, 'xvault-remote-connection-narrow.png') });
   assert.equal(
     await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
     true,
