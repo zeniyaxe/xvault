@@ -169,11 +169,17 @@
     head.id = 'l4Head';
     head.className = 'l4-head';
     head.innerHTML = `<div class="l4-title"><span class="l4-glyph" aria-hidden="true"></span><div><h2 id="l4Title">All posts</h2><div class="l4-sub"></div></div></div><div class="l4-head-controls"></div>`;
-    main.prepend(head);
-    const status = $('#page-library .libraryStatusBar');
-    if (status) head.querySelector('.l4-sub').append(status);
-    const controls = $('#page-library .lib-controls');
-    if (controls) head.querySelector('.l4-head-controls').append(controls);
+    // XVault 25: the Library header (dashboard.html #libraryHead) already lays out the controls and the status
+    // line; the title only fills its slot. Older markup without the slot keeps the v24 arrangement.
+    const slot = $('#libraryTitleSlot');
+    if (slot) slot.append(head);
+    else {
+      main.prepend(head);
+      const status = $('#page-library .libraryStatusBar');
+      if (status) head.querySelector('.l4-sub').append(status);
+      const controls = $('#page-library .lib-controls');
+      if (controls) head.querySelector('.l4-head-controls').append(controls);
+    }
 
     // filter builder sits beside the search field
     builder = document.createElement('details');
@@ -195,8 +201,10 @@
     chipsRow.setAttribute('role', 'list');
     chipsRow.setAttribute('aria-label', 'Active filters');
     chipsRow.hidden = true;
-    const filters = $('#page-library .lib-filters');
-    (filters || command).before(chipsRow);
+    const filters = $('#page-library .lib-filters'),
+      activeSlot = $('#libraryActiveSlot');
+    if (activeSlot) activeSlot.append(chipsRow);
+    else (filters || command).before(chipsRow);
     chipsRow.addEventListener('click', event => {
       const remove = event.target.closest('[data-remove-token]');
       if (remove) {
@@ -230,9 +238,9 @@
     const title = $('#l4Title');
     if (title && title.textContent !== info.title) {
       title.textContent = info.title;
+      // Restart the swap animation a frame later rather than forcing a layout mid-query (rapid typing).
       title.classList.remove('l4-swap');
-      void title.offsetWidth;
-      title.classList.add('l4-swap');
+      requestAnimationFrame(() => title.classList.add('l4-swap'));
     }
     const glyph = head.querySelector('.l4-glyph');
     if (glyph && glyph.dataset.symbol !== info.symbol) {
@@ -497,6 +505,8 @@
     afterRender();
   }
   window.XVaultDashboard?.after('renderLib', afterRender);
+  // Library 5.0 mounts cards in blocks as the reader scrolls; quotes in each new block resolve as it arrives.
+  document.addEventListener('xv:library-mounted', () => void hydrateQuotes());
   window.XVaultLibrary4 = Object.freeze({ describeToken, describeQuery, hydrateQuotes });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
   else mount();

@@ -395,8 +395,8 @@
     handle.setAttribute('role', 'separator');
     handle.setAttribute('aria-orientation', 'vertical');
     handle.setAttribute('aria-label', 'Inspector width. Arrow keys resize; double-click resets.');
-    handle.setAttribute('aria-valuemin', '320');
-    handle.setAttribute('aria-valuemax', '600');
+    handle.setAttribute('aria-valuemin', '300');
+    handle.setAttribute('aria-valuemax', '880');
     drawer.prepend(handle);
     const setWidth = width => {
       document.body.style.setProperty('--insp-w', `${width}px`);
@@ -412,6 +412,12 @@
     let gesture = null,
       frame = 0,
       nextWidth = 380;
+    // XVault 25: up to 880px, but the results keep at least 420px beside the sidebar.
+    const maxWidth = () => {
+      const side = document.querySelector('#libraryDestinations')?.getBoundingClientRect().width || 0,
+        rail = document.querySelector('.rail')?.getBoundingClientRect().width || 0;
+      return Math.max(300, Math.min(880, Math.round(innerWidth - side - rail - 420)));
+    };
     const stop = (commit = true) => {
       if (!gesture) return;
       cancelAnimationFrame(frame);
@@ -434,7 +440,7 @@
     });
     handle.addEventListener('pointermove', event => {
       if (!gesture) return;
-      nextWidth = Math.max(320, Math.min(600, gesture.width + gesture.x - event.clientX));
+      nextWidth = Math.max(300, Math.min(maxWidth(), gesture.width + gesture.x - event.clientX));
       if (!frame)
         frame = requestAnimationFrame(() => {
           frame = 0;
@@ -454,13 +460,13 @@
       event.preventDefault();
       const width =
         event.key === 'Home'
-          ? 320
+          ? 300
           : event.key === 'End'
-            ? 600
+            ? maxWidth()
             : Math.max(
-                320,
+                300,
                 Math.min(
-                  600,
+                  maxWidth(),
                   Math.round(drawer.getBoundingClientRect().width) +
                     (event.key === 'ArrowLeft' ? 1 : -1) * (event.shiftKey ? 40 : 10)
                 )
