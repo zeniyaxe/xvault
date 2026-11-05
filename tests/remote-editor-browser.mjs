@@ -149,6 +149,7 @@ try {
           'index.html',
           'remote.css',
           'remote.js',
+          'remote-capture.js',
           'app-icon.svg',
           'manifest.webmanifest',
           'remote-font.woff2',

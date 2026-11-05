@@ -246,6 +246,8 @@ import { createArchiveQualityService } from './sw/archive-quality-service.mjs';
 import { createLinkSnapshots } from './sw/link-snapshots.mjs';
 import { createWatchLists } from './sw/watch-lists.mjs';
 import { createSearchInsights } from './sw/search-insights.mjs';
+import { createCaptureInbox } from './sw/capture-inbox.mjs';
+import { avatarCandidates, createAvatarArchive, openAvatarStore } from './sw/avatar-archive.mjs';
 import {
   applyVideoQuality,
   holdReason,
@@ -288,6 +290,17 @@ const defaults = {
   accentCustom: '',
   inboxSince: 0,
   libraryTileSize: 260,
+  // XVault 25 Library 5.0 view options (dashboard View menu) and frame state.
+  libraryCardStyle: 'comfortable',
+  libraryMediaFit: 'cover',
+  libraryFeedWidth: 'wide',
+  archiveAvatars: true,
+  // XVault 25: media hosts whose queued files wait (new starts only; transfers already running finish).
+  pausedDownloadHosts: [],
+  librarySidebar: 'open',
+  librarySideCollapsed: [],
+  libraryAutoLoad: true,
+  libraryBlurSensitive: true,
   navMode: 'wide',
   theme: 'graphite',
   accentStyle: 'mono',
@@ -583,6 +596,22 @@ let pumping = false,
 const retryTimers = new Map(),
   runFinalizeTimers = new Map(),
   downloadEventTails = new Map();
+// XVault 25 per-host pause: rows whose media host is paused stay queued in IndexedDB but are not taken by the pump.
+// The buffer fill skips them; once a full pass over the queued rows finds nothing runnable the pump parks until a
+// host resumes or new work arrives (no busy re-scan of a large queue).
+const DOWNLOAD_HOST = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+let pausedHostSet = new Set(),
+  hostSkipsSinceAdd = 0,
+  hostScanWraps = 0,
+  hostHeldSeen = 0;
+function downloadHostOf(row) {
+  try {
+    return new URL(String(row?.item?.url || '')).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+const hostPaused = row => pausedHostSet.size > 0 && pausedHostSet.has(downloadHostOf(row));
 function queueRow(row) {
   const key = String(row?.key || '');
   if (!key || active.has(key) || queuedKeys.has(key)) return false;
@@ -632,8 +661,16 @@ async function fillQueueBuffer() {
     }
     if (epoch !== queueEpoch) return { more: false, recordsRead };
     recordsRead += page.recordsRead;
-    for (const row of page.rows) queueRow(row);
+    for (const row of page.rows) {
+      if (hostPaused(row)) {
+        hostSkipsSinceAdd++;
+        continue;
+      }
+      queueRow(row);
+    }
     if (queue.length > before) {
+      hostSkipsSinceAdd = 0;
+      hostScanWraps = 0;
       queueFillKey = page.hasMore ? page.nextKey : null;
       more = page.hasMore;
       break;
@@ -646,8 +683,14 @@ async function fillQueueBuffer() {
     more = false;
     if (after != null) {
       queueFillKey = null;
+      // Two wraps without a runnable row = one complete pass over the queue: every remaining row is on a paused host.
+      if (hostSkipsSinceAdd > 0 && ++hostScanWraps >= 2) {
+        hostHeldSeen = hostSkipsSinceAdd;
+        return { more: false, recordsRead, hostParked: true };
+      }
       continue;
     }
+    if (hostSkipsSinceAdd > 0) hostHeldSeen = hostSkipsSinceAdd;
     break;
   }
   return { more, recordsRead };
@@ -1126,7 +1169,25 @@ function normalizeSettings(raw = {}) {
   }
   out.workspaces = globalThis.XVaultWorkspaces.normalizeList(out.workspaces);
   out.toolbarActions = globalThis.XVaultWorkspaces.toolbar(out.toolbarActions);
-  out.inspectorPixels = Number(out.inspectorPixels) > 0 ? Math.min(600, Math.max(320, Number(out.inspectorPixels))) : 0;
+  out.inspectorPixels = Number(out.inspectorPixels) > 0 ? Math.min(880, Math.max(300, Number(out.inspectorPixels))) : 0;
+  if (!['compact', 'comfortable', 'media', 'detailed'].includes(out.libraryCardStyle))
+    out.libraryCardStyle = 'comfortable';
+  if (!['cover', 'contain'].includes(out.libraryMediaFit)) out.libraryMediaFit = 'cover';
+  if (!['reading', 'wide', 'full'].includes(out.libraryFeedWidth)) out.libraryFeedWidth = 'wide';
+  out.archiveAvatars = out.archiveAvatars !== false;
+  out.pausedDownloadHosts = Array.isArray(out.pausedDownloadHosts)
+    ? [
+        ...new Set(
+          out.pausedDownloadHosts.map(host => String(host || '').toLowerCase()).filter(host => DOWNLOAD_HOST.test(host))
+        ),
+      ].slice(0, 16)
+    : [];
+  if (!['open', 'closed'].includes(out.librarySidebar)) out.librarySidebar = 'open';
+  out.librarySideCollapsed = Array.isArray(out.librarySideCollapsed)
+    ? [...new Set(out.librarySideCollapsed.map(String).filter(key => key.length <= 80))].slice(0, 24)
+    : [];
+  out.libraryAutoLoad = out.libraryAutoLoad !== false;
+  out.libraryBlurSensitive = out.libraryBlurSensitive !== false;
   if (!['off', 'reduced', 'subtle', 'normal', 'rich', 'extreme'].includes(out.motionLevel)) out.motionLevel = 'normal';
   if (!(Number(out.inboxSince) > 0)) out.inboxSince = Date.now();
   out.libraryTileSize = Math.min(440, Math.max(150, Number(out.libraryTileSize) || 260));
@@ -2870,6 +2931,16 @@ async function remoteDownloadsStatus() {
       speedBps: row.speedBps,
       postId: validRemoteId(row.tweetId) ? row.tweetId : null,
       kind: String(row.kind || '').slice(0, 24),
+      downloadId: Number(row.downloadId) || 0,
+    })),
+    pausedHosts: (stats.pausedHosts || []).filter(host => REMOTE_MEDIA_HOSTS.has(host)),
+    // XVault 25: the next rows the pump will take (in-memory buffer order), so a phone can move a post forward.
+    upNext: queue.slice(0, 6).map(row => ({
+      name: name(row.target?.filename || String(row.item?.url || '').split('?')[0] || 'media'),
+      postId: validRemoteId(String(row.item?.tweetId || row.tweetId || ''))
+        ? String(row.item?.tweetId || row.tweetId)
+        : null,
+      kind: String(row.item?.mediaType || row.target?.kind || '').slice(0, 24),
     })),
     recent: history.slice(0, 24).map(row => ({
       name: name(row.target?.filename || String(row.item?.url || '').split('?')[0] || 'media'),
@@ -2888,7 +2959,53 @@ async function remoteDownloadsControl(payload = {}) {
   if (action === 'pause') return pauseAllDownloads();
   if (action === 'resume') return resumeAllDownloads();
   if (action === 'retry') return retryFailed();
+  if (action === 'prioritize') {
+    const postId = String(payload.postId || '');
+    if (!validRemoteId(postId)) throw Error('Post identity is invalid');
+    return prioritizePostDownloads(postId);
+  }
+  // XVault 25: one transfer at a time from the phone — only a download XVault itself is running right now.
+  if (['pause-item', 'resume-item', 'cancel-item'].includes(action)) {
+    const downloadId = Number(payload.downloadId);
+    const row = [...active.values()].find(entry => Number(entry.downloadId) === downloadId);
+    if (!Number.isInteger(downloadId) || downloadId <= 0 || !row) throw Error('That transfer is no longer running');
+    if (action === 'pause-item') {
+      await chrome.downloads.pause(downloadId);
+      await setDownloadStateById(downloadId, 'paused');
+    } else if (action === 'resume-item') {
+      await chrome.downloads.resume(downloadId);
+      await setDownloadStateById(downloadId, 'downloading');
+    } else await chrome.downloads.cancel(downloadId);
+    return { ok: true, count: 1 };
+  }
+  if (action === 'pause-host' || action === 'resume-host') {
+    const host = String(payload.host || '');
+    if (!REMOTE_MEDIA_HOSTS.has(host)) throw Error('That host cannot be paused from the phone');
+    const result = await setDownloadHostPaused(host, action === 'pause-host');
+    return { ok: result.ok, count: result.pausedHosts?.length || 0 };
+  }
   throw Error('This download action is not available');
+}
+const REMOTE_MEDIA_HOSTS = new Set(['pbs.twimg.com', 'video.twimg.com']);
+// XVault 25: "Download next" — a post's queued files jump to the front of the in-memory pump buffer. Rows keep
+// their stored state; the buffer is rebuilt from IndexedDB on restart, so this is a best-effort reorder.
+async function prioritizePostDownloads(postId) {
+  const database = await db();
+  let rows = [];
+  try {
+    rows = await readDownloadRows(database, [postId], { perPostLimit: 64, totalLimit: 64 });
+  } finally {
+    database.close();
+  }
+  const waiting = (rows || []).filter(row => row?.key && row.state === 'queued' && !active.has(String(row.key)));
+  if (!waiting.length) return { ok: true, count: 0 };
+  const keys = new Set(waiting.map(row => String(row.key)));
+  for (let index = queue.length - 1; index >= 0; index--)
+    if (keys.has(String(queue[index]?.key))) queue.splice(index, 1);
+  queue.unshift(...waiting);
+  for (const key of keys) queuedKeys.add(key);
+  scheduleQueuePump();
+  return { ok: true, count: waiting.length };
 }
 // Overview: totals, the busiest authors and twelve months of archiving, counted from the posts store in one pass.
 async function remoteOverview() {
@@ -3082,6 +3199,21 @@ async function handleRemoteBridgeRequest(message) {
     };
   }
   if (method === 'library.media.page') return remoteMediaPage(payload);
+  if (method === 'capture.enqueue')
+    return captureInbox.add(String(payload.url || '').slice(0, 2048), {
+      source: payload.via === 'share' ? 'share' : 'remote',
+      device: String(payload.deviceName || '').slice(0, 48),
+      deviceId: String(payload.deviceId || '').slice(0, 64),
+    });
+  if (method === 'capture.list') return captureInbox.list({ limit: 60 });
+  if (method === 'avatar.read') return avatarArchive.readEncoded(String(payload.handle || '').slice(0, 16));
+  if (method === 'capture.control') {
+    const actionName = String(payload.action || '');
+    if (!['retry', 'remove', 'clear', 'retry-all'].includes(actionName)) throw Error('Capture action is invalid');
+    const id = String(payload.id || '');
+    if (id && !validRemoteId(id)) throw Error('Post identity is invalid');
+    return captureInbox.control(actionName, id);
+  }
   if (method === 'downloads.status') return remoteDownloadsStatus();
   if (method === 'downloads.control') return remoteDownloadsControl(payload);
   if (method === 'library.overview') return remoteOverview();
@@ -3658,6 +3790,47 @@ const visitor = createStatusVisitor({
     }),
 });
 visitor.recover().catch(() => {});
+// XVault 25: the capture inbox — post links from a paired phone, the Capture page or the Remote share target.
+const captureInboxChannel = new BroadcastChannel('xvault-capture-inbox');
+const captureInbox = createCaptureInbox({
+  activeXTab,
+  readPost: readOnePost,
+  getSettings,
+  onChange: () => captureInboxChannel.postMessage({ at: Date.now() }),
+  log: (item, outcome) =>
+    outcome === 'archived'
+      ? action(
+          'capture',
+          item.source === 'remote' || item.source === 'share'
+            ? 'Post archived from the phone inbox'
+            : 'Post archived from the inbox',
+          {
+            tweetId: item.id,
+          }
+        )
+      : null,
+});
+router.mount(captureInbox, { denied: 'The capture inbox is managed from XVault pages' });
+// XVault 25: author avatars archived locally (own small database) for the Library, Reader and the phone.
+const avatarChannel = new BroadcastChannel('xvault-avatars');
+const avatarArchive = createAvatarArchive({
+  store: openAvatarStore(),
+  enabled: async () => (await getSettings()).archiveAvatars !== false,
+  lookup: async handle => {
+    const rows = await store('tweets', 'readonly', os => req(os.index('handle').getAll(String(handle), 3))).catch(
+      () => []
+    );
+    return (rows || []).map(row => row?.author?.avatar).find(Boolean) || '';
+  },
+  onChange: handle => avatarChannel.postMessage({ handle, at: Date.now() }),
+});
+router.mount(avatarArchive, { denied: 'Avatars are managed from XVault pages' });
+captureInbox.recover().catch(() => {});
+// Items waiting for x.com start as soon as an X page finishes loading.
+chrome.tabs.onUpdated?.addListener((tabId, change, tab) => {
+  if (change.status !== 'complete' || !/^https:\/\/(x|twitter|mobile\.twitter)\.com\//.test(tab?.url || '')) return;
+  if (captureInbox.hasPending() !== false) void captureInbox.run();
+});
 const archiveQuality = createArchiveQualityService({
   forEachPost: visit => scanLibraryRows(row => void visit(row)),
   archivedIds: () => withLibraryDatabase(database => archivedIdSet(database)),
@@ -4557,6 +4730,8 @@ route('STORE_RECORDS', async m => {
     users = m.users || [];
   await putMany('users', users);
   await storeProfileSnapshots(users, m.context || {});
+  if (incoming.length) void captureInbox.noticeStored(incoming.map(t => t?.id).filter(Boolean)).catch(() => {});
+  if (incoming.length) void avatarArchive.remember(avatarCandidates(incoming)).catch(() => {});
   for (const id of [...new Set(incoming.map(t => t?.observedRunId).filter(Boolean))]) {
     const run = await store('archiveRuns', 'readonly', os => req(os.get(id))).catch(() => null);
     if (run?.diff || run?.state === 'settling')
@@ -4891,6 +5066,60 @@ route('LIBRARY_TIMELINE', async m => {
     database.close();
   }
 });
+// Library 5.0 "Select all matching": the IDs of every post that matches a search, without materializing rows in the
+// dashboard. Same matcher as the timeline; bounded by the 5,000-post selection limit. Download-state filters need
+// the download join, so the dashboard pages through QUERY_LIBRARY_PAGE for those instead.
+route('QUERY_LIBRARY_IDS', async m => {
+  const query = String(m.query || '').slice(0, 1000),
+    limit = Math.min(5000, Math.max(1, Math.floor(Number(m.limit) || 5000)));
+  const Search = globalThis.XVaultLibrarySearch;
+  if (Search.queryIssues(query).length) return { ok: false, error: 'Fix the search before selecting every match' };
+  const compiled = Search.compileQuery(query);
+  if (Search.usesRuleKind(compiled, ['downloaded', 'missing', 'size'])) return { ok: true, unsupported: true, ids: [] };
+  const settings = await getSettings(),
+    database = await db();
+  try {
+    const ocrText = query ? await ocrTextFor(compiled) : null,
+      semanticScores = query ? await semanticFor(compiled) : null,
+      boardNames = boardNamesOf(settings),
+      joins = query ? await queryJoinsFor(database, compiled) : {};
+    const ids = [];
+    let after = null,
+      scanned = 0,
+      truncated = false;
+    for (;;) {
+      const range = after == null ? null : IDBKeyRange.lowerBound(after, true);
+      const batch = await new Promise((resolve, reject) => {
+        const request = database.transaction('tweets', 'readonly').objectStore('tweets').getAll(range, 1000);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      for (const post of batch) {
+        scanned++;
+        if (query) {
+          const projection = Search.projectPost(post, 0, {
+            inboxSince: settings.inboxSince,
+            ocrText: ocrText?.map?.get(String(post.id)),
+            semanticScores: semanticScoresFor(semanticScores, String(post.id)),
+            boardNames,
+            ...joins,
+          });
+          if (!Search.matchesCompiledQuery(projection, compiled)) continue;
+        }
+        if (ids.length >= limit) {
+          truncated = true;
+          break;
+        }
+        ids.push(String(post.id));
+      }
+      if (truncated || batch.length < 1000) break;
+      after = batch.at(-1).id;
+    }
+    return { ok: true, ids, truncated, scanned };
+  } finally {
+    database.close();
+  }
+});
 route('GET_LIBRARY_QUERY_PROGRESS', async m => {
   const queryId = String(m.queryId || '');
   return { ok: true, progress: activeLibraryQueryProgress.get(queryId) || null };
@@ -4972,8 +5201,10 @@ route('GET_DOWNLOADS_FOR_TWEETS', async m => {
   }
 });
 route('RETRY_FAILED', async m => {
-  return await retryFailed();
+  const host = String(m.host || '').toLowerCase();
+  return await retryFailed(DOWNLOAD_HOST.test(host) ? { host } : {});
 });
+route('SET_DOWNLOAD_HOST_PAUSED', async m => setDownloadHostPaused(m.host, m.paused !== false));
 route('REBUILD_QUEUED_TARGETS', async m => {
   return await rebuildTargets();
 });
@@ -6394,7 +6625,8 @@ async function queueStats() {
     complete = ready ? counts.complete : null,
     failed = ready ? counts.failed : null;
   const remaining = Math.max(0, totalBytes - bytesReceived),
-    etaSeconds = speedBps > 1 ? remaining / speedBps : null;
+    etaSeconds = speedBps > 1 ? remaining / speedBps : null,
+    pausedHosts = [...((await getSettings()).pausedDownloadHosts || [])];
   return {
     countsReady: ready,
     queued,
@@ -6413,6 +6645,8 @@ async function queueStats() {
     // byte counts Chrome reports — nothing is estimated; totalBytes is 0 when the server sent no length.
     hold: manualHold() || queueHold,
     pausedByUser: !!manualQueuePause,
+    pausedHosts: pausedHosts,
+    hostHeld: pausedHosts.length ? hostHeldSeen : 0,
     activeRows: [...active.values()].slice(0, 12).map(row => ({
       key: row.key,
       downloadId: Number(row.downloadId) || 0,
@@ -6427,6 +6661,7 @@ async function queueStats() {
       tweetId: row.item?.tweetId ? String(row.item.tweetId) : '',
       kind: String(row.target?.kind || row.item?.mediaType || ''),
       startedAt: Number(row.startedAt) || 0,
+      host: downloadHostOf(row),
     })),
     completedBytes: null,
     speedBps,
@@ -6459,6 +6694,7 @@ async function pump() {
     s = await getSettings();
     await manualQueuePauseReady;
     const max = downloadGovernor.limit(s.maxConcurrentDownloads || 4, s.adaptiveDownloads !== false);
+    pausedHostSet = new Set(s.pausedDownloadHosts || []);
     // XVault 21: schedule window / Data Saver hold new starts (active downloads continue).
     const held = queueHeld(s);
     while (!held && active.size < max) {
@@ -6472,6 +6708,8 @@ async function pump() {
       }
       const r = takeQueuedRow();
       if (!r || active.has(r.key)) continue;
+      // A row buffered before its host was paused stays queued in IndexedDB; it is read again after a resume.
+      if (hostPaused(r)) continue;
       startOne(r, s).catch(error => {
         console.error('XVault download start failed', error);
         void action('error', 'A queued download could not start', { key: r.key, reason: String(error) }).catch(
@@ -6773,7 +7011,36 @@ async function downloadStatePage(state, afterKey = null, limit = 32) {
     database.close();
   }
 }
-async function retryFailed() {
+async function setDownloadHostPaused(value, paused) {
+  const host = String(value || '').toLowerCase();
+  if (!DOWNLOAD_HOST.test(host)) return { ok: false, error: 'That is not a host name' };
+  const s = await getSettings(),
+    hosts = new Set(s.pausedDownloadHosts || []);
+  if (paused) hosts.add(host);
+  else hosts.delete(host);
+  if (hosts.size > 16) return { ok: false, error: 'At most 16 hosts can be paused' };
+  await writeSettingsPatch({ pausedDownloadHosts: [...hosts] });
+  pausedHostSet = hosts;
+  if (paused) {
+    // Drop that host's rows from the in-memory buffer; they stay queued and are read again on resume.
+    for (let index = queue.length - 1; index >= 0; index--)
+      if (downloadHostOf(queue[index]) === host) {
+        queuedKeys.delete(String(queue[index].key));
+        queue.splice(index, 1);
+      }
+  } else {
+    queueFillKey = null;
+    hostSkipsSinceAdd = 0;
+    hostScanWraps = 0;
+    hostHeldSeen = 0;
+  }
+  scheduleQueuePump();
+  void action('downloads', paused ? `Downloads from ${host} paused` : `Downloads from ${host} resumed`, { host }).catch(
+    () => {}
+  );
+  return { ok: true, pausedHosts: [...hosts] };
+}
+async function retryFailed({ host = '' } = {}) {
   const s = await getSettings();
   let afterKey = null,
     added = 0,
@@ -6791,6 +7058,7 @@ async function retryFailed() {
     const entries = [];
     for (const row of page.rows) {
       if (!row.item?.url) continue;
+      if (host && downloadHostOf(row) !== host) continue;
       const next = { ...row };
       transitionDownload(next, 'queued');
       next.error = null;

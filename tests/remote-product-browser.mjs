@@ -165,6 +165,7 @@ try {
           'index.html',
           'remote.js',
           'remote-drafts.js',
+          'remote-capture.js',
           'remote.css',
           'app-icon.svg',
           'manifest.webmanifest',

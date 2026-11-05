@@ -2,7 +2,7 @@
   "id": "/",
   "name": "XVault Remote",
   "short_name": "XVault",
-  "description": "Private same-Wi-Fi access to your local XVault Library.",
+  "description": "Private same-Wi-Fi access to your local XVault Library. Share X posts to XVault to archive them on your computer.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,8 +10,46 @@
   "background_color": "#0b0c0f",
   "theme_color": "#0b0c0f",
   "icons": [
-    { "src": "/app-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    {
+      "src": "/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "share_target": {
+    "action": "/share",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "shortcuts": [
+    {
+      "name": "Capture a post",
+      "short_name": "Capture",
+      "url": "/share",
+      "icons": [
+        {
+          "src": "/app-icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
   ]
 }

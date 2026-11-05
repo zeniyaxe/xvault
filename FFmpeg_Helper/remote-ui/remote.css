@@ -3166,3 +3166,601 @@ textarea:focus-visible {
     flex: 0 1 150px;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════════════════════════════════
+   Phone Remote 4.0 (XVault 25): Capture inbox, archived avatars
+   ════════════════════════════════════════════════════════════════════════════════════════════════ */
+.avatar {
+  position: relative;
+  overflow: hidden;
+}
+.avatar > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 160ms var(--ease);
+}
+.avatar.has-image > img {
+  opacity: 1;
+}
+.avatar.has-image {
+  background: var(--raised);
+  color: transparent;
+  text-shadow: none;
+}
+.primary-button,
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: var(--pill);
+  font-weight: 650;
+  font-size: 14.5px;
+  white-space: nowrap;
+  transition:
+    background 160ms var(--ease),
+    opacity 160ms var(--ease),
+    transform 120ms var(--ease);
+}
+.primary-button {
+  background: var(--accent);
+  color: var(--ink);
+}
+.primary-button:disabled {
+  opacity: 0.45;
+}
+.primary-button[aria-busy='true'] {
+  opacity: 0.75;
+}
+.ghost-button {
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--text);
+}
+.ghost-button.small {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.primary-button svg,
+.ghost-button svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.primary-button:active:not(:disabled),
+.ghost-button:active {
+  transform: scale(0.97);
+}
+#captureUpdated:empty {
+  display: none;
+}
+.capture-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%),
+    var(--surface);
+}
+.capture-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 48px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--bg);
+  cursor: text;
+}
+.capture-field:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.capture-field > svg {
+  width: 18px;
+  height: 18px;
+  margin-top: 12px;
+  flex: none;
+  color: var(--muted);
+}
+.capture-field textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  max-height: 140px;
+  padding: 9px 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.35;
+}
+.capture-field textarea:focus-visible {
+  outline: 0;
+}
+.capture-field .icon-button {
+  width: 38px;
+  height: 38px;
+}
+.capture-actions {
+  display: flex;
+  gap: 8px;
+}
+.capture-actions .primary-button {
+  flex: 1;
+  min-width: 0;
+}
+.capture-actions .primary-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.capture-hint {
+  margin: 0 2px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.capture-hint[data-tone='ok'] {
+  color: var(--ok);
+}
+.capture-hint[data-tone='error'] {
+  color: var(--danger);
+}
+.capture-notice {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: var(--r-m);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.capture-notice[data-tone='warn'] {
+  background: color-mix(in srgb, var(--warn) 14%, var(--surface));
+}
+.capture-notice[data-tone='error'] {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+}
+.capture-outbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 8px 8px 14px;
+  border: 1px dashed color-mix(in srgb, var(--warn) 55%, var(--line));
+  border-radius: var(--r-m);
+  background: var(--surface);
+}
+.capture-outbox > svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: var(--warn);
+}
+.capture-outbox-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.capture-outbox-copy b {
+  font-size: 14px;
+}
+.capture-outbox-copy small {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.capture-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 22px 2px 10px;
+}
+.capture-toolbar .section-title {
+  margin: 0;
+}
+.capture-filters {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--pill);
+  background: var(--raised);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.capture-filter {
+  min-height: 32px;
+  padding: 0 11px;
+  border-radius: var(--pill);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.capture-filter[data-count]:not([data-count=''])::after {
+  content: attr(data-count);
+  margin-left: 5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+.capture-filter[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+.capture-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--soft-line);
+  border-radius: var(--r-l);
+  background: var(--surface);
+  overflow: hidden;
+}
+.capture-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 10px 12px 14px;
+}
+.capture-item + .capture-item {
+  border-top: 1px solid var(--soft-line);
+}
+.capture-item.is-new {
+  animation: capture-arrive 900ms var(--ease-out);
+}
+@keyframes capture-arrive {
+  from {
+    background: var(--accent-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
+.capture-item .avatar {
+  margin-top: 2px;
+}
+.capture-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.capture-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.capture-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14.5px;
+  font-weight: 650;
+}
+.capture-handle,
+.capture-time {
+  flex: none;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.capture-handle {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.capture-time {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.capture-text {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  color: var(--soft);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.capture-text.is-link {
+  color: var(--muted);
+  font-size: 13px;
+  -webkit-line-clamp: 1;
+}
+.capture-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.capture-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: var(--pill);
+  background: var(--raised);
+  color: var(--soft);
+  font-weight: 650;
+  font-size: 12px;
+}
+.capture-state svg {
+  width: 13px;
+  height: 13px;
+}
+.capture-state.is-archived,
+.capture-state.is-duplicate {
+  background: color-mix(in srgb, var(--ok) 15%, transparent);
+  color: var(--ok);
+}
+.capture-state.is-capturing,
+.capture-state.is-queued {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.capture-state.is-waiting {
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
+}
+.capture-state.is-failed,
+.capture-state.is-unavailable {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+.capture-state.is-capturing svg {
+  animation: spin 1.2s linear infinite;
+}
+.capture-reason {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.capture-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 1px;
+}
+.capture-foot .capture-meta {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+.capture-row-actions {
+  display: flex;
+  flex: none;
+  margin: -6px -4px -8px 0;
+}
+.capture-row-actions svg {
+  width: 18px;
+  height: 18px;
+}
+.capture-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent) 0 0 / 40% 100% no-repeat;
+  animation: capture-sweep 1.3s linear infinite;
+}
+@keyframes capture-sweep {
+  from {
+    background-position: -40% 0;
+  }
+  to {
+    background-position: 140% 0;
+  }
+}
+.capture-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 30px 22px 28px;
+  text-align: center;
+}
+.capture-empty b {
+  font-size: 15px;
+}
+.capture-empty p {
+  max-width: 36ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.capture-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 4px;
+  border-radius: 15px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.capture-empty-icon svg {
+  width: 22px;
+  height: 22px;
+}
+.capture-skeleton {
+  height: 74px;
+  background: linear-gradient(90deg, var(--surface) 0%, var(--raised) 40%, var(--surface) 80%) 0 0 / 300% 100%;
+  animation: remote-shimmer 1.4s linear infinite;
+}
+.capture-skeleton + .capture-skeleton {
+  border-top: 1px solid var(--soft-line);
+}
+.capture-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+.capture-bulk:not(:has(button:not([hidden]))) {
+  display: none;
+}
+.capture-help {
+  margin-top: 18px;
+  border: 1px solid var(--soft-line);
+  border-radius: var(--r-m);
+  background: var(--surface);
+}
+.capture-help summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.capture-help summary::-webkit-details-marker {
+  display: none;
+}
+.capture-help summary svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+.capture-help div {
+  padding: 0 14px 12px;
+  color: var(--soft);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.capture-help p {
+  margin: 0 0 8px;
+}
+@media (min-width: 720px) {
+  #captureView {
+    max-width: 720px;
+    margin-inline: auto;
+  }
+}
+/* Five tabs (Remote 4.0 adds Capture) must fit a 300 px phone. */
+.nav-item {
+  min-width: 0;
+}
+.nav-item span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 380px) {
+  .bottom-nav {
+    gap: 0;
+    padding-inline: 4px;
+  }
+  .nav-item {
+    padding-inline: 0;
+  }
+  .nav-item svg {
+    width: 40px;
+    padding: 4px 10px;
+  }
+}
+@media (max-width: 350px) {
+  .capture-actions .ghost-button span {
+    display: none;
+  }
+  .capture-actions .ghost-button {
+    padding: 0 12px;
+  }
+  .nav-item span {
+    font-size: 10px;
+    letter-spacing: -0.02em;
+  }
+  .nav-item svg {
+    width: 36px;
+    padding: 4px 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .capture-item.is-new,
+  .capture-progress,
+  .capture-state.is-capturing svg {
+    animation: none;
+  }
+}
+:root[data-motion='off'] .capture-item.is-new,
+:root[data-motion='off'] .capture-progress,
+:root[data-motion='off'] .capture-state.is-capturing svg {
+  animation: none;
+}
+.dl-item-action {
+  margin: -8px -8px -8px -4px;
+}
+.dl-item-action + .dl-item-action {
+  margin-left: -8px;
+}
+.dl-item-action svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Remote 4.0 · pause by media host */
+.dl-hosts {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+.dl-host {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.dl-host svg {
+  width: 18px;
+  height: 18px;
+}
+.dl-host.is-paused {
+  border-color: color-mix(in srgb, var(--warn, #e7b85c) 60%, var(--line));
+  background: color-mix(in srgb, var(--warn, #e7b85c) 14%, var(--surface));
+}
+.dl-host:disabled {
+  opacity: 0.6;
+}

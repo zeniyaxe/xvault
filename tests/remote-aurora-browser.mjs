@@ -18,6 +18,7 @@ const STATIC = [
   'index.html',
   'remote.js',
   'remote-drafts.js',
+  'remote-capture.js',
   'remote.css',
   'app-icon.svg',
   'manifest.webmanifest',
@@ -318,7 +319,11 @@ try {
   assert.equal(await page.locator('#gallery').getAttribute('data-layout'), 'feed', 'feed is the default layout');
   assert.equal(await page.locator('.post-card').count(), ROWS.length);
   const first = page.locator('.post-card').nth(0);
-  assert.equal(await first.locator('.avatar').textContent(), 'M', 'avatar is a monogram, never a fetched image');
+  assert.equal(
+    await first.locator('.avatar').textContent(),
+    'M',
+    'without an archived avatar the monogram stays (the phone never contacts X)'
+  );
   assert.equal(await first.locator('.card-name .verified').getAttribute('aria-label'), 'Verified');
   assert.equal(await first.locator('.card-media').getAttribute('data-count'), '3');
   assert.equal(await first.locator('.card-media .tile-media.has-media').count(), 3);
