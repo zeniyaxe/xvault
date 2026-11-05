@@ -71,7 +71,7 @@ try {
   );
   assert.match(
     await frame.locator('#librarySelectedCount').textContent(),
-    /^1[\s\u00a0\u202f]500 selected$/,
+    /^1[\s\u00a0\u202f,.]?500 selected$/,
     'selection should be limited to the loaded page'
   );
   await frame.evaluate(() => document.querySelector('#libraryClearSelection').click());

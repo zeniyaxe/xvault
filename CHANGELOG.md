@@ -1,5 +1,51 @@
 # Changelog
 
+## XVault 24.0.0 "Aurora" - 2026-11-05
+
+- **A new look, everywhere.** XVault 24 replaces the matte-brass workbench with **Aurora**: an ink-dark ground, an
+  iris accent (`#8d7dff`) with a cyan second accent, softer radii, a type scale, a spacing scale and one set of
+  motion curves. The dashboard now has a compact **icon rail** instead of the text sidebar, a glassy top bar and lit
+  stat tiles. Every page, dialog, menu and the side panel uses the same tokens, so all 16 themes inherit the new
+  structure; the classic brass look is still there as the **Graphite** theme, and Paper, True black and the other
+  palettes keep their colours.
+- **One button system and one icon set.** Every button is built from the same primitives (secondary, primary,
+  quiet, danger, icon-only, split, segmented, floating, toolbar) with real hover, press, focus, disabled, loading
+  and success/error states (`XVaultUI.busy`). Icons are **Lucide** (ISC), vendored into `xv-icon-set.js` and a
+  Remote sprite — no network requests, no emoji glyphs. Icon-only controls get a tooltip and borrow their
+  accessible name from it.
+- **Library 4.0.** A heading that names what you are looking at (a destination, an author, a tag, a board or a
+  saved view) with a plain-language line for the active filters, a **filter builder** (media, posted range or exact dates, author and tag with suggestions, minimum likes, status and kind
+  toggles) that writes ordinary search syntax, removable **filter chips** with Clear and Save view, and richer
+  cards: avatar, verified badge, reply/thread context, a 1–4 media grid with `+N`, **quoted posts** (hydrated from
+  your archive), link cards, polls, Community Notes and your note. Cards, Gallery, Masonry, Compact, Table and
+  Timeline were redrawn (Timeline gets an avatar column), facets and the inspector were rebuilt, and selection
+  uses a floating bulk bar. Clicking an author, thread or note in a card narrows the search.
+- **Phone Remote 3.0.** Rich feed cards (avatar monogram, verified, reply/thread context, media grid, media status,
+  quoted post, link card, Later/Note/tags chips, metrics), a **feed / grid** switch that is remembered, a
+  bottom-sheet preview with Share (Web Share API, falls back to copying the link), a **Downloads monitor** (live
+  progress, stat tiles, transfers and recent files, Pause/Resume/Retry when the device may manage downloads,
+  polling only while the view is visible), an **Overview** (archive totals, 12 month bars and top people that open
+  as searches, recent activity), and a viewer with swipe, swipe-down to close, double-tap zoom, pinch and pan.
+  Aurora, Paper and OLED palettes with matching `theme-color`; skeleton loading; reduced motion respected.
+- **Side panel and Command Center.** Lucide action tiles, real switches (`role=switch`), a lit status card, and
+  family icons on every palette row.
+- **Motion.** View changes, sheets, menus, dialogs and the selection bar move with shared durations and curves;
+  everything collapses to instant changes with *Calm motion* or `prefers-reduced-motion`.
+- **Fixes:** the command palette showed a mojibake separator (`Â·`) between title and shortcut; muted text on
+  raised surfaces was below 4.5:1 contrast (now about 4.9:1); the Library profile test depended on the host
+  locale's thousands separator.
+- **Compatibility:** archives, recovery files and settings from 23.x load unchanged. The stored theme value
+  `graphite` now shows the Aurora palette; pick **Graphite** in Appearance for the classic brass look. The default
+  post-text font is now the interface font (Newsreader is still available). The Remote Downloads and Overview views
+  need the 24.0 extension and companion (`GET /api/downloads`, `GET /api/overview`, `POST /api/downloads/control`,
+  gated by the new `downloads.manage` permission); older companions keep serving Library, viewer and saves.
+- Tests: 154 unit tests; a new real-browser Remote test (`tests/remote-aurora-browser.mjs`: feed cards, preview
+  sheet, layout persistence, download controls and polling stop, overview jumps, swipe/double-tap/CDP pinch,
+  read-only devices, three themes, 320/768/1440 px without overflow, reduced motion, axe-core audits) and CI runs
+  every Remote browser test; Python tests for the new companion routes and sanitizers; the axe-core audit covers 28
+  dashboard surfaces with 0 serious or critical issues; `scripts/ui-gallery.mjs` renders every layout and page at
+  five viewports for screenshots. Live X, a real X-issued archive, Windows/NTFS and screen readers were not tested.
+
 ## XVault 23.0.0 "Lodestar" - 2026-11-05
 
 - **The helper works with Firefox.** The FFmpeg helper now pairs with Firefox (its `moz-extension://` UUID) as well as Chrome and Edge, and with several browsers at once (`extension_ids` in `config.json`; `setup_helper.ps1` accepts a comma-separated list). Downloads › Files & health shows the exact pairing ID to paste and, when the helper refuses the browser, what to add. Firefox keeps Native Messaging, so Remote can be registered there (`setup_remote.ps1` accepts a Firefox add-on ID and writes the Mozilla host manifest). The Firefox e2e pairs with the real helper and measures a hard link.

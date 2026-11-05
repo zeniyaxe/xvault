@@ -5,6 +5,10 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
 
 ## Highlights
 
+- **Aurora design (24.0)** — an ink-dark interface with an iris accent, a compact icon rail, one button system
+  with loading/success/error states, Lucide icons (vendored, no network), tooltips that also name icon-only
+  controls, a shared type/spacing/motion scale and 16 themes (the classic brass look is the **Graphite** theme).
+  See `DESIGN.md`.
 - **Capture** — passive capture while you browse, one-click archive/download on posts, bulk Bookmarks / Likes /
   profile / timeline / thread collection with resumable checkpoints, presets, live rate/ETA and run history. Polls,
   link cards, Spaces, Community Notes, edit history and alt text are kept as structured data.
@@ -25,7 +29,11 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
   with their full text), like, bookmark, community post and recently deleted post it contains, and save the media
   files inside it as local downloads; read in the browser without unpacking, direct messages are never read, and
   live captures always keep their richer data.
-- **Library** — fast ranked search with filters (`from:`, `has:`, `tag:`, `likes:>1k`, `after:`, `on:`, `year:`,
+- **Library 4.0** — a heading that names the current view, a filter builder (media, dates, author, tag, likes,
+  status, kind) that writes ordinary search syntax, removable filter chips with Save view, and cards with
+  avatars, reply/thread context, media grids, quoted posts, link cards, polls and notes. Cards, Gallery, Masonry,
+  Compact, Table and Timeline layouts, facets, an inspector and a floating selection bar.
+- **Search** — fast ranked search with filters (`from:`, `has:`, `tag:`, `likes:>1k`, `after:`, `on:`, `year:`,
   `is:thread`, `#hashtag`, `@mention`, `domain:`, `thread:ID`…), negation (`-from:bot`), alternatives
   (`has:video|gif`), usage-ranked suggestions with inline filter help (`Ctrl`+`Space`), text inside images
   (`ocr:receipt`, `has:ocr`, read on-device by a bundled OCR engine), **meaning search** (`about:cooking`,
@@ -55,8 +63,11 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
 - **Feel** — animated view changes, notices that stack, count repeats and offer **Undo** (with **Recent notices**
   in the command palette), sliding segmented controls, lightbox zoom from the thumbnail; *Calm motion* turns it off.
 - **Accessibility** — high contrast, always-on focus rings, text scaling, remappable shortcuts (`?` lists them).
-- **Remote** — optional phone viewer (PWA) served by the local helper over your LAN, with QR pairing,
-  per-device permissions and revocation.
+- **Remote 3.0** — optional phone viewer (PWA) served by the local helper over your LAN, with QR pairing,
+  per-device permissions and revocation: rich feed cards or a media grid, a bottom-sheet preview with Share, a
+  Downloads monitor (Pause/Resume/Retry for devices allowed to manage downloads), an archive Overview, and a
+  viewer with swipe, pinch, double-tap zoom and swipe-down to close.
+- **Side panel** — status card, Lucide action tiles and real switches for the capture toggles.
 
 ## Install (unpacked)
 
@@ -83,6 +94,9 @@ npm run bench      # engine benchmarks on synthetic 10k/50k/100k-post vaults
 npm run e2e        # loads the real extension in Chromium (needs `npm i --no-save playwright`)
 npm run e2e:a11y   # axe-core accessibility audit of every page (serious/critical fail)
 npm run e2e:helper # real helper process + real downloads (renames, hard links) and automatic backups
+npm run e2e:downloads # Downloads page against real Chromium downloads
+npm run e2e:remote # every Remote PWA browser test (shell, connection, Aurora feed/sheet/downloads/overview/viewer)
+node scripts/ui-gallery.mjs --out=shots   # seeded screenshots of every layout/page (--only, --themes, --viewports)
 python3 scripts/e2e-firefox.py dist/XVault-<version>-firefox.zip   # real Firefox (FIREFOX_BIN, GECKODRIVER)
 python -m unittest discover -s tests/python   # Remote pairing/security and helper file-operation tests
 python -m unittest discover -s tests -p 'test_*.py'   # helper/companion tests
@@ -98,7 +112,9 @@ Project layout: `background.js` (service worker: queue, capture, storage orchest
 scheduler, meaning index, boards/rules, adaptive downloads, archive quality and visit queue, watch lists, link
 snapshots, topic clusters, download policy, automatic backups, timeline buckets), `x-archive-import.mjs`, `x-post-extras.js`, `revision-diff.js`,
 `filename-template.js`, `backup-crypto.mjs` and `recovery-backup-core.mjs` (+ `offscreen-backup.mjs`),
-`dashboard.html` + `xv-*.js` (app shell and pages; they extend `dashboard.js` through `dashboard-hooks.js`), `content.js` /
+`dashboard.html` + `xv-*.js` (app shell and pages; they extend `dashboard.js` through `dashboard-hooks.js`),
+`xv-app.css` (the dashboard stylesheet: cascade layers `base` → `legacy` → `aurora`), `xv-aurora*.css` / `xv-aurora.js` /
+`xv-library4.js` (the Aurora design system and Library 4.0), `xv-icon-set.js` (vendored Lucide icons), `content.js` /
 `instant-actions.js` / `page-hook.js` (X integration), `FFmpeg_Helper/` (Python helper + Remote PWA).
 See `XVAULT_ROADMAP.md` for architecture notes, decisions and the current plan.
 

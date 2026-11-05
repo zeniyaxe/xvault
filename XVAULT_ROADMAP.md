@@ -2,6 +2,73 @@
 
 This file is the hand-off document: another session should be able to resume from here.
 
+## v24 "Aurora" pass
+
+Branch: `xvault-24-aurora` (from `main` after PR #6 was merged). Version 24.0.0. Goal: a real visual and
+interaction redesign — one design system, Library 4.0 (first priority), Phone Remote 3.0 (second), every other
+page, motion and accessibility — with real backend routes for the new Remote views, before/after screenshots and
+real-browser tests. No fake functionality: a control is shown only when the action works.
+
+| Area | Change |
+| --- | --- |
+| Design system | `xv-app.css` is the single dashboard stylesheet with cascade layers `base` (`xv-aurora-base.css`: element defaults, the button system, fields, switches, menus) → `legacy` (pre-24 modules) → `aurora` (`xv-aurora.css` tokens, shell, overlays, motion; `xv-aurora-library.css`; `xv-aurora-pages.css`). `xv-core.css` is the side-panel subset. Default theme value `graphite` → Aurora palette (ink `#0b0c0f`, iris `#8d7dff`, cyan `#4cc3e8`); the old palette is the new `brass` theme ("Graphite"); `readFont` default `sans`. See `DESIGN.md`. |
+| Icons | `scripts/vendor-icons.mjs` (`npm run vendor:icons`) copies Lucide (ISC) into `xv-icon-set.js` and the Remote sprite; `app-icons.js` maps every XVault glyph name onto it. `THIRD_PARTY_NOTICES.md` (root and `remote-ui/`). |
+| Behaviour helpers | `xv-aurora.js`: one positioned tooltip (`[data-tip]`, `[title]`, icon-only buttons), accessible names for icon-only buttons from their tooltip, `XVaultUI.busy(button, work)` loading → success/error. `xv-shell.js`: icon rail (`xv-nav` = `rail`/`wide`), page entry along nav order, shortcuts dialog. |
+| Library 4.0 | `xv-library4.js`: `l4-head` title/sub from `describeQuery` (destinations, `from:`, `tag:`, `board:`, saved views), filter builder (`<details>` popover; writes search tokens only), removable chips with Clear / Save view, quoted posts hydrated through `GET_LIBRARY_RECORDS`, author/thread/note shortcuts. `xv-aurora-library.css`: cards, gallery, masonry, compact rows, table, timeline avatar column, facets, inspector, floating bulk bar, phone compaction. |
+| Pages | `xv-aurora-pages.css`: Home stat tiles, Capture, Downloads, System, Tools, Atlas, Explorer, Studio, Health and Settings on the shared tokens. Side panel (`sidepanel.*`): Lucide action tiles, `role=switch` toggles, status card. Command Center: family icons (`ICON_RULES`/`commandIcon`), fixed `Â·` separator. |
+| Remote backend | `background.js`: `remotePostContext` (verified, reply/thread, quoted post from the archive, link card, later, note), RPC `downloads.status`, `downloads.control` (`pause`/`resume`/`retry`), `library.overview`. `remote_companion.py`: `GET /api/downloads`, `GET /api/overview`, `POST /api/downloads/control` (needs the new `downloads.manage` device permission), sanitizers `_post_context`, `_clean_downloads`, `_clean_overview`. |
+| Remote 3.0 | `remote.js`/`remote.css`/`index.html`: feed cards (`createCard`), feed/grid toggle (`xvault.remote.layout.v1`), bottom-sheet preview with Share, Downloads view (3 s polling only while visible, controls only with `canManage`), Overview (month bars → `archived-after:`/`archived-before:`, people → `from:`), viewer gestures (swipe, swipe-down ≥ 110 px, double-tap 2.5×, pinch 1–4×, clamped pan, `#viewerZoom`), themes with `theme-color`, skeletons. Service worker cache `xvault-remote-shell-v7`. |
+| Tooling | `scripts/ui-gallery.mjs` seeds a mock vault and screenshots every Library layout and page (`--out`, `--only`, `--themes`, `--viewports`). `tests/remote-aurora-browser.mjs`; `npm run e2e:remote` runs all five Remote browser tests and CI runs them. |
+| Fixes | Palette separator mojibake; muted text contrast (`#7e8591` → `#868d99`, 4.9:1 on raised); locale-dependent assertion in `tests/library-profile.mjs`. |
+
+### Decisions (v24)
+
+- **Layers instead of a rewrite of every module.** Legacy module CSS still loads, in a lower layer, so the
+  redesign is authoritative without `!important` and without breaking pages that were not restyled; each legacy
+  file can be retired independently.
+- **The stored theme value is kept.** `graphite` users get Aurora automatically; the classic palette moved to a
+  new value (`brass`) so nobody's settings need migrating.
+- **Icons are vendored, not fetched.** Lucide SVG paths are copied at build time (ISC notice included); the
+  extension and the phone app make no icon requests.
+- **The filter builder writes search syntax.** It is a view onto the query, not a second filter model, so chips,
+  saved views, history and typed queries all stay in sync.
+- **Remote shows only what works.** Download controls appear only for devices with `downloads.manage`; avatars are
+  monograms because the phone never contacts X; Share uses the Web Share API for post links (capturing new URLs
+  from the phone would need a new permission and was not built).
+- **Quoted posts come from the archive.** A quote that is not archived says so instead of fetching it.
+
+### Verification log (v24)
+
+| Check | Result |
+| --- | --- |
+| `npm run verify` (structure, ESLint, unit tests, Prettier) | pass: 154/154 tests |
+| `npm run e2e` | pass (Library 24/24) |
+| `node scripts/e2e-a11y.mjs` (axe-core) | 28 surfaces, 0 serious/critical violations |
+| `npm run e2e:helper`, `npm run e2e:downloads` | pass |
+| `npm run e2e:remote` (aurora, product, shell, editor, connection) | 5/5 pass; `tests/remote-installed-browser.mjs` needs a registered native host (fails the same way on `main`) |
+| `tests/library-profile.mjs` (50k posts, v23 → v24, 2 runs) | first render 18–18 → 21–27 ms; usable 22–24 → 28–31 ms; select 1.5k 45–68 → 43–50 ms; Quick Look 74–80 → 73–80 ms; rapid searches 222–226 → 246–253 ms |
+| Python: `tests/python` and `tests/test_*.py` | 22 + 50 tests pass (2 new companion tests) |
+| `npm run build:all` | Chrome, Edge and Firefox zips (199 files each) |
+| `web-ext lint` on the Firefox build | 0 errors, 163 warnings |
+| `scripts/e2e-firefox.py` (real Firefox) | 22/22 (live x.com skipped) |
+| `scripts/ui-gallery.mjs` | before (v23) and after screenshots of every layout and page, desktop → phone |
+
+Payload: dashboard CSS 267 KB (56 KB gzip) → 344 KB (74 KB gzip) while the legacy layer is still loaded; Remote
+`remote.css` 6 → 11 KB gzip, `remote.js` 22 → 31 KB gzip.
+
+Not verified: live X, a real X-issued archive, Windows/NTFS and the PowerShell setup scripts, Firefox Remote
+Native Messaging on Windows, the Edge store, and screen readers (axe-core only).
+
+### Remaining after v24
+
+1. Retire the `legacy` CSS layer module by module (Library 3 and dashboard leftovers first) to win back the
+   payload, and delete superseded `dashboard.js` renderers.
+2. Remote: per-item cancel and priority in the Downloads monitor; sharing a new X link from the phone into the
+   capture queue (needs a new device permission and a Web Share Target); real avatars from archived media.
+3. Screen-reader passes (NVDA, VoiceOver) on Library 4.0 and Remote 3.0.
+4. Everything still open from v23: live X, a real X archive, Windows helper/setup, optional neural embeddings,
+   per-host download pause, an Atlas thread graph.
+
 ## v23 "Lodestar" pass
 
 Branch: `xvault-23-meridian` (stacked on `xvault-22-keystone`, PR #6 targets that branch; the branch name predates

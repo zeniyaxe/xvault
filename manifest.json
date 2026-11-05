@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "XVault",
-  "version": "23.0.0",
+  "version": "24.0.0",
   "description": "Local-first X archive with verified downloads, FixVX Copy Link, contextual X controls, and archival history.",
   "minimum_chrome_version": "120",
   "permissions": [
