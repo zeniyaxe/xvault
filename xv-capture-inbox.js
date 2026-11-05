@@ -1,4 +1,4 @@
-// XVault 25: the Capture page's inbox panel — the desktop view of sw/capture-inbox.mjs. Links pasted here, sent
+// XVault 25/26: the Capture page's inbox panel — the desktop view of sw/capture-inbox.mjs. Links pasted here, sent
 // from Phone Remote (paste or Web Share Target) or shared to XVault are listed with their live state; the
 // service worker announces every change on the "xvault-capture-inbox" BroadcastChannel.
 (() => {
@@ -38,6 +38,36 @@
       : item.source === 'remote'
         ? `From ${item.device || 'a phone'}`
         : 'Added here';
+  const until = at => {
+    const ms = Number(at || 0) - Date.now();
+    if (!(ms > 0)) return 'soon';
+    if (ms < 60e3) return `in ${Math.max(1, Math.round(ms / 1e3))} s`;
+    if (ms < 3600e3) return `in ${Math.round(ms / 60e3)} min`;
+    return `at ${new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+  };
+  const OUTCOME = {
+    archived: 'Saved',
+    duplicate: 'Already saved',
+    unavailable: 'Unavailable',
+    auth: 'Sign-in needed',
+    'rate-limited': 'X limited requests',
+    'x-error': 'X error page',
+    pending: 'Did not load in time',
+    error: 'Error',
+  };
+  // XVault 26: the last attempts of one capture — when, what happened and how long it took.
+  function attemptLog(item) {
+    const log = Array.isArray(item.log) ? item.log : [];
+    if (!log.length || DONE.has(item.state)) return '';
+    return `<details class="capture-inbox-log"><summary>Attempt history (${log.length})</summary><ol>${log
+      .slice()
+      .reverse()
+      .map(
+        entry =>
+          `<li><time>${esc(new Date(entry.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }))}</time> ${esc(OUTCOME[entry.outcome] || entry.outcome)}${entry.ms ? ` · ${esc((entry.ms / 1000).toFixed(1))} s` : ''}${entry.detail ? ` · ${esc(entry.detail)}` : ''}</li>`
+      )
+      .join('')}</ol></details>`;
+  }
   function row(item) {
     const preview = item.preview || {};
     const who = preview.name || (item.handle ? `@${item.handle}` : 'X post');
@@ -67,6 +97,8 @@
         <p>${esc(preview.text || item.url)}</p>
         <small>${[
           reason,
+          item.state === 'queued' && item.nextAttemptAt > Date.now() ? `next try ${until(item.nextAttemptAt)}` : '',
+          !DONE.has(item.state) && item.attempts ? `attempt ${item.attempts} of ${item.maxAttempts || 3}` : '',
           preview.mediaCount ? `${preview.mediaCount} media` : '',
           origin(item),
           when(item.updatedAt || item.createdAt),
@@ -74,6 +106,7 @@
           .filter(Boolean)
           .map(esc)
           .join(' · ')}</small>
+        ${attemptLog(item)}
       </div>
       <div class="capture-inbox-actions">${actions}</div>
     </li>`;
@@ -85,8 +118,40 @@
     const problems = (counts.unavailable || 0) + (counts.failed || 0);
     const finished = (counts.archived || 0) + (counts.duplicate || 0) + problems;
     const state = $('captureInboxState');
-    state.textContent = data.paused ? 'Paused' : data.pending ? `${data.pending} in progress` : 'Idle';
-    state.dataset.tone = data.paused ? 'warn' : data.pending ? 'busy' : '';
+    const cooling = data.cooldownUntil > Date.now(),
+      blocked = !!data.authBlocked && data.pending > 0;
+    state.textContent = data.paused
+      ? 'Paused'
+      : blocked
+        ? 'Sign-in needed'
+        : cooling
+          ? 'Cooling down'
+          : data.pending
+            ? `${data.pending} in progress`
+            : 'Idle';
+    state.dataset.tone = data.paused || blocked || cooling ? 'warn' : data.pending ? 'busy' : '';
+    // XVault 26: one plain-language banner for whatever holds the whole inbox.
+    const notice = $('captureInboxNotice');
+    if (notice) {
+      const message = blocked
+        ? 'X is asking you to sign in. Sign in to x.com in this browser, then choose Resume — no attempts were used.'
+        : cooling
+          ? `X is limiting requests, so captures wait until the cooldown ends (${until(data.cooldownUntil)}). Nothing is lost.`
+          : '';
+      notice.hidden = !message;
+      notice.textContent = message;
+      $('captureInboxResume').hidden = !(blocked || cooling);
+      notice.parentElement?.toggleAttribute('hidden', !message);
+    }
+    // Progress through the current batch: finished items over everything still listed as part of it.
+    const bar = $('captureInboxProgress');
+    if (bar) {
+      const total = data.pending + finished;
+      bar.hidden = !data.pending;
+      bar.max = Math.max(1, total);
+      bar.value = finished;
+      bar.setAttribute('aria-label', `${finished} of ${total} captures finished`);
+    }
     $('captureInboxSummary').textContent = data.items.length
       ? `${data.items.length} link${data.items.length === 1 ? '' : 's'} · ${(counts.archived || 0) + (counts.duplicate || 0)} saved${problems ? ` · ${problems} need attention` : ''}`
       : '';
@@ -149,6 +214,13 @@
     $('captureInboxPause').addEventListener('click', () => control(data?.paused ? 'resume' : 'pause'));
     $('captureInboxRetry').addEventListener('click', () => control('retry-all'));
     $('captureInboxClear').addEventListener('click', () => control('clear'));
+    $('captureInboxResume')?.addEventListener('click', () => control('resume'));
+    // Countdowns ("next try in 40 s", the cooldown) stay current while the page is visible.
+    setInterval(() => {
+      if (document.hidden || !data || !(data.pending > 0)) return;
+      if (!document.getElementById('captureInboxPanel')?.offsetParent) return;
+      render();
+    }, 15000);
     $('captureInboxList').addEventListener('click', event => {
       const button = event.target.closest('[data-inbox]');
       if (!button) return;

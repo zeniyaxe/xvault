@@ -97,8 +97,8 @@
       bar = document.createElement('div');
       bar.id = 'xvViewerBar';
       bar.className = 'xv-viewer-bar';
-      bar.innerHTML =
-        '<div class="xv-viewer-where" aria-live="polite"></div><div class="xv-viewer-tools" role="toolbar" aria-label="Viewer"><button type="button" data-viewer="download" title="Download this media (D)" aria-label="Download this media">↓</button><button type="button" data-viewer="info" title="Show or hide details (I)" aria-label="Show or hide details" aria-pressed="true">i</button><button type="button" data-viewer="fullscreen" title="Full screen (F)" aria-label="Full screen">⤢</button><button type="button" data-viewer="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button></div>';
+      const icon = (name, fallback) => window.XVaultIcons?.svg?.(name) || fallback;
+      bar.innerHTML = `<div class="xv-viewer-where" aria-live="polite"></div><div class="xv-viewer-tools" role="toolbar" aria-label="Viewer"><button type="button" data-viewer="download" title="Download this media (D)" aria-label="Download this media">${icon('download', '↓')}</button><button type="button" data-viewer="info" title="Show or hide details (I)" aria-label="Show or hide details" aria-pressed="true">${icon('info', 'i')}</button><button type="button" data-viewer="fullscreen" title="Full screen (F)" aria-label="Full screen">${icon('maximize', '⛶')}</button><button type="button" data-viewer="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('keyboard', '?')}</button></div>`;
       bar.addEventListener('click', event => {
         const action = event.target.closest('[data-viewer]')?.dataset.viewer;
         if (action) run(action);
@@ -179,6 +179,9 @@
     const meta = $('#lbMeta'),
       entry = items()[index()];
     if (!meta || !entry) return;
+    const counter = meta.querySelector(':scope > small');
+    if (counter && /^\d+\/\d+$/.test(counter.textContent))
+      counter.textContent = `Media ${index() + 1} of ${items().length}`;
     meta.querySelector('.xv-media-facts')?.remove();
     const { t, m } = entry,
       kind = kindOf(m),
@@ -433,7 +436,8 @@
     else if (action === 'fullscreen') toggleFullscreen();
     else if (action === 'help') showHelp();
   }
-  document.addEventListener(
+  // On window, capture phase: ahead of the focus scope's Escape (app-focus.js) so Esc closes the shortcut sheet first.
+  window.addEventListener(
     'keydown',
     event => {
       if (!isOpen() || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;

@@ -11,7 +11,16 @@ export const CAPTURE_STATES = ['queued', 'waiting', 'capturing', 'archived', 'du
 export const CAPTURE_PENDING = new Set(['queued', 'waiting', 'capturing']);
 const STATE_KEY = 'xvCaptureInbox';
 const MAX_ITEMS = 400;
-const MAX_ATTEMPTS = 2;
+const MAX_ATTEMPTS = 3;
+// XVault 26: a slow or failed visit is retried later instead of straight away (20 s, then 90 s).
+const RETRY_BACKOFF_MS = [20000, 90000];
+// X limiting requests pauses the whole inbox: 5 min, doubling per strike, at most 30 min.
+const COOLDOWN_MS = 5 * 60000;
+const COOLDOWN_MAX_MS = 30 * 60000;
+// After X asks for a sign-in, page loads do not restart captures for two minutes (a retry or resume does).
+const AUTH_HOLD_MS = 2 * 60000;
+const LOG_LIMIT = 6;
+export const AUTH_REASON = 'X asked for a sign-in. Sign in to X in this browser, then press Retry — nothing was lost.';
 const KEEP_FINISHED_MS = 30 * 86400000;
 const HOSTS = /^(?:www\.|mobile\.|m\.)?(?:x|twitter|fxtwitter|vxtwitter|fixupx|fixvx|twittpr)\.com$/i;
 const RESERVED = new Set(['i', 'home', 'search', 'explore', 'settings', 'notifications', 'messages']);
@@ -61,11 +70,53 @@ export function publicItem(item) {
     device: item.device || '',
     deviceId: item.deviceId || '',
     attempts: item.attempts || 0,
+    maxAttempts: MAX_ATTEMPTS,
+    nextAttemptAt: item.nextAttemptAt || 0,
     createdAt: item.createdAt || 0,
     updatedAt: item.updatedAt || 0,
     preview: item.preview || null,
+    log: Array.isArray(item.log) ? item.log.slice(-LOG_LIMIT) : [],
   };
 }
+/**
+ * What the capture tab shows when the post did not arrive: a sign-in wall, X limiting requests, an unavailable
+ * post or X's generic error page. Pure, so the rules are unit-tested; `text` is the page's visible text.
+ */
+export function classifyCapturePage({ url = '', text = '' } = {}) {
+  let path = '';
+  try {
+    path = new URL(String(url)).pathname;
+  } catch {}
+  const body = String(text || '').slice(0, 6000);
+  if (/^\/(?:i\/flow\/(?:login|signup)|login|account\/access|i\/jf\/onboarding)/i.test(path)) return 'auth';
+  if (
+    /rate limit exceeded|you are over the daily limit|temporarily limited|too many requests|try again in a few minutes/i.test(
+      body
+    )
+  )
+    return 'rate-limited';
+  if (
+    /this (?:post|tweet) (?:is unavailable|was deleted|has been deleted|is from an account that no longer exists)|this page doesn[’']t exist|account (?:is suspended|doesn[’']t exist|has been suspended)|these posts are protected|(?:post|tweet) (?:is|has been) withheld/i.test(
+      body
+    )
+  )
+    return 'unavailable';
+  if (/something went wrong\.?\s*try reloading/i.test(body)) return 'x-error';
+  if (
+    /(?:sign in to x|log in to x|sign in to twitter|don[’']t miss what[’']s happening|sign up now to get your own)/i.test(
+      body
+    )
+  )
+    return 'auth';
+  return 'unknown';
+}
+const clock = at => {
+  try {
+    return new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+};
 /** A short, display-only preview of an archived post. */
 export function previewOf(post) {
   if (!post) return null;
@@ -114,7 +165,41 @@ export function createCaptureInbox(deps) {
     pollMs = 700,
     visitTimeoutMs = 20000,
     gapMs = [1500, 3000],
+    // Asks to be run again at `when` (background.js uses chrome.alarms so a sleeping worker wakes up).
+    wake = null,
+    // Reads what the capture tab shows ({ url, text }) when a post did not arrive; null when it cannot be read.
+    probePage = null,
   } = deps;
+  let wakeTimer = 0;
+  function scheduleWake(when) {
+    clearTimeout(wakeTimer);
+    const delay = Math.max(1000, when - now());
+    wakeTimer = setTimeout(() => void run(), delay);
+    wakeTimer?.unref?.();
+    try {
+      wake?.(now() + delay);
+    } catch {}
+  }
+  async function readPage(tab) {
+    try {
+      if (probePage) return await probePage(tab);
+      const [result] =
+        (await chromeApi.scripting?.executeScript?.({
+          target: { tabId: tab },
+          func: () => ({ url: location.href, text: (document.body?.innerText || '').slice(0, 6000) }),
+        })) || [];
+      return result?.result || null;
+    } catch {
+      return null;
+    }
+  }
+  const entry = (outcome, startedAt, detail = '') => ({
+    at: now(),
+    outcome,
+    ms: Math.max(0, now() - startedAt),
+    detail: String(detail || '').slice(0, 140),
+  });
+  const withLog = (item, record) => [...(Array.isArray(item.log) ? item.log : []), record].slice(-LOG_LIMIT);
   let running = null,
     tabId = null,
     chain = Promise.resolve(),
@@ -155,6 +240,8 @@ export function createCaptureInbox(deps) {
       pending: state.items.filter(item => CAPTURE_PENDING.has(item.state)).length,
       items: [...state.items].sort((a, b) => b.createdAt - a.createdAt).map(publicItem),
       updatedAt: state.updatedAt,
+      cooldownUntil: Number(state.cooldownUntil) > now() ? Number(state.cooldownUntil) : 0,
+      authBlocked: Number(state.authBlockedAt || 0) > 0,
     };
   }
   async function list({ limit = 100 } = {}) {
@@ -208,12 +295,17 @@ export function createCaptureInbox(deps) {
   async function control(action, id = '') {
     const { state } = await mutate(state => {
       const item = id ? state.items.find(row => row.id === String(id)) : null;
-      if (action === 'retry' && item && !CAPTURE_PENDING.has(item.state)) {
-        Object.assign(item, { state: 'queued', error: '', attempts: 0, updatedAt: now() });
+      // An explicit retry or resume is the reader saying "try now": it lifts a sign-in hold and a cooldown.
+      if (['retry', 'retry-all', 'resume'].includes(action)) {
+        state.authBlockedAt = 0;
+        state.cooldownUntil = 0;
+      }
+      if (action === 'retry' && item && (!CAPTURE_PENDING.has(item.state) || item.state === 'waiting')) {
+        Object.assign(item, { state: 'queued', error: '', attempts: 0, nextAttemptAt: 0, updatedAt: now() });
       } else if (action === 'retry-all') {
         for (const row of state.items)
-          if (['failed', 'unavailable', 'waiting'].includes(row.state))
-            Object.assign(row, { state: 'queued', error: '', attempts: 0, updatedAt: now() });
+          if (['failed', 'unavailable', 'waiting'].includes(row.state) || (row.state === 'queued' && row.nextAttemptAt))
+            Object.assign(row, { state: 'queued', error: '', attempts: 0, nextAttemptAt: 0, updatedAt: now() });
       } else if (action === 'remove' && item && item.state !== 'capturing') {
         state.items = state.items.filter(row => row !== item);
       } else if (action === 'clear') {
@@ -290,12 +382,19 @@ export function createCaptureInbox(deps) {
       await sleep(pollMs);
       outcome = classifyCapture(await readPost(id).catch(() => null), startedAt);
       if (outcome !== 'pending') break;
-      if (!(await chromeApi.tabs.get(tab).catch(() => null))) {
+      const current = await chromeApi.tabs.get(tab).catch(() => null);
+      if (!current) {
         tabId = null;
         throw Error('The capture tab was closed.');
       }
+      // X redirecting the post to its sign-in flow is known at once; no need to wait for the timeout.
+      if (current.url && classifyCapturePage({ url: current.url }) === 'auth') return { outcome: 'auth', startedAt };
     }
-    return outcome;
+    if (outcome !== 'pending') return { outcome, startedAt };
+    // The post never arrived: look at what X is showing instead.
+    const page = await readPage(tab);
+    const seen = page ? classifyCapturePage(page) : 'unknown';
+    return { outcome: seen === 'unknown' ? 'pending' : seen, startedAt };
   }
 
   async function run() {
@@ -305,42 +404,117 @@ export function createCaptureInbox(deps) {
         for (;;) {
           const state = await load();
           if (state.paused) return;
-          const next = state.items
-            .filter(item => item.state === 'queued' || item.state === 'waiting')
+          const at = now();
+          if (Number(state.cooldownUntil) > at) return scheduleWake(Number(state.cooldownUntil));
+          if (Number(state.authBlockedAt) > 0 && at - Number(state.authBlockedAt) < AUTH_HOLD_MS) return;
+          const pending = state.items.filter(item => item.state === 'queued' || item.state === 'waiting');
+          const next = pending
+            .filter(item => !(Number(item.nextAttemptAt) > at))
             .sort((a, b) => a.createdAt - b.createdAt)[0];
-          if (!next) return;
+          if (!next) {
+            const later = pending.map(item => Number(item.nextAttemptAt) || 0).filter(Boolean);
+            if (!later.length) return;
+            const when = Math.min(...later);
+            // A short backoff is waited out here; a long one asks for a wake-up (the worker may sleep meanwhile).
+            if (when - at <= 25000) {
+              await sleep(Math.max(0, when - at));
+              continue;
+            }
+            return scheduleWake(when);
+          }
           const settings = await getSettings();
           if (settings.captureWhileBrowsing === false)
             return holdAll('Turn on “Capture while browsing” in XVault so opened posts are recorded.');
           const xTab = await activeXTab();
           if (!xTab) return holdAll('Waiting for x.com — open X on the computer; captures use your signed-in session.');
-          let outcome;
+          let outcome, startedAt;
           try {
-            outcome = await visit(next, xTab);
+            ({ outcome, startedAt } = await visit(next, xTab));
           } catch (error) {
-            const failed = (next.attempts || 0) + 1 >= MAX_ATTEMPTS;
+            const attempts = (next.attempts || 0) + 1,
+              failed = attempts >= MAX_ATTEMPTS,
+              message = String(error?.message || error).slice(0, 160);
             await setItem(next.id, {
               state: failed ? 'failed' : 'queued',
-              error: String(error?.message || error).slice(0, 160),
+              error: failed ? message : `${message} Trying again at ${clock(now() + RETRY_BACKOFF_MS[attempts - 1])}.`,
+              nextAttemptAt: failed ? 0 : now() + (RETRY_BACKOFF_MS[attempts - 1] || 90000),
+              log: withLog(next, entry('error', now(), message)),
             });
             await sleep(gapMs[0]);
             continue;
           }
           const post = outcome === 'archived' ? await readPost(next.id).catch(() => null) : null;
           const attempts = (next.attempts || 0) + 1;
-          if (outcome === 'archived')
-            await setItem(next.id, { state: 'archived', error: '', preview: previewOf(post) });
-          else if (outcome === 'unavailable')
+          const record = entry(outcome, startedAt);
+          if (outcome === 'archived') {
+            await setItem(next.id, {
+              state: 'archived',
+              error: '',
+              nextAttemptAt: 0,
+              preview: previewOf(post),
+              log: withLog(next, record),
+            });
+            await mutate(state => {
+              state.rateStrikes = 0;
+              state.authBlockedAt = 0;
+            });
+          } else if (outcome === 'unavailable')
             await setItem(next.id, {
               state: 'unavailable',
               error: 'X says this post is unavailable (deleted, protected or withheld).',
+              nextAttemptAt: 0,
+              log: withLog(next, record),
             });
-          else if (attempts < MAX_ATTEMPTS)
-            await setItem(next.id, { state: 'queued', error: 'X did not show the post in time; trying again.' });
-          else
+          else if (outcome === 'auth') {
+            // Not the post's fault: keep its attempts, hold everything, and wait for the reader to sign in.
+            await setItem(next.id, {
+              state: 'waiting',
+              error: AUTH_REASON,
+              attempts: next.attempts || 0,
+              log: withLog(next, { ...record, detail: 'Sign-in wall' }),
+            });
+            await mutate(state => {
+              state.authBlockedAt = now();
+            });
+            await holdAll(AUTH_REASON);
+            await log(next, outcome).catch(() => {});
+            return;
+          } else if (outcome === 'rate-limited') {
+            let until = 0;
+            await mutate(state => {
+              const strikes = Number(state.rateStrikes || 0);
+              until = now() + Math.min(COOLDOWN_MAX_MS, COOLDOWN_MS * 2 ** strikes);
+              state.rateStrikes = strikes + 1;
+              state.cooldownUntil = until;
+            });
+            const reason = `X is limiting requests right now. Capture resumes by itself at ${clock(until)}.`;
+            await setItem(next.id, {
+              state: 'waiting',
+              error: reason,
+              attempts: next.attempts || 0,
+              log: withLog(next, { ...record, detail: 'Rate limited' }),
+            });
+            await holdAll(reason);
+            await log(next, outcome).catch(() => {});
+            scheduleWake(until);
+            return;
+          } else if (attempts < MAX_ATTEMPTS) {
+            const retryAt = now() + (RETRY_BACKOFF_MS[attempts - 1] || 90000);
+            await setItem(next.id, {
+              state: 'queued',
+              error: `${outcome === 'x-error' ? 'X showed “Something went wrong”' : 'X did not show the post in time'}; trying again at ${clock(retryAt)}.`,
+              nextAttemptAt: retryAt,
+              log: withLog(next, record),
+            });
+          } else
             await setItem(next.id, {
               state: 'failed',
-              error: 'X did not show this post. Check that you are signed in to X on the computer, then retry.',
+              error:
+                outcome === 'x-error'
+                  ? `X showed “Something went wrong” on ${MAX_ATTEMPTS} tries. Retry later; the link is kept.`
+                  : `X did not show this post after ${MAX_ATTEMPTS} tries. Check that you are signed in to X on the computer, then retry.`,
+              nextAttemptAt: 0,
+              log: withLog(next, record),
             });
           await log(next, outcome).catch(() => {});
           const [low, high] = gapMs;

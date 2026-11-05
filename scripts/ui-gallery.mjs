@@ -229,6 +229,67 @@ export function seedPosts(count = 72) {
   return posts;
 }
 
+// XVault 26: a capture inbox mid-batch while X limits requests (stored state; no X tab is opened).
+async function seedCaptureInbox(page) {
+  await page.evaluate(async () => {
+    const at = Date.now();
+    const item = (id, state, extra = {}) => ({
+      id,
+      handle: extra.handle || 'mirrorlake',
+      url: `https://x.com/${extra.handle || 'mirrorlake'}/status/${id}`,
+      state,
+      error: '',
+      source: 'remote',
+      device: 'Pixel 8',
+      attempts: 0,
+      createdAt: at - Number(id.slice(-2)) * 60000,
+      updatedAt: at - 30000,
+      log: [],
+      ...extra,
+    });
+    await chrome.storage.local.set({
+      xvCaptureInbox: {
+        paused: false,
+        updatedAt: at,
+        cooldownUntil: at + 4 * 60000,
+        rateStrikes: 1,
+        items: [
+          item('1790000000000000011', 'waiting', {
+            handle: 'pixeltide',
+            error: 'X is limiting requests — waiting for the cooldown',
+            attempts: 1,
+            log: [{ at: at - 50000, outcome: 'rate-limited', ms: 4100, detail: 'Rate limited' }],
+          }),
+          item('1790000000000000012', 'queued', {
+            handle: 'hanaw',
+            attempts: 1,
+            nextAttemptAt: at + 85000,
+            error: 'The post did not load in time — trying again',
+            log: [{ at: at - 120000, outcome: 'pending', ms: 20000 }],
+          }),
+          item('1790000000000000013', 'archived', {
+            preview: { name: 'Mirror Lake', handle: 'mirrorlake', text: 'Morning fog over the lake', mediaCount: 3 },
+          }),
+          item('1790000000000000014', 'duplicate', {
+            handle: 'oddarchive',
+            preview: {
+              name: 'Odd Archive',
+              handle: 'oddarchive',
+              text: 'Scans from a 1962 field guide',
+              mediaCount: 4,
+            },
+          }),
+          item('1790000000000000015', 'unavailable', {
+            handle: 'gone',
+            attempts: 1,
+            error: 'This post is unavailable — deleted, protected or age-restricted',
+            log: [{ at: at - 900000, outcome: 'unavailable', ms: 3200 }],
+          }),
+        ],
+      },
+    });
+  });
+}
 async function seed(page) {
   const posts = seedPosts(Number(arg('count', '96')));
   const stored = await page.evaluate(
@@ -302,6 +363,7 @@ async function main() {
   await page.goto(`chrome-extension://${id}/dashboard.html`);
   await page.waitForTimeout(700);
   await seed(page);
+  await seedCaptureInbox(page);
   await page.evaluate(() => localStorage.setItem('xv-nav', ''));
   const shots = [];
   const shot = async name => {
@@ -317,7 +379,12 @@ async function main() {
     await page.waitForTimeout(500);
   };
   const go = async name => {
-    await page.evaluate(target => document.querySelector(`.rail [data-page="${target}"]`)?.click(), name);
+    await page.evaluate(target => {
+      const rail = document.querySelector(`.rail [data-page="${target}"]`);
+      if (rail) rail.click();
+      // Sub-pages (Capture → New archive) are reached through the page function.
+      else if (typeof page === 'function') page(target);
+    }, name);
     await page.waitForTimeout(700);
   };
   const layout = async name => {
@@ -382,9 +449,18 @@ async function main() {
         await page.waitForTimeout(600);
       }
       if (want('pages')) {
-        for (const name of ['atlas', 'explorer', 'home', 'media', 'studio', 'health', 'settings']) {
+        for (const name of ['atlas', 'explorer', 'home', 'archive', 'media', 'studio', 'health', 'settings']) {
           await go(name);
           await shot(`page-${name}-${tag}`);
+          if (name === 'archive') {
+            const inbox = page.locator('#captureInboxPanel');
+            if (await inbox.count()) {
+              await inbox.scrollIntoViewIfNeeded();
+              await page.waitForTimeout(400);
+              await inbox.screenshot({ path: join(out, `capture-inbox-${tag}.png`) });
+              shots.push(`capture-inbox-${tag}`);
+            }
+          }
           if (name === 'atlas') {
             const threads = page.locator('#xaThreads');
             if (await threads.count()) {
