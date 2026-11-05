@@ -12,14 +12,16 @@
       <header>
         <img class="mark" src="icons/xvault-mark.svg" alt="" width="28" height="28" />
         <div><b>XVault</b><small>Acts on the X tab you have open</small></div>
-        <button id="dash" class="quiet" title="Open the dashboard" aria-label="Open dashboard">Open</button>
+        <button id="dash" class="quiet" data-icon="arrowUpRight" title="Open the dashboard" aria-label="Open dashboard">
+          Open
+        </button>
       </header>
       <section class="hero"><strong id="count">0</strong><span>posts in your vault</span></section>
       <div class="grid">
-        <button data-action="copy"><b>Copy link</b><small>post in view</small></button
-        ><button data-action="download"><b>Download media</b><small>best quality</small></button
-        ><button data-action="archive"><b>Archive post</b><small>post in view</small></button
-        ><button data-action="timeline"><b>Archive page</b><small>everything loaded</small></button>
+        <button data-action="copy" data-icon="link"><b>Copy link</b><small>post in view</small></button
+        ><button data-action="download" data-icon="download"><b>Download media</b><small>best quality</small></button
+        ><button data-action="archive" data-icon="archive"><b>Archive post</b><small>post in view</small></button
+        ><button data-action="timeline" data-icon="layers"><b>Archive page</b><small>everything loaded</small></button>
       </div>
       <section class="card">
         <label
@@ -31,8 +33,8 @@
             <option value="vxtwitter">VXTwitter</option>
           </select></label
         >
-        <label class="row"><span>Passive capture</span><input id="capture" type="checkbox" /></label>
-        <label class="row"><span>Inline copy button</span><input id="inline" type="checkbox" /></label>
+        <label class="row"><span>Passive capture</span><input id="capture" type="checkbox" role="switch" /></label>
+        <label class="row"><span>Inline copy button</span><input id="inline" type="checkbox" role="switch" /></label>
       </section>
       <section class="card shortcuts">
         <b>Keyboard</b><span><kbd>Alt⇧C</kbd> copy</span><span><kbd>Alt⇧D</kbd> media</span
@@ -40,6 +42,7 @@
       </section>
       <div id="toast"></div>
     </main>
+    <script src="xv-icon-set.js"></script>
     <script src="sidepanel.js"></script>
   </body>
 </html>

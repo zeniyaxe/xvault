@@ -114,3 +114,141 @@ label.row {
 #toast.show {
   transform: none;
 }
+
+/* XVault 24 "Aurora": icon tiles, switch toggles and a lit stat header. */
+main {
+  padding: 16px;
+}
+header button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-direction: row-reverse;
+  border-radius: 999px;
+  padding: 0 12px;
+}
+header button .sp-icon {
+  width: 15px;
+  height: 15px;
+}
+.hero {
+  position: relative;
+  padding: 16px 16px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    radial-gradient(130% 160% at 0% 0%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 62%),
+    var(--surface);
+  overflow: hidden;
+}
+.hero strong {
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+.grid {
+  gap: 10px;
+}
+.grid button {
+  gap: 3px;
+  min-height: 92px;
+  padding: 12px;
+  border-radius: 14px;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+.grid button:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+.grid button:active {
+  transform: scale(0.98);
+}
+.sp-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+.sp-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.grid .sp-icon {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 8px;
+  padding: 7px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+.card {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.row:first-of-type,
+.card > label:not(.row) + .row {
+  margin-top: 12px;
+}
+.row input[type='checkbox'] {
+  appearance: none;
+  position: relative;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--raised);
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+.row input[type='checkbox']::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition:
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 160ms ease;
+}
+.row input[type='checkbox']:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.row input[type='checkbox']:checked::after {
+  background: #fff;
+  transform: translateX(16px);
+}
+.row input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.shortcuts kbd {
+  border-radius: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .grid button,
+  .row input[type='checkbox'],
+  .row input[type='checkbox']::after {
+    transition: none;
+  }
+}
+.card label.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: var(--text);
+  font-size: 13px;
+}

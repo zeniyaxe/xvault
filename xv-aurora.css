@@ -16,7 +16,7 @@
   --line-soft: #1a1d23;
   --text: #eceef3;
   --soft: #b8bdc8;
-  --muted: #7e8591;
+  --muted: #868d99;
   --accent: #8d7dff;
   --accent-ink: #0c0a1d;
   --accent-2: #4cc3e8;
@@ -672,7 +672,7 @@ dialog::backdrop {
   border-bottom: 1px solid var(--line-soft);
   border-radius: 0;
   background: transparent
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%237e8591' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E")
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23868d99' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E")
     no-repeat 20px center;
   font-size: var(--fs-l);
   box-shadow: none;
@@ -690,16 +690,31 @@ dialog::backdrop {
   --btn-bg-hover: var(--hover);
   --btn-border: transparent;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   width: 100%;
-  min-height: 40px;
+  min-height: 42px;
   padding: 7px 12px;
   border-radius: var(--r-m);
   box-shadow: none;
   text-align: left;
   white-space: normal;
+}
+.paletteCommand .paletteIcon {
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border-radius: var(--r-s);
+  background: var(--raised);
+  color: var(--soft);
+  transition:
+    background-color var(--t-fast),
+    color var(--t-fast);
+}
+.palettebox #paletteList .paletteCommand.active .paletteIcon {
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 .paletteCommand b {
   font-weight: 600;
@@ -727,7 +742,7 @@ dialog::backdrop {
 }
 @media (max-width: 520px) {
   .paletteCommand {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr);
   }
   .paletteCommand small {
     display: none;

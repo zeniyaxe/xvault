@@ -2,6 +2,24 @@
 (() => {
   // Palette styles live in xv-aurora.css (XVault 24).
   let activeIndex = 0;
+  // A leading glyph per command family (explicit command.icon wins); decorative, the name stays the label.
+  const ICON_RULES = [
+    [/inbox|review/i, 'inbox'],
+    [/^archive|capture/i, 'archive'],
+    [/^export|recovery|backup/i, 'export'],
+    [/library/i, 'library'],
+    [/explore|time machine/i, 'explorer'],
+    [/tools/i, 'studio'],
+    [/keyboard|shortcut/i, 'keyboard'],
+    [/remote|phone/i, 'remote'],
+    [/download|media/i, 'download'],
+    [/find|search|show/i, 'search'],
+    [/theme|appearance|colou?r/i, 'color'],
+    [/setting/i, 'settings'],
+    [/workspace|view/i, 'layers'],
+  ];
+  const commandIcon = command =>
+    command.icon || ICON_RULES.find(([pattern]) => pattern.test(command.name || ''))?.[1] || 'command';
   let visible = [];
   const execute = command => {
     closePalette();
@@ -264,7 +282,7 @@
       ? visible
           .map(
             (command, index) =>
-              `<button type="button" class="paletteCommand ${index === activeIndex ? 'active' : ''}" data-command-index="${index}"><b>${esc(command.name)}</b><small>${esc(command.hint || '')}${command.shortcut ? ' � ' + esc(command.shortcut) : ''}</small></button>`
+              `<button type="button" class="paletteCommand ${index === activeIndex ? 'active' : ''}" data-command-index="${index}">${window.XVaultIcons?.svg(commandIcon(command), { className: 'paletteIcon' }) || ''}<b>${esc(command.name)}</b><small>${esc(command.hint || '')}${command.shortcut ? ' · ' + esc(command.shortcut) : ''}</small></button>`
           )
           .join('')
       : '<div class="paletteEmpty">No matching command. Try <b>archive @name</b>, <b>find tag:art</b>, or <b>show failed gifs</b>.</div>';

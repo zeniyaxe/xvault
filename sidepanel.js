@@ -3,7 +3,20 @@ const $ = s => document.querySelector(s),
   toTab = payload => call({ type: 'SEND_TO_TAB', payload });
 let settings = {};
 document.addEventListener('DOMContentLoaded', init);
+// Lucide glyphs from the shared vendored set (xv-icon-set.js); decorative, so hidden from assistive tech.
+function drawIcons() {
+  const set = globalThis.XVaultIconSet || {};
+  for (const node of document.querySelectorAll('[data-icon]')) {
+    const body = set[node.dataset.icon];
+    if (!body || node.querySelector('.sp-icon')) continue;
+    const icon = document.createElement('span');
+    icon.className = 'sp-icon';
+    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+    node.prepend(icon);
+  }
+}
 async function init() {
+  drawIcons();
   try {
     const [st, s] = await Promise.all([call({ type: 'GET_SETTINGS' }), call({ type: 'STATS' })]);
     settings = st?.settings || {};
