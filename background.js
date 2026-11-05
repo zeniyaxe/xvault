@@ -2719,6 +2719,7 @@ async function remoteLibraryQuery(options = {}) {
             .map(item => String(item?.type || '').toLowerCase())
             .filter(Boolean)
             .slice(0, 12),
+          ...remotePostContext(post),
         };
         let statusUrl = String(post.url || '');
         if (!statusUrl && /^[A-Za-z0-9_]{1,15}$/.test(row.handle))
@@ -2750,6 +2751,17 @@ async function remoteLibraryQuery(options = {}) {
         return row;
       })
       .filter(Boolean);
+    // XVault 24: quoted posts that are also in this vault travel with the row, so the phone can show them inline.
+    const quotedIds = [...new Set(rows.map(row => row.quotedPostId).filter(validRemoteId))].slice(0, 50);
+    if (quotedIds.length) {
+      const quoted = new Map((await remotePostsById(database, quotedIds)).map(post => [String(post.id), post]));
+      for (const row of rows) {
+        if (!row.quotedPostId) continue;
+        const post = quoted.get(row.quotedPostId);
+        row.quote = post ? remoteQuoteProjection(post) : { id: row.quotedPostId, missing: true };
+      }
+    }
+    for (const row of rows) delete row.quotedPostId;
     if (control.cancelled)
       return { ok: true, cancelled: true, rows: [], matched: 0, matchedExact: false, hasMore: false };
     const currentRevision = await readLibraryRevision(database),
@@ -2775,6 +2787,168 @@ async function remoteLibraryQuery(options = {}) {
   } finally {
     if (database) database.close();
     releaseRemoteQuery(activeRemoteSearches, searchKey, control);
+  }
+}
+// XVault 24 Remote rows: the context a phone needs to draw a real post preview. Only what the archive holds is sent;
+// a note's text never leaves this function (the phone learns that one exists and reads it through notes.write).
+function remoteHandle(value) {
+  const handle = String(value || '').replace(/^@/, '');
+  return /^[A-Za-z0-9_]{1,15}$/.test(handle) ? handle.toLowerCase() : '';
+}
+function remotePostContext(post) {
+  const handle = remoteHandle(post.author?.handle),
+    replyTo = remoteHandle(post.replyToHandle),
+    userMeta = post.userMeta && typeof post.userMeta === 'object' ? post.userMeta : {},
+    context = {
+      verified: !!post.author?.verified,
+      replyTo: replyTo || null,
+      thread: !!replyTo && replyTo === handle,
+      readLater: !!userMeta.readLater && !userMeta.readAt,
+      hasNote: !!String(userMeta.note || '').trim(),
+      quotedPostId: validRemoteId(String(post.quotedPostId || '')) ? String(post.quotedPostId) : null,
+      card: null,
+    };
+  const card = post.card && typeof post.card === 'object' ? post.card : null;
+  if (card && !(Array.isArray(post.media) && post.media.length) && (card.title || card.url)) {
+    let domain = String(card.domain || '');
+    try {
+      domain ||= new URL(String(card.url || '')).hostname.replace(/^www\./, '');
+    } catch {}
+    domain = /^[A-Za-z0-9.-]{1,253}$/.test(domain) ? domain.toLowerCase() : '';
+    if (domain || card.title)
+      context.card = { title: String(card.title || '').slice(0, 160), domain: domain.slice(0, 80) };
+  }
+  return context;
+}
+function remoteQuoteProjection(post) {
+  return {
+    id: String(post.id),
+    handle: remoteHandle(post.author?.handle),
+    name: String(post.author?.name || post.author?.handle || '').slice(0, 80),
+    text: String(post.text || '').slice(0, 280),
+    createdAt: post.createdAt || null,
+    mediaCount: Array.isArray(post.media) ? post.media.length : 0,
+  };
+}
+// Downloads as the phone sees them: the same honest counts the Downloads page shows, live transfers with the bytes
+// Chrome reports, and the most recent finished rows. No URLs or folders are sent, only file names.
+async function remoteDownloadsStatus() {
+  const stats = await queueStats(),
+    database = await db();
+  let history = [];
+  try {
+    history = (await readDownloadHistoryPage(database, 24)).rows || [];
+  } finally {
+    database.close();
+  }
+  const name = value =>
+    String(value || '')
+      .split(/[\\/]/)
+      .pop()
+      .slice(0, 120);
+  return {
+    ok: true,
+    countsReady: !!stats.countsReady,
+    queued: stats.queued,
+    retryWait: stats.retryWait,
+    downloading: stats.downloading,
+    paused: stats.paused,
+    complete: stats.complete,
+    failed: stats.failed,
+    active: stats.active,
+    pausedByUser: !!stats.pausedByUser,
+    hold: stats.hold ? String(stats.hold.reason || stats.hold.label || 'held').slice(0, 80) : null,
+    bytesReceived: Number(stats.bytesReceived) || 0,
+    totalBytes: Number(stats.totalBytes) || 0,
+    speedBps: Number(stats.speedBps) || 0,
+    etaSeconds: Number.isFinite(stats.etaSeconds) ? stats.etaSeconds : null,
+    transfers: (stats.activeRows || []).slice(0, 8).map(row => ({
+      name: name(row.name),
+      state: String(row.state || '').slice(0, 24),
+      bytesReceived: row.bytesReceived,
+      totalBytes: row.totalBytes,
+      speedBps: row.speedBps,
+      postId: validRemoteId(row.tweetId) ? row.tweetId : null,
+      kind: String(row.kind || '').slice(0, 24),
+    })),
+    recent: history.slice(0, 24).map(row => ({
+      name: name(row.target?.filename || String(row.item?.url || '').split('?')[0] || 'media'),
+      state: String(row.state || '').slice(0, 24),
+      postId: validRemoteId(String(row.item?.tweetId || row.tweetId || ''))
+        ? String(row.item?.tweetId || row.tweetId)
+        : null,
+      kind: String(row.item?.mediaType || row.target?.kind || '').slice(0, 24),
+      at: Number(row.completedAt || row.updatedAt || row.createdAt) || 0,
+      error: row.state === 'failed' ? String(row.error || row.verification?.reason || '').slice(0, 160) : '',
+    })),
+  };
+}
+async function remoteDownloadsControl(payload = {}) {
+  const action = String(payload.action || '');
+  if (action === 'pause') return pauseAllDownloads();
+  if (action === 'resume') return resumeAllDownloads();
+  if (action === 'retry') return retryFailed();
+  throw Error('This download action is not available');
+}
+// Overview: totals, the busiest authors and twelve months of archiving, counted from the posts store in one pass.
+async function remoteOverview() {
+  const database = await db();
+  try {
+    const now = new Date(),
+      months = [];
+    for (let back = 11; back >= 0; back--) {
+      const at = new Date(now.getFullYear(), now.getMonth() - back, 1);
+      months.push({ key: `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}`, count: 0 });
+    }
+    const monthIndex = new Map(months.map((month, index) => [month.key, index]));
+    const authors = new Map();
+    const totals = { posts: 0, media: 0, images: 0, videos: 0, favorites: 0, notes: 0, later: 0, people: 0 };
+    await new Promise((resolve, reject) => {
+      const tx = database.transaction('tweets', 'readonly'),
+        request = tx.objectStore('tweets').openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        const post = cursor.value || {},
+          media = Array.isArray(post.media) ? post.media : [],
+          meta = post.userMeta || {};
+        totals.posts++;
+        totals.media += media.length;
+        for (const item of media) {
+          if (item?.type === 'photo' || item?.type === 'image') totals.images++;
+          else if (item?.type) totals.videos++;
+        }
+        if (meta.favorite) totals.favorites++;
+        if (String(meta.note || '').trim()) totals.notes++;
+        if (meta.readLater && !meta.readAt) totals.later++;
+        const handle = remoteHandle(post.author?.handle);
+        if (handle) {
+          const author = authors.get(handle) || {
+            handle,
+            name: String(post.author?.name || handle).slice(0, 80),
+            count: 0,
+          };
+          author.count++;
+          authors.set(handle, author);
+        }
+        const archived = new Date(Number(post.archivedAt) || 0),
+          key = `${archived.getFullYear()}-${String(archived.getMonth() + 1).padStart(2, '0')}`;
+        if (monthIndex.has(key)) months[monthIndex.get(key)].count++;
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error || new Error('Overview read failed'));
+      tx.oncomplete = resolve;
+      tx.onabort = () => reject(tx.error || new Error('Overview read aborted'));
+    });
+    totals.people = authors.size;
+    return {
+      ok: true,
+      totals,
+      months,
+      authors: [...authors.values()].sort((a, b) => b.count - a.count || a.handle.localeCompare(b.handle)).slice(0, 8),
+    };
+  } finally {
+    database.close();
   }
 }
 async function remoteSetMeta(method, payload = {}) {
@@ -2908,6 +3082,9 @@ async function handleRemoteBridgeRequest(message) {
     };
   }
   if (method === 'library.media.page') return remoteMediaPage(payload);
+  if (method === 'downloads.status') return remoteDownloadsStatus();
+  if (method === 'downloads.control') return remoteDownloadsControl(payload);
+  if (method === 'library.overview') return remoteOverview();
   if (method === 'ui.preferences') {
     const s = await getSettings(),
       database = await db();
@@ -4835,7 +5012,9 @@ route('CANCEL_DOWNLOAD', async m => {
     return { ok: false, error: String(e) };
   }
 });
-route('PAUSE_ALL_DOWNLOADS', async m => {
+route('PAUSE_ALL_DOWNLOADS', async () => pauseAllDownloads());
+route('RESUME_ALL_DOWNLOADS', async () => resumeAllDownloads());
+async function pauseAllDownloads() {
   manualQueuePause = { at: Date.now() };
   await chrome.storage.local.set({ downloadQueuePause: manualQueuePause });
   let n = 0;
@@ -4847,8 +5026,8 @@ route('PAUSE_ALL_DOWNLOADS', async m => {
         n++;
       } catch {}
   return { ok: true, paused: n };
-});
-route('RESUME_ALL_DOWNLOADS', async m => {
+}
+async function resumeAllDownloads() {
   let n = 0;
   for (const r of active.values())
     if (r.downloadId)
@@ -4862,7 +5041,7 @@ route('RESUME_ALL_DOWNLOADS', async m => {
   await chrome.storage.local.remove('downloadQueuePause');
   void pump();
   return { ok: true, resumed: n };
-});
+}
 route('OPEN_DOWNLOAD_SOURCE', async m => {
   const url = String(m.url || '');
   if (!/^https:\/\/(x\.com|twitter\.com)\//i.test(url))
