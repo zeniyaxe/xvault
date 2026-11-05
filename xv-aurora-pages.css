@@ -1,0 +1,456 @@
+/* XVault 24 "Aurora" — Capture, Downloads, Atlas, Explore, Tools, System and Settings.
+   Presentation only, in the `aurora` layer. Each page keeps its markup and scripts; this sheet gives them the
+   shared Aurora surfaces: 18px cards, stat tiles, quiet section headings and consistent rhythm. */
+
+/* ── Page rhythm ── */
+.page.show {
+  padding: 26px 30px 72px;
+}
+.page.page-narrow.show {
+  max-width: 980px;
+}
+.panel {
+  border-radius: 18px;
+}
+.page .panel,
+.page > .grid > .panel,
+.page .grid > .panel,
+.page details.panel {
+  padding: 20px 22px;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--edge);
+}
+.page > .panel + .panel,
+.page > section.panel + section.panel {
+  margin-top: 0;
+  border-top: 1px solid var(--line-soft);
+}
+.panelhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.panel h3 {
+  margin: 0 0 4px;
+}
+.panel > small:first-child,
+.panelhead small:first-child {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.page .empty {
+  color: var(--muted);
+}
+
+/* ── Stat tiles (Capture, Downloads) ── */
+.vault-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+.vault-stats > div {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background:
+    radial-gradient(140px 80px at 100% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
+    var(--surface);
+  box-shadow: var(--edge);
+}
+.vault-stats > div:last-child {
+  margin: 0;
+  padding: 16px 18px;
+  border-right: 1px solid var(--line-soft);
+}
+.vault-stats dt {
+  order: 1;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-weight: 560;
+}
+.vault-stats dd {
+  order: 2;
+  margin: 0;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.queue-stats {
+  margin-bottom: 18px;
+}
+#qFailed:not(:is(:empty, [data-zero])) {
+  color: inherit;
+}
+
+/* ── Capture (home) ── */
+.home-top {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.home-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  min-width: 230px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.home-actions button {
+  justify-content: flex-start;
+  width: 100%;
+}
+.home-recent {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 128px;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+}
+.recent-tile {
+  position: relative;
+  width: 128px;
+  height: 128px;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--raised);
+  scroll-snap-align: start;
+  box-shadow: none;
+  transition:
+    transform var(--t-med) var(--ease-out),
+    border-color var(--t-fast),
+    box-shadow var(--t-med);
+}
+.recent-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+  box-shadow: var(--sh-2);
+}
+.recent-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.recent-tile > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+  padding: 12px;
+  color: var(--soft);
+  font-size: var(--fs-s);
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+}
+.home-grid {
+  margin-bottom: 18px;
+}
+.home-grid canvas {
+  width: 100%;
+  border-radius: 12px;
+}
+
+/* ── Downloads ── */
+.xd-page .mega {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 4px 0 12px;
+}
+.xd-page .mega strong {
+  font-size: 44px;
+  font-weight: 720;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  background: var(--aurora);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.xd-page .mega strong.is-empty {
+  background: none;
+  color: var(--muted);
+}
+.xd-page .mega span {
+  color: var(--soft);
+  font-variant-numeric: tabular-nums;
+}
+.xd-page #xdSpark {
+  margin-left: auto;
+}
+.bigprogress {
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--sunk);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  overflow: hidden;
+}
+.qmeta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  font-variant-numeric: tabular-nums;
+}
+.xv-engine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--sunk);
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+.xv-engine b {
+  color: var(--text);
+}
+.xv-engine button {
+  margin-left: auto;
+}
+.xd-historybar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 10px;
+}
+.xd-historybar input {
+  margin-left: auto;
+  max-width: 280px;
+  border-radius: var(--r-pill);
+}
+.downloadhistory {
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.downloadhistory > :not(.empty) {
+  border-bottom: 1px solid var(--line-soft);
+}
+.downloadhistory > :last-child {
+  border-bottom: 0;
+}
+.downloadhistory .empty {
+  padding: 36px 16px;
+  text-align: center;
+}
+.xd-active {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.xd-active > * {
+  border-radius: 14px;
+}
+.disclose > summary {
+  min-height: 32px;
+}
+
+/* ── System (health) ── */
+.healthlist {
+  display: grid;
+  gap: 2px;
+}
+.healthlist > * {
+  border-radius: 10px;
+}
+.healthlist > *:hover {
+  background: var(--hover);
+}
+.repairgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.repairgrid button {
+  justify-content: flex-start;
+  min-height: 42px;
+  border-radius: 12px;
+}
+
+/* ── Tools ── */
+.actionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.actionGrid button {
+  min-height: 42px;
+  border-radius: 12px;
+}
+#toolPostUrl {
+  min-height: 46px;
+  border-radius: 14px;
+  font-size: var(--fs-l);
+}
+
+/* ── Atlas ── */
+#page-atlas .xa-head h1 {
+  font-size: var(--fs-3xl);
+  font-weight: 720;
+  letter-spacing: -0.03em;
+}
+#page-atlas .xa-kpis {
+  gap: 12px;
+}
+#page-atlas .xa-kpi {
+  padding: 16px 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background:
+    radial-gradient(160px 90px at 100% 0%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 70%),
+    var(--surface);
+  box-shadow: var(--edge);
+}
+#page-atlas .xa-section {
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--edge);
+}
+#page-atlas .xa-split {
+  gap: 14px;
+}
+
+/* ── Explore ── */
+#page-explorer .xe-card,
+#page-explorer .tm-card,
+#page-explorer article {
+  border-radius: 16px;
+}
+
+/* ── Settings ── */
+.settings-shell {
+  gap: 28px;
+}
+.settings-nav {
+  padding: 4px;
+}
+.settings-links a,
+.settings-links button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--soft);
+  font-weight: 540;
+  text-decoration: none;
+  background: transparent;
+  box-shadow: none;
+}
+.settings-links a:hover,
+.settings-links button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.settings-links a[aria-current],
+.settings-links .active,
+.settings-links [aria-current='true'] {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 640;
+}
+.settings-search input {
+  min-height: 38px;
+  border-radius: 12px;
+}
+.settings-section > h3,
+.settings-section > header h3 {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.theme-card {
+  border-radius: 16px;
+  transition:
+    transform var(--t-med) var(--ease-out),
+    border-color var(--t-fast),
+    box-shadow var(--t-med);
+}
+.theme-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--sh-2);
+}
+.theme-card[aria-checked='true'] {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    var(--sh-2);
+}
+.theme-card .tc-mini {
+  border-radius: 11px;
+}
+#accentSwatches button {
+  border-radius: 50%;
+}
+
+/* ── Narrow windows & phones ── */
+@media (max-width: 900px) {
+  .page.show {
+    padding: 20px 18px 64px;
+  }
+}
+@media (max-width: 640px) {
+  .page.show {
+    padding: 14px 12px calc(96px + env(safe-area-inset-bottom));
+  }
+  .vault-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .vault-stats dd {
+    font-size: 24px;
+  }
+  .home-actions {
+    width: 100%;
+  }
+  .page .panel,
+  .page > .grid > .panel {
+    padding: 16px;
+    border-radius: 16px;
+  }
+  .xd-page .mega strong {
+    font-size: 34px;
+  }
+}
