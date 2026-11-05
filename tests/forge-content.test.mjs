@@ -155,7 +155,8 @@ test('rename plans skip unchanged files and never overwrite', () => {
   );
   assert.deepEqual(again.moves, [{ key: 'c', from: 'XVault/2-01.jpg', to: 'XVault/bob_2_01.jpg' }]);
   const foldered = Template.planRenames(rows.slice(2, 3), '{tweetId}', '{author}');
-  assert.deepEqual(foldered.moves, [{ key: 'c', from: 'XVault/2-01.jpg', to: 'bob/2.jpg' }]);
+  // The folder template applies inside the file's archive folder (v21 moved files out of XVault/).
+  assert.deepEqual(foldered.moves, [{ key: 'c', from: 'XVault/2-01.jpg', to: 'XVault/bob/2.jpg' }]);
 });
 
 test('post extras: polls, cards, Spaces, notes, edits, media extras', () => {

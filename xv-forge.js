@@ -310,7 +310,7 @@ ${reasons.length ? `<p class="xf-reasons">Most often missing: ${reasons.map(([re
   });
 
   /* ───────────── Downloads › Files & health ───────────── */
-  const filesState = { duplicates: null, plan: null };
+  const filesState = { duplicates: null, plan: null, helper: [] };
   function filesSkeleton() {
     const root = ensurePage('files', 'media', 'Download files and health');
     if (root.dataset.ready) {
@@ -329,7 +329,7 @@ ${reasons.length ? `<p class="xf-reasons">Most often missing: ${reasons.map(([re
 <section class="panel" aria-labelledby="xfDupTitle"><div class="panelhead"><div><h3 id="xfDupTitle">Duplicate files</h3><p>Completed downloads with identical bytes (or the same media at the same size). XVault keeps one copy and can delete the rest from disk.</p></div></div><div id="xfDup"></div></section>
 <section class="panel" aria-labelledby="xfVerifyTitle"><div class="panelhead"><div><h3 id="xfVerifyTitle">Re-check files</h3><p>Confirms each completed file is still on disk and still the right type. Schedule it in Settings › Downloads.</p></div></div><div id="xfVerify"></div></section>
 <section class="panel xf-wide" aria-labelledby="xfRenameTitle"><div class="panelhead"><div><h3 id="xfRenameTitle">Rename files to a template</h3><p>Browsers cannot move finished downloads, so XVault plans every rename (never overwriting anything), gives you a script to run, then updates its records.</p></div></div>
-<form id="xfRename" class="xf-rename" autocomplete="off"><label class="field"><span>Filename template</span><input name="file" spellcheck="false" maxlength="300"></label><label class="field"><span>Folder template (optional — empty keeps current folders)</span><input name="folder" spellcheck="false" maxlength="300" placeholder="{author}/{year}"></label><div class="pathpreview" id="xfRenamePreview" aria-live="polite"></div><div class="row"><button type="submit" class="primary">Plan renames</button></div></form><div id="xfRenamePlan"></div></section>
+<form id="xfRename" class="xf-rename" autocomplete="off"><label class="field"><span>Filename template</span><input name="file" spellcheck="false" maxlength="300"></label><label class="field"><span>Folder template inside your XVault folder (optional — empty keeps current folders)</span><input name="folder" spellcheck="false" maxlength="300" placeholder="{author}/{year}"></label><div class="pathpreview" id="xfRenamePreview" aria-live="polite"></div><div class="row"><button type="submit" class="primary">Plan renames</button></div></form><div id="xfRenamePlan"></div></section>
 </div>`;
     root.addEventListener('click', onFilesClick);
     const form = root.querySelector('#xfRename');
@@ -359,6 +359,9 @@ ${reasons.length ? `<p class="xf-reasons">Most often missing: ${reasons.map(([re
       ask({ type: 'DUPLICATE_REPORT' }),
       ask({ type: 'INTEGRITY_REVERIFY_STATUS' }),
     ]);
+    // File operations the local helper can do (22.0+); without it the script / trash paths remain.
+    const helper = await ask({ type: 'HELPER_STATUS' }).catch(() => null);
+    filesState.helper = helper?.connected ? helper.capabilities || [] : [];
     const hold = health?.hold || null,
       band = health?.bandwidth || {};
     const policy = [
@@ -394,7 +397,7 @@ ${reasons.length ? `<p class="xf-reasons">Most often missing: ${reasons.map(([re
           )
           .join(
             ''
-          )}</ul>${groups.length > 30 ? `<p class="xf-muted">and ${n(groups.length - 30)} more groups (all included)</p>` : ''}<div class="row"><button type="button" class="danger" data-ff="reclaim">Delete extra copies</button></div>`
+          )}</ul>${groups.length > 30 ? `<p class="xf-muted">and ${n(groups.length - 30)} more groups (all included)</p>` : ''}<div class="row">${filesState.helper.includes('link-duplicates') ? '<button type="button" class="primary" data-ff="link" title="The helper swaps each identical copy for a hard link: every path keeps working and the space is freed">Link identical copies</button>' : ''}<button type="button" class="danger" data-ff="reclaim">Delete extra copies</button></div>${filesState.helper.includes('link-duplicates') ? '<p class="xf-muted">The helper checks every pair byte for byte first; copies that differ or sit on another drive are left alone.</p>' : ''}`
       : '<p class="xf-muted">No duplicate files found.</p>';
     const last = verify?.last;
     $('#xfVerify').innerHTML =
@@ -420,7 +423,7 @@ ${reasons.length ? `<p class="xf-reasons">Most often missing: ${reasons.map(([re
       .slice(0, 12)
       .map(move => `<li><code>${html(move.from)}</code> → <code>${html(move.to)}</code></li>`)
       .join('')}</ol>${plan.total > 12 ? `<p class="xf-muted">…and ${n(plan.total - 12)} more.</p>` : ''}
-<ol class="xf-steps"><li>Download the script for your system and run it from any folder. It only moves files that exist and never replaces one.<div class="row"><button type="button" data-ff="script" data-os="sh">macOS / Linux script</button><button type="button" data-ff="script" data-os="ps1">Windows PowerShell script</button></div></li><li>Then tell XVault, so the Library, verification and duplicate checks follow the new names.<div class="row"><button type="button" class="primary" data-ff="record">I ran it — update records</button></div></li></ol><p class="xf-muted">Download folder: <code>${html(plan.base || 'unknown — the script asks for it')}</code>${plan.truncated ? ' · the plan shows the first 5,000 files; plan again after renaming for the rest' : ''}. Future downloads use the template set in Settings › Downloads.</p>`;
+${filesState.helper.includes('rename') ? `<div class="xf-helper-rename"><p>The XVault helper is running, so XVault can rename the files itself — nothing is ever overwritten and only confirmed moves are recorded.</p><div class="row"><button type="button" class="primary" data-ff="helper-rename">Rename ${n(plan.total)} files now</button></div><p class="xf-muted">Or do it by hand:</p></div>` : ''}<ol class="xf-steps"><li>Download the script for your system and run it from any folder. It only moves files that exist and never replaces one.<div class="row"><button type="button" data-ff="script" data-os="sh">macOS / Linux script</button><button type="button" data-ff="script" data-os="ps1">Windows PowerShell script</button></div></li><li>Then tell XVault, so the Library, verification and duplicate checks follow the new names.<div class="row"><button type="button" class="primary" data-ff="record">I ran it — update records</button></div></li></ol><p class="xf-muted">Download folder: <code>${html(plan.base || 'unknown — the script asks for it')}</code>${plan.truncated ? ' · the plan shows the first 5,000 files; plan again after renaming for the rest' : ''}. Future downloads use the template set in Settings › Downloads.</p>`;
   }
 
   function renameScript(plan, os) {
@@ -475,6 +478,71 @@ ${reasons.length ? `<p class="xf-reasons">Most often missing: ${reasons.map(([re
           : result?.error || 'Could not delete'
       );
       return paintFiles();
+    }
+    if (act === 'link') {
+      const chosen = new Set(
+        [...document.querySelectorAll('#xfDup [data-dup]:checked')].map(input => input.dataset.dup)
+      );
+      const groups = (filesState.duplicates?.groups || []).filter(
+        (group, index) => index >= 30 || chosen.has(group.key)
+      );
+      const keys = groups.flatMap(group => group.remove.map(entry => entry.key));
+      if (!keys.length) return say('Choose at least one group');
+      target.disabled = true;
+      const preview = await ask({ type: 'DUPLICATE_LINK', keys, dryRun: true });
+      target.disabled = false;
+      if (!preview?.ok) return say(preview?.error || 'The helper could not check the files');
+      const ready = preview.counts?.['would-link'] || 0;
+      if (!ready)
+        return say(
+          `Nothing to link${preview.problems?.[0] ? ` · ${preview.problems[0].reason || preview.problems[0].state}` : ''}`
+        );
+      if (
+        !confirm(
+          `Replace ${n(ready)} identical copies with links (${bytes(preview.bytes)} freed)? Every file keeps its path.`
+        )
+      )
+        return;
+      target.disabled = true;
+      const result = await ask({ type: 'DUPLICATE_LINK', keys });
+      target.disabled = false;
+      say(
+        result?.ok
+          ? `Linked ${n(result.linked)} files · ${bytes(result.bytes)} freed${result.problems?.length ? ` · ${n(result.problems.length)} left alone` : ''}`
+          : result?.error || 'Could not link'
+      );
+      return paintFiles();
+    }
+    if (act === 'helper-rename') {
+      const plan = filesState.plan;
+      if (!plan || !confirm(`Rename ${n(plan.moves.length)} files with the helper? Existing files are never replaced.`))
+        return;
+      target.disabled = true;
+      target.textContent = 'Renaming…';
+      const result = await ask({
+        type: 'HELPER_RENAME_APPLY',
+        fileTemplate: plan.fileTemplate,
+        folderTemplate: plan.folderTemplate,
+        keys: plan.moves.map(move => move.key),
+      });
+      if (!result?.ok) {
+        target.disabled = false;
+        target.textContent = 'Try again';
+        return say(result?.error || 'The helper could not rename the files');
+      }
+      const left = result.problems || [];
+      $('#xfRenamePlan').innerHTML =
+        `<p class="xf-ok" role="status">Renamed ${n(result.updated)} of ${n(result.planned)} files.</p>${
+          left.length
+            ? `<p class="xf-warn">${n(left.length)} left as they were:</p><ul class="xf-list">${left
+                .slice(0, 12)
+                .map(row => `<li><code>${html(row.key)}</code> · ${html(row.reason || row.state)}</li>`)
+                .join('')}</ul>`
+            : ''
+        }`;
+      filesState.plan = null;
+      say(`${n(result.updated)} files renamed`);
+      return result.updated && save({ fileNaming: 'custom', customFilenameTemplate: plan.fileTemplate }, false);
     }
     if (act === 'script') {
       const plan = filesState.plan;

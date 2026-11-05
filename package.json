@@ -16,7 +16,8 @@
     "e2e": "node scripts/e2e-extension.mjs && node scripts/e2e-library.mjs",
     "e2e:a11y": "node scripts/e2e-a11y.mjs",
     "bench": "node scripts/bench.mjs",
-    "verify": "npm run check && npm run lint && npm test && npm run format:check"
+    "verify": "npm run check && npm run lint && npm test && npm run format:check",
+    "e2e:helper": "node tests/helper-files-browser.mjs playwright \"$CHROMIUM_PATH\""
   },
   "devDependencies": {
     "@tesseract.js-data/eng": "^1.0.0",

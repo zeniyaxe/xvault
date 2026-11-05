@@ -282,6 +282,9 @@ class API(BaseHTTPRequestHandler):
    data=p.read_bytes();self.send_response(200);self.send_header('Access-Control-Allow-Origin',self.headers.get('Origin','null'));self.send_header('Vary','Origin');self.send_header('Cache-Control','no-store');self.send_header('Content-Type','image/gif' if p.suffix.lower()=='.gif' else 'image/webp' if p.suffix.lower()=='.webp' else 'application/octet-stream');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data);return
   self.sendj({'error':'Not found'},404)
  def do_POST(self):
+  # Chromium sends no Origin header on GET requests from an extension that holds host permissions, so the
+  # extension pairs with POST /bootstrap (which always carries Origin). GET /bootstrap stays for old builds.
+  if urllib.parse.urlparse(self.path).path=='/bootstrap': return self.sendj({'ok':True,'token':auth_token()},200) if self.allowed(True) else self.sendj({'error':'Extension origin required'},403)
   if not self.authorized(): return self.sendj({'error':'Authentication required'},401)
   limit=1048576 if urllib.parse.urlparse(self.path).path.startswith('/files/') else 16384
   if int(self.headers.get('Content-Length','0') or 0)>limit:return self.sendj({'error':'Request too large'},413)

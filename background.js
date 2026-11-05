@@ -3694,11 +3694,8 @@ router.register('RENAME_PLAN', async m => {
   const limit = Math.max(1, Math.min(20000, Number(m.limit) || 5000));
   return { ...plan, total: plan.moves.length, moves: plan.moves.slice(0, limit), truncated: plan.moves.length > limit };
 });
-router.register('RENAME_RECORD', async m => {
-  const plan = await renamePlan(m);
-  if (!plan.ok) return plan;
-  const wanted = new Set((Array.isArray(m.keys) ? m.keys : []).map(String));
-  const moves = plan.moves.filter(move => !wanted.size || wanted.has(String(move.key)));
+// Re-point download records at their new paths (only rows still at move.from are touched).
+async function recordRenames(moves) {
   let updated = 0;
   for (let at = 0; at < moves.length; at += 200) {
     const batch = moves.slice(at, at + 200),
@@ -3725,9 +3722,127 @@ router.register('RENAME_RECORD', async m => {
     if (rows.length) await putMany('downloads', rows);
     updated += rows.length;
   }
+  return updated;
+}
+router.register('RENAME_RECORD', async m => {
+  const plan = await renamePlan(m);
+  if (!plan.ok) return plan;
+  const wanted = new Set((Array.isArray(m.keys) ? m.keys : []).map(String));
+  const updated = await recordRenames(plan.moves.filter(move => !wanted.size || wanted.has(String(move.key))));
   if (updated)
     void action('downloads', `Recorded ${updated} renamed files`, { template: m.fileTemplate }).catch(() => {});
   return { ok: true, updated };
+});
+// With the local helper (v22+), XVault performs the plan itself: the helper moves files inside its
+// XVault folder without ever overwriting, and only moves it confirms are recorded.
+async function helperFileOps(capability) {
+  const status = await helperStatusCore();
+  if (!status.connected) return { ok: false, error: 'The XVault helper is not running' };
+  if (!(status.capabilities || []).includes(capability))
+    return { ok: false, error: 'Update the XVault helper to 22.0 or newer for file operations' };
+  const root = String(status.watching || '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+  return { ok: true, rootName: root.slice(root.lastIndexOf('/') + 1), status };
+}
+const firstSegment = path =>
+  String(path || '')
+    .replace(/\\/g, '/')
+    .split('/')[0] || '';
+router.register('HELPER_RENAME_APPLY', async m => {
+  const helper = await helperFileOps('rename');
+  if (!helper.ok) return helper;
+  const plan = await renamePlan(m);
+  if (!plan.ok) return plan;
+  const wanted = new Set((Array.isArray(m.keys) ? m.keys : []).map(String));
+  const dryRun = !!m.dryRun;
+  const counts = {},
+    problems = [];
+  const confirmed = [];
+  // Both ends must stay inside the folder the helper watches; anything else stays a script job.
+  const moves = plan.moves.filter(move => !wanted.size || wanted.has(String(move.key)));
+  const inside = moves.filter(move => {
+    const ok =
+      firstSegment(move.from).toLowerCase() === helper.rootName.toLowerCase() &&
+      firstSegment(move.to).toLowerCase() === helper.rootName.toLowerCase();
+    if (!ok)
+      problems.push({ key: move.key, state: 'outside', reason: `Not inside the helper folder ${helper.rootName}` });
+    return ok;
+  });
+  for (let at = 0; at < inside.length; at += 200) {
+    const batch = inside.slice(at, at + 200);
+    const out = await helperPost('/files/rename', {
+      dryRun,
+      moves: batch.map(move => ({ key: move.key, from: move.from, to: move.to })),
+    });
+    if (!out.ok) return { ok: false, error: out.error || `Helper returned HTTP ${out.status}`, counts, problems };
+    const byKey = new Map(batch.map(move => [String(move.key), move]));
+    for (const result of out.results || []) {
+      counts[result.state] = (counts[result.state] || 0) + 1;
+      if (['moved', 'already-moved'].includes(result.state) && byKey.has(String(result.key)))
+        confirmed.push(byKey.get(String(result.key)));
+      else if (!['would-move', 'unchanged'].includes(result.state))
+        problems.push({ key: result.key, state: result.state, reason: result.reason || '' });
+    }
+  }
+  const updated = dryRun ? 0 : await recordRenames(confirmed);
+  if (updated)
+    void action('downloads', `Renamed ${updated} files with the helper`, { template: m.fileTemplate }).catch(() => {});
+  return { ok: true, dryRun, planned: moves.length, updated, counts, problems: problems.slice(0, 200) };
+});
+router.register('DUPLICATE_LINK', async m => {
+  const helper = await helperFileOps('link-duplicates');
+  if (!helper.ok) return helper;
+  const keys = new Set((Array.isArray(m.keys) ? m.keys : []).map(String).slice(0, 5000));
+  const report = duplicateReport(await all('downloads'), { assetOf: row => assetIdentity(row.item?.url).asset });
+  // The helper hashes both files and links only byte-identical copies on the same drive, so
+  // "same media and size" groups are safe to offer too: a near-match is simply left alone.
+  const pairs = report.groups
+    .filter(group => group.keep.file)
+    .flatMap(group =>
+      group.remove
+        .filter(entry => entry.file && (!keys.size || keys.has(String(entry.key))))
+        .map(entry => ({ key: entry.key, keep: group.keep.file, duplicate: entry.file, keepKey: group.keep.key }))
+    );
+  const dryRun = !!m.dryRun;
+  const counts = {},
+    problems = [];
+  let linked = 0,
+    bytes = 0;
+  for (let at = 0; at < pairs.length; at += 200) {
+    const batch = pairs.slice(at, at + 200);
+    const out = await helperPost('/files/link-duplicates', {
+      dryRun,
+      pairs: batch.map(({ key, keep, duplicate }) => ({ key, keep, duplicate })),
+    });
+    if (!out.ok) return { ok: false, error: out.error || `Helper returned HTTP ${out.status}`, counts, problems };
+    const byKey = new Map(batch.map(pair => [String(pair.key), pair]));
+    const rows = [];
+    for (const result of out.results || []) {
+      counts[result.state] = (counts[result.state] || 0) + 1;
+      const pair = byKey.get(String(result.key));
+      if (!pair) continue;
+      if (['linked', 'already-linked'].includes(result.state) && !dryRun) {
+        const row = await store('downloads', 'readonly', os => req(os.get(pair.key)));
+        if (row) {
+          // The file still exists (it is the same inode as the kept copy), so the row stays a normal
+          // completed download; linkedAt only keeps it out of future duplicate reports.
+          row.linkedAt = Date.now();
+          row.linkedTo = pair.keepKey;
+          rows.push(row);
+        }
+        if (result.state === 'linked') {
+          linked++;
+          bytes += Number(result.bytes) || 0;
+        }
+      } else if (result.state === 'would-link') bytes += Number(result.bytes) || 0;
+      else if (!['linked', 'already-linked'].includes(result.state))
+        problems.push({ key: result.key, state: result.state, reason: result.reason || '' });
+    }
+    if (rows.length) await putMany('downloads', rows);
+  }
+  if (linked) void action('downloads', `Linked ${linked} duplicate files`, { bytes }).catch(() => {});
+  return { ok: true, dryRun, pairs: pairs.length, linked, bytes, counts, problems: problems.slice(0, 200) };
 });
 const INTEGRITY_ALARM = 'xv-integrity-reverify';
 async function reverifyCompletedDownloads({ limit = 400 } = {}) {
@@ -7053,7 +7168,9 @@ async function helperFetch(path, options = {}) {
     signal: options.signal || AbortSignal.timeout(1500),
   });
   if (r.status === 401) {
+    // POST: Chromium omits the Origin header on extension GETs, and the helper only pairs with a known origin.
     const boot = await fetch(`http://127.0.0.1:${port}/bootstrap`, {
+      method: 'POST',
       cache: 'no-store',
       signal: AbortSignal.timeout(1200),
     }).catch(() => null);
