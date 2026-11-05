@@ -2,6 +2,64 @@
 
 This file is the hand-off document: another session should be able to resume from here.
 
+## v22 "Keystone" pass
+
+Branch: `xvault-22-keystone` (from `main` after PR #4 was merged). Version 22.0.0. Goal: run Firefox for real,
+finish the helper file operations from the v21 list, make backups automatic, and add date navigation to the
+Library — then fix what the new real-browser tests found.
+
+| Area | Change |
+| --- | --- |
+| Firefox | `scripts/e2e-firefox.py` drives the real Firefox build through geckodriver/Marionette (install add-on, seed, Library, capture message path, downloads to disk, OCR on the event page, automatic backup) and is a CI job. Fixes: `setAccessLevel` guard, `moz-extension:` origin accepted as the dashboard, one owner per tab message (instant-actions returned `null` for messages it does not own, and that reply won). |
+| Helper files | `FFmpeg_Helper/file_ops.py`: no-overwrite rename (`os.link` then unlink — fails if the target exists — or `os.rename` after a check where links are unsupported; both paths inside the watched root) and verified hard-link dedupe (same volume, same size and SHA-256 before linking, atomic `os.replace` from a temporary link so the duplicate's path never disappears). Helper 22.0 reports `rename` / `link-duplicates` capabilities. Worker routes `HELPER_RENAME_APPLY` (≤200 per batch, `recordRenames()` updates only confirmed moves) and `DUPLICATE_LINK` (rows get `linkedAt`/`linkedTo`, excluded from later duplicate reports). Pairing uses `POST /bootstrap` (Chromium sends no `Origin` on extension GETs). |
+| Automatic backups | `recovery-backup-core.mjs` (`writeRecoveryBackup`, shared with manual export), `offscreen-backup.mjs` (offscreen target `xv-backup`, build/release with leases shared with OCR), `sw/auto-backup.mjs` (hourly alarm, due logic, `Backups/xvault-auto-*.jsonl|.xvenc`, retention that only deletes downloads it logged itself, after checking the download's filename still matches, skip-unchanged via the library revision, passphrase only in `storage.session`, inline builder on Firefox). Storage page panel in `xv-vault.js`. |
+| Timeline | `sw/timeline.mjs` (`timelineBuckets`, day ≤ 92 days, week ≤ 2 years, month ≤ 10 years, else year; Monday weeks; UTC or local). Route `LIBRARY_TIMELINE` scans matching posts in 1,000-record pages (cap 400k), cached per revision/zone/field/query. `xv-keystone.js` renders the strip (buttons with labels, roving tabindex, click/drag brush → `after:`/`before:` or `archived-after:`/`archived-before:`). |
+| asof | `asof:` cards render the text from the newest revision at or before that day and mark "edited later". |
+| Atlas | Year in Review `reviewModel()` feeds the page, a canvas PNG card (text only) and a Markdown summary. |
+| Fixes | `mergeLibraryCapture` replaced the revision-bump `onsuccess` instead of chaining it, so captures never advanced the library revision; rename planner folder templates escaped `XVault/`; CI never ran the 28 top-level Python tests; ESLint 10 → 0 warnings. |
+
+### Decisions (v22)
+
+- **The helper does file work only inside its watched folder.** Both ends of every rename and both copies of every
+  link must resolve inside the helper's root; anything else is refused and reported. Records follow the helper's
+  confirmation, never the plan.
+- **Hard links, not deletions.** Linking keeps every path the user (or another app) may rely on and still frees the
+  space; the helper re-hashes both files, so a stale XVault record cannot link different content.
+- **Backups go through the downloads API.** Chrome extensions cannot write arbitrary paths, so automatic backups
+  are downloads into `<media folder>/Backups/`; retention removes only downloads the schedule logged itself, and
+  only while the browser's record still has the same filename. Media files are not copied — the recovery file is the archive, media stay where they are.
+- **Encrypted schedules need the passphrase once per browser session.** It is kept in `storage.session` (memory),
+  never on disk; without it the schedule reports "locked" instead of silently writing plaintext.
+- **Timeline counts on demand.** One worker scan per (query, revision) is cheap enough at 100k posts and keeps the
+  numbers exact for any query; a pre-aggregated index was not worth the write cost.
+
+### Verification log (v22)
+
+| Check | Result |
+| --- | --- |
+| `npm run verify` (structure check, ESLint, unit tests, Prettier) | pass: ESLint 0 errors / 0 warnings, 150/150 tests |
+| `npm run e2e` (all pages at 4 viewports, seeded Library incl. timeline and Year in Review exports) | pass (Library 14/14) |
+| `node scripts/e2e-a11y.mjs` (axe-core) | 28 surfaces, 0 violations |
+| `npm run e2e:helper` (real Chromium downloads + real Python helper; offscreen automatic backups) | pass: 1 copy linked, differing file untouched; 3 renamed, 1 overwrite refused; plaintext + encrypted backups, retention kept 2 |
+| `scripts/e2e-firefox.py` on the Firefox zip (Firefox + geckodriver) | 19/19 (live x.com check skipped unless `FF_LIVE_X=1`) |
+| Python: `tests/python` and top-level `tests/test_*.py` | 18 + 46 tests pass |
+| `npm run build:all` | Chrome, Edge and Firefox zips built (184 files each) |
+| `web-ext lint` on the Firefox build | 0 errors, 151 warnings (minified-code and `innerHTML` notices) |
+
+Not verified: live X (capture paths, visit/watch queues, badges, x.com content scripts in Firefox), a real
+X-issued archive, the helper on Windows/NTFS (tests ran on Linux ext4), the Edge store, and screen readers.
+
+### Remaining after v22
+
+1. Live X: capture of polls/cards/notes/tombstones on real GraphQL payloads, visit and watch queues, badges; a
+   real (anonymised) X-issued archive including ZIP media.
+2. Firefox: the helper only accepts `chrome-extension://` origins, so helper features (conversion, renames, links)
+   are unavailable there; Remote needs Native Messaging registration for Firefox.
+3. Storage statistics count hard-linked copies twice (the browser reports each path's size).
+4. Optional neural embeddings (opt-in, local model) as a second meaning engine; OCR languages beyond English.
+5. Keep replacing structural source tests with behavioural ones and delete superseded `dashboard.js` paths.
+6. A reply/quote thread graph view (Atlas has the mention graph), and timeline zoom (drill from year to day).
+
 ## v21 "Forge" pass
 
 Branch: `xvault-21-forge` (from `main` after PRs #1–#3 were merged). Version 21.0.0. Goal: close the v20 gaps, then
