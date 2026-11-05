@@ -113,7 +113,9 @@ export function createInsightsAccumulator(options = {}) {
     sources: new Map(),
     tags: new Map(),
     media: { photo: 0, video: 0, gif: 0, other: 0, items: 0, postsWithMedia: 0, textOnly: 0 },
-    relationships: { replies: 0, quotes: 0, reposts: 0, selfThreads: 0, conversations: new Set() },
+    // XVault 25: conversations count members (the conversation id is the root post id on X), quotes count how often
+    // each quoted post appears, so Atlas can show the largest threads and the most-quoted posts.
+    relationships: { replies: 0, quotes: 0, reposts: 0, selfThreads: 0, conversations: new Map(), quoted: new Map() },
     personal: { favorites: 0, tagged: 0, notes: 0, reviewed: 0 },
     sensitive: 0,
     likes: 0,
@@ -270,11 +272,25 @@ export function createInsightsAccumulator(options = {}) {
       else if (owners.length < 24 && !owners.includes(String(post.id))) owners.push(String(post.id));
     });
     if (post.replyToId) state.relationships.replies++;
-    if (post.quotedPostId) state.relationships.quotes++;
+    if (post.quotedPostId) {
+      state.relationships.quotes++;
+      const quoted = String(post.quotedPostId);
+      if (state.relationships.quoted.has(quoted) || state.relationships.quoted.size < 200000)
+        state.relationships.quoted.set(quoted, (state.relationships.quoted.get(quoted) || 0) + 1);
+    }
     if (wrapper) state.relationships.reposts++;
     if (post.replyToId && String(post.replyToHandle || '').toLowerCase() === handle) state.relationships.selfThreads++;
-    if (post.conversationId && state.relationships.conversations.size < 200000)
-      state.relationships.conversations.add(String(post.conversationId));
+    if (post.conversationId) {
+      const conversations = state.relationships.conversations,
+        key = String(post.conversationId),
+        known = conversations.get(key);
+      if (known) {
+        known.posts++;
+        if (known.authors.size < 12) known.authors.add(handle);
+        if (key === String(post.id)) known.member = key;
+      } else if (conversations.size < 200000)
+        conversations.set(key, { posts: 1, member: String(post.id), authors: new Set([handle]) });
+    }
     const likes = Number(post.metrics?.likes || 0);
     state.likes += likes;
     state.views += Number(post.metrics?.views || 0);
@@ -378,6 +394,15 @@ export function createInsightsAccumulator(options = {}) {
         reposts: state.relationships.reposts,
         selfThreads: state.relationships.selfThreads,
         conversations: state.relationships.conversations.size,
+        topConversations: [...state.relationships.conversations.entries()]
+          .filter(([, row]) => row.posts > 1)
+          .sort((a, b) => b[1].posts - a[1].posts || String(a[0]).localeCompare(String(b[0])))
+          .slice(0, 8)
+          .map(([id, row]) => ({ id, posts: row.posts, member: row.member, people: row.authors.size })),
+        topQuoted: topEntries(state.relationships.quoted, 40)
+          .filter(row => row.count > 1)
+          .slice(0, 6)
+          .map(row => ({ id: row.key, quotes: row.count })),
       },
       personal: { ...state.personal },
       sensitive: state.sensitive,

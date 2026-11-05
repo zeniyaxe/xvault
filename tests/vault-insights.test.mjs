@@ -47,6 +47,16 @@ assert.equal(insights.relationships.replies, 3);
 assert.equal(insights.relationships.quotes, 1);
 assert.ok(insights.relationships.selfThreads >= 1, 'self-replies by the root author form a thread');
 assert.deepEqual(
+  insights.relationships.topConversations,
+  [{ id: '100', posts: 4, member: '100', people: 2 }],
+  'XVault 25: the largest conversations are counted with their root and the people in them'
+);
+assert.deepEqual(insights.relationships.topQuoted, [], 'a post quoted once is not a "most quoted" post');
+const quotedTwice = buildInsights([quote, post('106', 'eve', '2025-01-05T09:00:00Z', { quotedPostId: '100' })], {
+  now: at('2026-03-01T13:00:00Z'),
+});
+assert.deepEqual(quotedTwice.relationships.topQuoted, [{ id: '100', quotes: 2 }]);
+assert.deepEqual(
   insights.sharedMedia.map(group => [group.mediaId, group.posts.map(String).sort()]),
   [['m1', ['104', '105']]],
   'the same media id archived from two posts is reported once'
