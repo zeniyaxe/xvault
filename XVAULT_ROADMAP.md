@@ -50,8 +50,8 @@ Library — then fix what the new real-browser tests found.
 | `npm run e2e:helper` (real Chromium downloads + real Python helper; offscreen automatic backups) | pass: 1 copy linked, differing file untouched; 3 renamed, 1 overwrite refused; plaintext + encrypted backups, retention kept 2 |
 | `scripts/e2e-firefox.py` on the Firefox zip (Firefox + geckodriver) | 19/19 (live x.com check skipped unless `FF_LIVE_X=1`) |
 | Python: `tests/python` and top-level `tests/test_*.py` | 18 + 46 tests pass |
-| `npm run build:all` | Chrome, Edge and Firefox zips built (184 files each) |
-| `web-ext lint` on the Firefox build | 0 errors, 151 warnings (minified-code and `innerHTML` notices) |
+| `npm run build:all` | Chrome, Edge and Firefox zips built (187 files each) |
+| `web-ext lint` on the Firefox build | 0 errors, 153 warnings (minified-code and `innerHTML` notices) |
 
 Not verified: live X (capture paths, visit/watch queues, badges, x.com content scripts in Firefox), a real
 X-issued archive, the helper on Windows/NTFS (tests ran on Linux ext4), the Edge store, and screen readers.
