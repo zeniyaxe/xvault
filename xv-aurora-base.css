@@ -995,3 +995,21 @@ progress {
   background: var(--aurora);
   border-radius: inherit;
 }
+
+/* Keyframes still used by legacy modules (explorer, library, reader menus) after the shell moved out of xv-base. */
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+@keyframes pageIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.ghost:hover {
+  background: var(--raised);
+  color: var(--text);
+}

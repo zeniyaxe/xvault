@@ -1679,11 +1679,17 @@
 
 /* ── Floating selection bar: a pill that rises from the bottom ── */
 .xv-library-bulk {
-  left: 50%;
-  right: auto;
+  /* both insets + fit-content: centred, and free to use the full pane width before it wraps
+     (left: 50% alone would cap the shrink-to-fit width at half the pane) */
+  left: 24px;
+  right: 24px;
   bottom: 22px;
-  transform: translateX(-50%);
-  max-width: calc(100% - 48px);
+  width: fit-content;
+  margin-inline: auto;
+  transform: none;
+  max-width: none;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 4px;
   padding: 6px 6px 6px 14px;
   border: 1px solid var(--line);
@@ -1697,7 +1703,7 @@
 @keyframes xvBulkIn {
   from {
     opacity: 0;
-    transform: translate(-50%, 16px) scale(0.97);
+    transform: translateY(16px) scale(0.97);
   }
 }
 .xv-library-bulk strong {
@@ -1866,8 +1872,12 @@
   }
   .xv-library-bulk {
     position: fixed;
+    left: 8px;
+    right: 8px;
     bottom: calc(74px + env(safe-area-inset-bottom));
     max-width: calc(100vw - 16px);
+    flex-wrap: nowrap;
+    justify-content: flex-start;
     overflow-x: auto;
     scrollbar-width: none;
   }

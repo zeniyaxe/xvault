@@ -400,8 +400,12 @@ body[data-nav='wide'] .rail-collapse svg {
   transform: rotate(180deg);
 }
 .railfoot {
+  display: flex;
+  align-items: center;
   justify-content: center;
   gap: 8px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
   min-height: 36px;
   margin-top: 2px;
   padding: 8px 0 2px;
@@ -410,12 +414,36 @@ body[data-nav='wide'] .rail-collapse svg {
 .railfoot > div {
   display: none;
 }
+.railfoot b {
+  display: block;
+  color: var(--soft);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.railfoot small {
+  display: block;
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+.nav .count:empty {
+  display: none;
+}
+.rail-collapse:hover {
+  color: var(--text);
+}
 .railfoot > span {
+  display: block;
+  flex: none;
   width: 9px;
   height: 9px;
+  border-radius: 50%;
+  background: var(--warn);
+  transition: background-color var(--t-med) var(--ease);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent);
 }
 .railfoot > span.ok {
+  background: var(--ok);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent);
   animation: xvBreathe 3.2s var(--ease-in-out) infinite;
 }
@@ -757,6 +785,9 @@ dialog::backdrop {
   box-shadow: var(--sh-2);
   backdrop-filter: blur(14px);
 }
+.xv-queue-island[data-position='left'] {
+  left: calc(var(--xv-rail) + 18px);
+}
 
 /* ───────── Motion primitives ───────── */
 .xv-enter {
@@ -908,5 +939,12 @@ body[data-motion='reduced'] .xv-skeleton::after {
     overflow-x: auto;
     max-width: 52vw;
     scrollbar-width: none;
+  }
+  /* the status pill sits above the bottom tab bar, not on it */
+  .xv-queue-island,
+  .xv-queue-island[data-position='left'] {
+    left: auto;
+    right: 10px;
+    bottom: calc(72px + env(safe-area-inset-bottom));
   }
 }
