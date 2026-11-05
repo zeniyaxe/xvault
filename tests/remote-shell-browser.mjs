@@ -10,6 +10,7 @@ const files = new Set([
   'index.html',
   'remote.js',
   'remote-drafts.js',
+  'remote-capture.js',
   'remote.css',
   'remote-sw.js',
   'manifest.webmanifest',
@@ -120,7 +121,7 @@ try {
   );
   await page.locator('#viewerBack').click();
   const cached = await page.evaluate(async () => {
-    const cache = await caches.open('xvault-remote-shell-v7');
+    const cache = await caches.open('xvault-remote-shell-v8');
     return {
       paths: (await cache.keys()).map(req => new URL(req.url).pathname),
       session: !!(await caches.match('/api/session')),

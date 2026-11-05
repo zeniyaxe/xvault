@@ -126,7 +126,7 @@
     if (history && !$('#xdActive')) {
       history.insertAdjacentHTML(
         'beforebegin',
-        `<section id="xdActive" class="xd-active" aria-label="Transferring now" hidden></section><div class="xd-historybar"><div class="seg xd-filters" role="group" aria-label="Filter download history">${FILTERS.map(
+        `<section id="xdActive" class="xd-active" aria-label="Transferring now" hidden></section><section id="xdHosts" class="xd-hosts" aria-labelledby="xdHostsTitle" hidden><header><h3 id="xdHostsTitle">Media hosts</h3><small>Pause one source without stopping the others · counts from the last 200 downloads</small></header><div class="xd-hostlist" role="list"></div></section><div class="xd-historybar"><div class="seg xd-filters" role="group" aria-label="Filter download history">${FILTERS.map(
           ([key, label]) =>
             `<button type="button" data-xd-filter="${key}" aria-pressed="${key === 'all'}">${label}<span class="xd-n"></span></button>`
         ).join(
@@ -169,6 +169,7 @@
       );
     const button = event.target.closest('button');
     if (!button || button.disabled) return;
+    if (button.dataset.xdHost) return hostAction(button);
     if (button.id === 'xdPause') {
       button.disabled = true;
       const resume = state.last?.pausedByUser;
@@ -487,11 +488,96 @@
     state.painted = true;
   }
 
+  // XVault 25: per-host controls. X serves images from pbs.twimg.com and video from video.twimg.com; pausing a host
+  // holds its queued files (in-flight transfers finish) while the rest of the queue keeps moving.
+  const HOST_LABEL = { 'pbs.twimg.com': 'Images', 'video.twimg.com': 'Video and GIFs' };
+  const hostOf = row => {
+    try {
+      return new URL(String(row?.item?.url || '')).hostname.toLowerCase();
+    } catch {
+      return '';
+    }
+  };
+  function paintHosts() {
+    const section = $('#xdHosts'),
+      list = section?.querySelector('.xd-hostlist');
+    if (!list) return;
+    const paused = new Set(state.last?.pausedHosts || []),
+      hosts = new Map();
+    const entry = host => {
+      if (!hosts.has(host))
+        hosts.set(host, { host, active: 0, waiting: 0, complete: 0, failed: 0, reasons: new Map() });
+      return hosts.get(host);
+    };
+    for (const host of paused) entry(host);
+    for (const row of state.rows) {
+      const host = hostOf(row);
+      if (!host) continue;
+      const item = entry(host);
+      if (ACTIVE.has(row.state)) item.active++;
+      else if (WAITING.has(row.state)) item.waiting++;
+      else if (row.state === 'complete') item.complete++;
+      else if (row.state === 'failed') {
+        item.failed++;
+        const reason = String(row.error || row.failureReason || 'Unknown error')
+          .replace(/\s+/g, ' ')
+          .slice(0, 80);
+        item.reasons.set(reason, (item.reasons.get(reason) || 0) + 1);
+      }
+    }
+    for (const row of state.last?.activeRows || []) if (row.host && !hosts.has(row.host)) entry(row.host).active++;
+    section.hidden = !hosts.size;
+    const rows = [...hosts.values()].sort(
+      (a, b) =>
+        Number(paused.has(b.host)) - Number(paused.has(a.host)) ||
+        b.active + b.waiting + b.failed + b.complete - (a.active + a.waiting + a.failed + a.complete)
+    );
+    const markup = rows
+      .map(item => {
+        const isPaused = paused.has(item.host),
+          [reason, times] = [...item.reasons.entries()].sort((a, b) => b[1] - a[1])[0] || [],
+          facts = [
+            isPaused ? 'Paused · queued files wait' : null,
+            item.active ? `${number(item.active)} active` : null,
+            item.waiting ? `${number(item.waiting)} waiting` : null,
+            item.complete ? `${number(item.complete)} done` : null,
+            item.failed ? `${number(item.failed)} failed` : null,
+          ].filter(Boolean);
+        return `<div class="xd-host${isPaused ? ' is-paused' : ''}" role="listitem" data-host="${html(item.host)}"><span class="xd-host-name"><b>${html(HOST_LABEL[item.host] || item.host)}</b>${HOST_LABEL[item.host] ? `<small>${html(item.host)}</small>` : ''}</span><span class="xd-host-facts">${html(facts.join(' · ') || 'Nothing recent')}${reason ? `<small title="${html(reason)}">Most common problem: ${html(reason)}${times > 1 ? ` (${number(times)}×)` : ''}</small>` : ''}</span><span class="xd-host-actions">${item.failed ? `<button type="button" class="quiet" data-xd-host="retry">Retry failed</button>` : ''}<button type="button" data-xd-host="toggle" aria-pressed="${isPaused}" aria-label="${isPaused ? 'Resume' : 'Pause'} downloads from ${html(item.host)}">${isPaused ? 'Resume' : 'Pause'}</button></span></div>`;
+      })
+      .join('');
+    if (list.dataset.sig !== markup) {
+      list.innerHTML = markup;
+      list.dataset.sig = markup;
+    }
+  }
+  async function hostAction(button) {
+    const host = button.closest('[data-host]')?.dataset.host;
+    if (!host) return;
+    button.disabled = true;
+    const pausedNow = (state.last?.pausedHosts || []).includes(host);
+    const result =
+      button.dataset.xdHost === 'retry'
+        ? await send({ type: 'RETRY_FAILED', host })
+        : await send({ type: 'SET_DOWNLOAD_HOST_PAUSED', host, paused: !pausedNow });
+    button.disabled = false;
+    if (!result?.ok) return window.toast?.(result?.error || 'That did not work', 'error');
+    if (button.dataset.xdHost === 'retry')
+      window.toast?.(result.added ? `Retrying ${number(result.added)} from ${host}` : `Nothing to retry from ${host}`);
+    else {
+      if (state.last) state.last.pausedHosts = result.pausedHosts || [];
+      window.toast?.(pausedNow ? `Downloads from ${host} resumed` : `Downloads from ${host} paused`);
+    }
+    paintHosts();
+    void refresh();
+  }
+
   async function loadHistory() {
     const history = await send({ type: 'GET_DOWNLOAD_HISTORY', limit: 200 });
     if (!history?.ok) return;
     state.rows = history.rows || [];
     paintHistory();
+    paintHosts();
   }
 
   async function refresh() {
@@ -503,6 +589,7 @@
     paintHold(q);
     paintProgress(q);
     paintActive(q);
+    paintHosts();
     // The parallelism note (xv-vault.js) reads best under the byte totals rather than between number and bar.
     const engine = $('#qEngine'),
       meta = $('#page-media .qmeta');
