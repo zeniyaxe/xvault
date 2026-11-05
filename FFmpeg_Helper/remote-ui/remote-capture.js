@@ -117,7 +117,17 @@
         '',
         rows.length === 1 ? '1 link waiting on this phone' : `${rows.length} links waiting on this phone`
       ),
-      api.el('small', '', 'Sent automatically when your computer is reachable.')
+      api.el(
+        'small',
+        '',
+        (() => {
+          const last = rows.reduce((max, row) => Math.max(max, Number(row.lastTry) || 0), 0);
+          const error = rows.find(row => row.lastError)?.lastError;
+          return last
+            ? `Sent automatically when your computer is reachable · last try ${api.relativeTime(last) === 'now' ? 'just now' : `${api.relativeTime(last)} ago`}${error ? ` (${error.toLowerCase()})` : ''}`
+            : 'Sent automatically when your computer is reachable.';
+        })()
+      )
     );
     const retry = api.el('button', 'ghost-button small', 'Send now');
     retry.type = 'button';
@@ -189,6 +199,7 @@
     if (offline.length) {
       keepOffline(offline, via);
       if (!limited) view.offline = true;
+      retryOutboxLater();
     }
     if (sent) render();
     if (sent && !offline.length && !refused.length) {
@@ -213,32 +224,72 @@
     schedule();
     return offline.length === 0 && refused.length === 0;
   }
+  // XVault 26: the outbox is safe to flush from several tabs and while new links arrive. Sending is idempotent on
+  // the computer (one inbox item per post id), so a link sent twice by a race is answered as already queued; the
+  // outbox itself is re-read before it is written so a link added mid-flush is never lost. A computer that stays
+  // unreachable is retried with a backoff (5 s doubling to 2 min) while the page is visible.
+  const outboxRetry = { timer: 0, delay: 0 };
+  function retryOutboxLater() {
+    clearTimeout(outboxRetry.timer);
+    outboxRetry.timer = 0;
+    if (!readOutbox().length || document.hidden) return;
+    outboxRetry.delay = Math.min(120000, outboxRetry.delay ? outboxRetry.delay * 2 : 5000);
+    outboxRetry.timer = setTimeout(() => void flushOutbox(), outboxRetry.delay);
+  }
   async function flushOutbox(manual = false) {
     if (view.flushing || !api?.hasPermission('capture.create')) return;
     const rows = readOutbox();
     if (!rows.length) return;
     view.flushing = true;
-    const remaining = [];
-    let sent = 0;
-    for (const [index, row] of rows.entries()) {
+    clearTimeout(outboxRetry.timer);
+    const done = new Set(),
+      tried = new Map(),
+      refused = [];
+    let sent = 0,
+      blocked = false;
+    for (const row of rows) {
+      const id = parseUrl(row.url)?.id;
       try {
         apply(await api.request('/api/capture', { url: row.url, via: row.via === 'share' ? 'share' : 'paste' }), false);
         sent++;
+        done.add(id);
       } catch (error) {
-        if (isNetwork(error) || error.status === 429 || error.status === 403) {
-          remaining.push(...rows.slice(index));
+        if (isNetwork(error) || error.status === 429 || error.status === 403 || error.status >= 500) {
+          tried.set(id, isNetwork(error) ? 'Computer unreachable' : error.message || `HTTP ${error.status}`);
+          blocked = true;
           break;
         }
-        // a link the computer refuses for good is dropped rather than retried forever
+        // A link the computer refuses for good is dropped rather than retried forever — but the phone says so.
+        done.add(id);
+        refused.push(error.message || 'XVault did not accept this link');
       }
     }
     view.flushing = false;
-    writeOutbox(remaining);
+    const at = Date.now();
+    writeOutbox(
+      readOutbox()
+        .filter(row => !done.has(parseUrl(row.url)?.id))
+        .map(row => {
+          const id = parseUrl(row.url)?.id;
+          return tried.has(id)
+            ? { ...row, tries: (Number(row.tries) || 0) + 1, lastTry: at, lastError: tried.get(id) }
+            : row;
+        })
+    );
+    if (blocked) retryOutboxLater();
+    else outboxRetry.delay = 0;
     if (sent) {
       render();
       api.toast(sent === 1 ? 'Waiting link sent to XVault' : `${sent} waiting links sent to XVault`);
-      if (!remaining.length) setNotice('');
-    } else if (manual && remaining.length) api.toast('Still cannot reach XVault');
+      if (!readOutbox().length) setNotice('');
+    } else if (manual && blocked) api.toast('Still cannot reach XVault — trying again shortly');
+    if (refused.length)
+      setNotice(
+        refused.length === 1
+          ? `A waiting link was not accepted: ${refused[0]}`
+          : `${refused.length} waiting links were not accepted (${refused[0]}).`,
+        'error'
+      );
   }
 
   // ── inbox ──
@@ -248,6 +299,8 @@
     view.counts = result.counts || {};
     view.pending = Number(result.pending) || 0;
     view.paused = result.paused === true;
+    view.cooldownUntil = Number(result.cooldownUntil) || 0;
+    view.authBlocked = result.authBlocked === true;
     view.loaded = true;
     view.denied = false;
     view.offline = false;
@@ -341,6 +394,10 @@
     chip.append(api.makeIcon(ICON[item.state] || 'info'), api.el('span', '', LABEL[item.state] || 'Queued'));
     const facts = [];
     if (!DONE.has(item.state)) facts.push(stateLine(item));
+    // XVault 26: when the next try happens and how many the computer allows.
+    if (item.state === 'queued' && item.nextAttemptAt > Date.now())
+      facts.push(`next try in ${Math.max(1, Math.round((item.nextAttemptAt - Date.now()) / 60000))} min`);
+    if (!DONE.has(item.state) && item.attempts) facts.push(`attempt ${item.attempts} of ${item.maxAttempts || 3}`);
     if (item.preview?.mediaCount)
       facts.push(
         item.preview.video
@@ -404,11 +461,15 @@
         ? 'Offline'
         : view.paused
           ? 'Paused on computer'
-          : view.pending
-            ? `${view.pending} in progress`
-            : view.loaded
-              ? 'Up to date'
-              : '';
+          : view.authBlocked && view.pending
+            ? 'Sign-in needed on computer'
+            : view.cooldownUntil > Date.now()
+              ? 'X cooldown — waiting'
+              : view.pending
+                ? `${view.pending} in progress`
+                : view.loaded
+                  ? 'Up to date'
+                  : '';
     if (view.denied) {
       renderEmpty(
         list,
@@ -589,6 +650,13 @@
       else void control(action, item.id);
     });
     addEventListener('online', () => void flushOutbox());
+    addEventListener('xvault-remote-reconnected', () => void flushOutbox());
+    // Another tab of the Remote changed the outbox (sent it, or kept a new link).
+    addEventListener('storage', event => {
+      if (event.key !== OUTBOX_KEY) return;
+      renderOutbox();
+      updateBadge();
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) return schedule();
       void load(true);
