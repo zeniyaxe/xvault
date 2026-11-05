@@ -1,4 +1,5 @@
-import { RECOVERY_STORES, createRecoveryHeader, encodeRecoveryLine, scanRecoveryArchive } from './archive-recovery.mjs';
+import { RECOVERY_STORES, encodeRecoveryLine, scanRecoveryArchive } from './archive-recovery.mjs';
+import { writeRecoveryBackup } from './recovery-backup-core.mjs';
 import * as exporters from './library-exporters.mjs';
 import { BACKUP_EXTENSION, decryptBackup, encryptingWriter, isEncryptedBackup } from './backup-crypto.mjs';
 
@@ -225,57 +226,20 @@ if (dialog && fileInput && typeof chrome !== 'undefined' && chrome.runtime?.send
     startOperation(controller);
     operation = 'export';
     let bytes = 0,
-      recordCount = 0,
-      archiveRevision = null,
-      downloadRevision = null,
-      wroteHeader = false;
+      recordCount = 0;
     const write = async value => {
-      if (controller.signal.aborted)
-        throw controller.signal.reason || new DOMException('Recovery export stopped', 'AbortError');
       await writer.write(value);
       bytes += encoderLength(value);
     };
     try {
-      for (const store of RECOVERY_STORES) {
-        let afterKey = null,
-          hasMore = true;
-        while (hasMore) {
-          const expected = archiveRevision == null ? null : { archiveRevision, downloadRevision };
-          const page = await request('READ_RECOVERY_BACKUP_PAGE', {
-            store,
-            afterKey,
-            limit: EXPORT_PAGE_SIZE,
-            expectedRevision: expected,
-          });
-          if (page.stale)
-            throw new Error('The archive changed during backup. The partial file was discarded; run the backup again.');
-          if (archiveRevision == null) {
-            archiveRevision = page.revision;
-            downloadRevision = page.downloadRevision;
-            await write(encodeRecoveryLine(createRecoveryHeader({ archiveRevision, downloadRevision })));
-            wroteHeader = true;
-          }
-          for (const value of page.rows || []) {
-            const key = store === 'revisions' ? value.key : value.id;
-            await write(encodeRecoveryLine({ type: 'record', store, key: String(key), value }));
-            recordCount++;
-          }
-          afterKey = page.nextKey;
-          hasMore = !!page.hasMore;
-          setProgress(`Read ${recordCount.toLocaleString()} records · wrote ${bytesLabel(bytes)}`, null);
-        }
-      }
-      if (!wroteHeader) throw new Error('XVault could not read an archive backup page');
-      const verified = await request('READ_RECOVERY_BACKUP_PAGE', {
-        store: 'tweets',
-        limit: 1,
-        expectedRevision: { archiveRevision, downloadRevision },
-      });
-      if (verified.stale)
-        throw new Error(
-          'The archive changed while the backup was being written. The partial file was discarded; run the backup again.'
-        );
-      await write(encodeRecoveryLine({ type: 'end', recordCount, archiveRevision, downloadRevision }));
+      ({ recordCount } = await writeRecoveryBackup({
+        request,
+        write,
+        signal: controller.signal,
+        pageSize: EXPORT_PAGE_SIZE,
+        onProgress: progress =>
+          setProgress(`Read ${progress.recordCount.toLocaleString()} records · wrote ${bytesLabel(bytes)}`, null),
+      }));
       await writer.close();
       status.textContent = `${passphrase ? 'Encrypted recovery file' : 'Recovery file'} saved · ${recordCount.toLocaleString()} records · ${bytesLabel(passphrase ? writer.bytesWritten : bytes)}. Media files were not copied.`;
       window.dispatchEvent(

@@ -5,6 +5,13 @@ import { HttpStatusError } from './derived-jobs.mjs';
 
 export const OFFSCREEN_URL = 'offscreen-ocr.html';
 
+// The offscreen document is shared (Chrome allows one per extension): OCR and scheduled backups (XVault 22)
+// both use it, so whoever holds a lease keeps it open and close() waits until nobody does.
+const leases = new Set();
+export function holdOffscreen(token) {
+  leases.add(token);
+  return () => leases.delete(token);
+}
 export function createOffscreenHost(chromeApi = globalThis.chrome) {
   let creating = null;
   async function has() {
@@ -23,8 +30,8 @@ export function createOffscreenHost(chromeApi = globalThis.chrome) {
     creating ||= chromeApi.offscreen
       .createDocument({
         url: OFFSCREEN_URL,
-        reasons: ['WORKERS'],
-        justification: 'Run the bundled OCR engine locally on archived images',
+        reasons: ['WORKERS', 'BLOBS'],
+        justification: 'Run the bundled OCR engine locally and assemble scheduled backup files',
       })
       .catch(error => {
         if (!/single offscreen|already/i.test(String(error?.message))) throw error;
@@ -33,10 +40,16 @@ export function createOffscreenHost(chromeApi = globalThis.chrome) {
     await creating;
   }
   async function send(message) {
-    await ensure();
-    return chromeApi.runtime.sendMessage({ target: 'xv-ocr', ...message });
+    const release = holdOffscreen(Symbol('ocr'));
+    try {
+      await ensure();
+      return await chromeApi.runtime.sendMessage({ target: 'xv-ocr', ...message });
+    } finally {
+      release();
+    }
   }
   async function close() {
+    if (leases.size) return;
     if (await has()) await chromeApi.offscreen.closeDocument().catch(() => {});
   }
   return { ensure, send, close, has };

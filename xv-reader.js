@@ -4,7 +4,8 @@
 (() => {
   const SIZES = [16, 17, 18, 19, 20, 22, 24],
     SIZE_KEY = 'xv-reader-size',
-    MODE_KEY = 'xv-reader-mode';
+    MODE_KEY = 'xv-reader-mode',
+    MAP_KEY = 'xv-reader-map';
   const store = {
     get(key, fallback) {
       try {
@@ -22,6 +23,8 @@
   const savedSize = SIZES.indexOf(Number(store.get(SIZE_KEY, 19)));
   let size = savedSize >= 0 ? savedSize : 3,
     mode = store.get(MODE_KEY, 'spine') === 'all' ? 'all' : 'spine',
+    mapOpen = store.get(MAP_KEY, '1') === '1',
+    mapPin = null,
     dialog = null,
     thread = null,
     stack = [],
@@ -75,6 +78,7 @@
   <div class="xr-tools">
     <button type="button" class="quiet" data-act="smaller" aria-label="Smaller text" title="Smaller text (−)">A−</button>
     <button type="button" class="quiet" data-act="larger" aria-label="Larger text" title="Larger text (+)">A+</button>
+    <button type="button" class="quiet xr-map-toggle" data-act="map" aria-pressed="false" aria-controls="xvReaderMap" title="Thread map (t)">Map</button>
     <span class="xr-sep" aria-hidden="true"></span>
     <button type="button" class="quiet" data-act="copy" title="Copy the thread as Markdown">Copy Markdown</button>
     <button type="button" class="quiet" data-act="download" title="Save the thread as a Markdown file">Save .md</button>
@@ -88,6 +92,7 @@
   </div>
 </header>
 <div class="xr-scroll"><main class="xr-column" id="xvReaderBody" tabindex="-1"></main></div>
+<aside class="xr-map" id="xvReaderMap" aria-label="Thread map" hidden><header><b>Map</b><small class="xr-map-count"></small></header><div class="xr-map-body"></div><p class="xr-map-legend" aria-hidden="true"><i class="is-spine"></i>thread <i class="is-reply"></i>reply <i class="is-quote"></i>quote</p></aside>
 <div class="xr-mark-pop" role="toolbar" aria-label="Highlight selection" hidden><button type="button" data-act="highlight">Highlight</button><button type="button" data-act="highlight-note">Highlight + note</button></div>`;
     document.body.append(dialog);
     dialog.addEventListener('click', onClick);
@@ -123,6 +128,9 @@
       button.textContent = labels[on ? 1 : 0];
       button.disabled = !thread;
     }
+    const mapButton = dialog.querySelector('[data-act="map"]');
+    mapButton.setAttribute('aria-pressed', String(mapOpen));
+    mapButton.hidden = (thread?.posts?.length || 0) < 3;
     const replies = (thread?.posts || []).filter(post => !post.spine).length;
     const modeGroup = dialog.querySelector('.xr-mode');
     modeGroup.hidden = !replies;
@@ -625,6 +633,7 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
 <footer class="xr-end"><span>End of what's archived</span>${thread.posts.length > visible.length ? `<button type="button" class="quiet" data-mode-switch="all">Show ${number(thread.posts.length - visible.length)} more replies</button>` : ''}</footer>
 <section class="xr-related-wrap" id="xvReaderRelated" hidden aria-label="Related posts"></section>`;
     paintChrome();
+    paintMap();
     paintHighlights(body);
     watchGifs(body);
     void related();
@@ -743,6 +752,13 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
       const previous = stack.pop();
       if (previous) await load(previous.id);
       return;
+    }
+    if (name === 'map') {
+      mapOpen = !mapOpen;
+      store.set(MAP_KEY, mapOpen ? '1' : '0');
+      paintChrome();
+      paintMap();
+      return updatePosition();
     }
     if (name === 'smaller' || name === 'larger') {
       size = Math.max(0, Math.min(SIZES.length - 1, size + (name === 'larger' ? 1 : -1)));
@@ -902,6 +918,102 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
     let index = posts.findIndex(post => post.getBoundingClientRect().bottom > edge);
     if (index < 0) index = posts.length - 1;
     label.textContent = `${index + 1} / ${posts.length}`;
+    // After a map jump the target stays current until the reader scrolls on their own — a reply near the
+    // end of the thread may never reach the top edge.
+    if (mapPin && performance.now() < mapPin.until) return markMap(mapPin.id);
+    mapPin = null;
+    markMap(posts[index]?.dataset.id);
+  }
+
+  // ---- XVault 22: thread map (reply/quote tree beside the column) ----
+  function paintMap() {
+    const aside = dialog?.querySelector('#xvReaderMap');
+    if (!aside) return;
+    const posts = thread?.posts || [];
+    const show = mapOpen && posts.length >= 3 && !!window.XVaultThreadMap;
+    aside.hidden = !show;
+    dialog.classList.toggle('has-map', show);
+    if (!show) return;
+    const map = window.XVaultThreadMap.layout(posts),
+      visible = new Set([...dialog.querySelectorAll('#xvReaderBody .xr-post')].map(article => article.dataset.id));
+    const quotes = map.edges.filter(edge => edge.kind === 'quote').length;
+    aside.querySelector('.xr-map-count').textContent =
+      `${number(map.nodes.length)} posts${quotes ? ` · ${number(quotes)} quote${quotes === 1 ? '' : 's'}` : ''}${map.truncated ? ' · first 400' : ''}`;
+    const body = aside.querySelector('.xr-map-body');
+    body.innerHTML = window.XVaultThreadMap.svg(map, { focusId: thread.focusId, visible });
+    const first = body.querySelector('.tm-node.is-focus') || body.querySelector('.tm-node');
+    first?.setAttribute('tabindex', '0');
+    if (!window.XVaultMotion?.calm?.()) {
+      body.classList.remove('is-entering');
+      void body.offsetWidth;
+      body.classList.add('is-entering');
+    }
+  }
+  function markMap(id) {
+    const body = dialog?.querySelector('#xvReaderMap:not([hidden]) .xr-map-body');
+    if (!body || !id) return;
+    const current = body.querySelector('.tm-node.is-current');
+    if (current?.dataset.mapId === id) return;
+    current?.classList.remove('is-current');
+    const node = body.querySelector(`.tm-node[data-map-id="${CSS.escape(id)}"]`);
+    if (!node) return;
+    node.classList.add('is-current');
+    // Keep the current node in view inside a long map.
+    const box = node.getBoundingClientRect(),
+      frame = body.getBoundingClientRect();
+    if (box.top < frame.top + 8 || box.bottom > frame.bottom - 8)
+      body.scrollTop += box.top - frame.top - frame.height / 2;
+  }
+  function goToMapNode(id) {
+    let article = dialog.querySelector(`#xvReaderBody .xr-post[data-id="${CSS.escape(id)}"]`);
+    if (!article && mode !== 'all') {
+      // A reply hidden in Thread mode: show replies first, then go there.
+      mode = 'all';
+      store.set(MODE_KEY, mode);
+      render({ keepScroll: true });
+      article = dialog.querySelector(`#xvReaderBody .xr-post[data-id="${CSS.escape(id)}"]`);
+    }
+    if (!article) return;
+    mapPin = { id, until: performance.now() + 1200 };
+    markMap(id);
+    article.scrollIntoView({ block: 'start', behavior: window.XVaultMotion?.calm?.() ? 'auto' : 'smooth' });
+    article.focus({ preventScroll: true });
+    window.XVaultMotion?.play?.(
+      article,
+      [
+        { boxShadow: '0 0 0 2px var(--accent)', offset: 0 },
+        { boxShadow: '0 0 0 2px var(--accent)', offset: 0.4 },
+        { boxShadow: '0 0 0 2px transparent', offset: 1 },
+      ],
+      1100,
+      { fixedDuration: true }
+    );
+  }
+  function onMapKey(event) {
+    const node = event.target.closest?.('.tm-node');
+    if (!node) return false;
+    const nodes = [...dialog.querySelectorAll('#xvReaderMap .tm-node')],
+      index = nodes.indexOf(node);
+    const move = next => {
+      const target = nodes[Math.max(0, Math.min(nodes.length - 1, next))];
+      if (!target) return;
+      nodes.forEach(item => item.setAttribute('tabindex', '-1'));
+      target.setAttribute('tabindex', '0');
+      target.focus();
+    };
+    const handled = {
+      ArrowDown: () => move(index + 1),
+      ArrowUp: () => move(index - 1),
+      Home: () => move(0),
+      End: () => move(nodes.length - 1),
+      Enter: () => goToMapNode(node.dataset.mapId),
+      ' ': () => goToMapNode(node.dataset.mapId),
+    }[event.key];
+    if (!handled) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    handled();
+    return true;
   }
 
   function jump(where) {
@@ -923,6 +1035,8 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
   }
 
   function onClick(event) {
+    const mapNode = event.target.closest?.('.tm-node');
+    if (mapNode && dialog.contains(mapNode)) return goToMapNode(mapNode.dataset.mapId);
     const modeButton = event.target.closest('[data-mode]');
     if (modeButton && dialog.contains(modeButton)) return setMode(modeButton.dataset.mode);
     const switcher = event.target.closest('[data-mode-switch]');
@@ -937,6 +1051,7 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
   function onKey(event) {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.target.closest('input,textarea,select,[contenteditable]')) return;
+    if (onMapKey(event)) return;
     const key = event.key;
     if (key === 'Escape') {
       const wide = dialog.querySelector('.xr-media.is-wide');
@@ -954,6 +1069,7 @@ ${visible.map((post, index) => postMarkup(post, index, post.spine ? ++spineIndex
       '=': () => act('larger'),
       '-': () => act('smaller'),
       r: () => setMode(mode === 'all' ? 'spine' : 'all'),
+      t: () => act('map'),
       o: () => act('x'),
       n: () => editNote(document.activeElement?.closest?.('.xr-post') || dialog.querySelector('.xr-post.is-focus')),
       l: () => toggleLater(),

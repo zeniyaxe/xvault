@@ -499,7 +499,18 @@
 
   if (!dead)
     try {
+      // Only answer this script's own types (see content.js: the first sendResponse on a tab wins).
+      const OWN_TYPES = new Set([
+        'XV_INSTANT_COPY',
+        'XV_INSTANT_ARCHIVE',
+        'XV_ARCHIVE_CENTERED',
+        'XV_INSTANT_DOWNLOAD',
+        'XV_DOWNLOAD_CENTERED',
+        'XV_COPY_CENTERED',
+        'XV_REFRESH_INSTANT_SETTINGS',
+      ]);
       chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
+        if (!OWN_TYPES.has(msg?.type)) return false;
         (async () => {
           if (msg.type === 'XV_INSTANT_COPY') {
             const m = (msg.url && findByUrl(msg.url)) || centered();

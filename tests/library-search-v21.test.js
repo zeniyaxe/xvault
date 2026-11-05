@@ -189,11 +189,12 @@ assert.ok(search.queryIssues('asof:2024-02-31').length === 1);
 
 // Joins the worker has to provide.
 const needs = search.queryNeeds(search.compileQuery('has:gap topic:space has:snapshot'), 'quality');
-assert.deepEqual(needs, { archivedIds: true, snapshotIds: true, clusterIds: true, sortValue: true });
+assert.deepEqual(needs, { archivedIds: true, snapshotIds: true, clusterIds: true, asOf: 0, sortValue: true });
 assert.deepEqual(search.queryNeeds(search.compileQuery('cats'), 'new'), {
   archivedIds: false,
   snapshotIds: false,
   clusterIds: false,
+  asOf: 0,
   sortValue: false,
 });
 
@@ -227,3 +228,25 @@ assert.deepEqual(ids('', 'checked-old'), ['3', '2', '1']);
 assert.equal(search.projectRankPost(posts[1], 1, { sort: 'duration' }).sortValue, 95000);
 
 console.log('library search v21 tests passed');
+
+// asof: joins the text a post had on that day (XVault 22).
+{
+  const day = Date.UTC(2024, 4, 2); // end of 2024-05-01
+  const revisions = [
+    { tweetId: '1', observedAt: day - 1000, before: { text: 'way older' } },
+    { tweetId: '1', observedAt: day + 5000, before: { text: 'original telescope' } },
+    { tweetId: '1', observedAt: day + 9000, before: { text: 'second edit' } },
+    { tweetId: '2', observedAt: day - 10, before: { text: 'edited before the day' } },
+    { tweetId: '3', observedAt: day + 1, before: {} },
+  ];
+  const map = search.historicTextFrom(revisions, day);
+  assert.deepEqual([...map], [['1', 'original telescope']]);
+  const compiled = search.compileQuery('asof:2024-05-01 telescope');
+  const needs = search.queryNeeds(compiled);
+  assert.ok(needs.asOf > 0);
+  const post = { id: '1', text: 'edited now: binoculars', archivedAt: day - 86400000, author: { handle: 'a' } };
+  assert.equal(search.matchesCompiledQuery(search.projectPost(post, 0, { historicText: map }), compiled), true);
+  assert.equal(search.matchesCompiledQuery(search.projectPost(post, 0, {}), compiled), false);
+  assert.equal(search.queryNeeds(search.compileQuery('-asof:2024-05-01 telescope')).asOf, 0);
+  assert.equal(search.queryNeeds(search.compileQuery('telescope')).asOf, 0);
+}

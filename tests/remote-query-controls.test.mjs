@@ -7,7 +7,7 @@ const secondTab = beginRemoteQuery(controls, 'device:tab-b', { query: 'cats', so
 assert.notEqual(firstTab, secondTab, 'separate Remote tabs must never share cancellation state');
 assert.equal(firstTab.cancelled, false);
 
-const replaced = beginRemoteQuery(controls, 'device:tab-a', { query: 'dogs', sort: 'new' });
+beginRemoteQuery(controls, 'device:tab-a', { query: 'dogs', sort: 'new' });
 assert.equal(firstTab.cancelled, true, 'a new query in one tab should stop that tab’s prior scan');
 assert.equal(secondTab.cancelled, false, 'a new query must not interrupt another tab');
 

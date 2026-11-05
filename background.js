@@ -8,6 +8,9 @@ import {
 } from './reliability.mjs';
 import { createInsightsAccumulator, orderThread, compactPost, previewUrl, mediaKind } from './vault-insights.mjs';
 import { createDerivedService } from './sw/derived-service.mjs';
+import { timelineBuckets } from './sw/timeline.mjs';
+import { createAutoBackup, createInlineBackupBuilder, createOffscreenBackupBuilder } from './sw/auto-backup.mjs';
+import { createOffscreenHost, holdOffscreen } from './sw/ocr.mjs';
 import { createSemanticService } from './sw/semantic-service.mjs';
 import { createMessageRouter, DESKTOP, CONTENT } from './sw/router.mjs';
 import { createConcurrencyGovernor } from './sw/adaptive-concurrency.mjs';
@@ -105,7 +108,12 @@ function announceLibraryChanges(ids, kind = 'metadata', forceTruncated = false) 
     at: Date.now(),
   });
 }
-const privateStorageReady = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+// Firefox has no storage.local.setAccessLevel (content scripts there can always read storage.local); the
+// dashboard-only keys are still never pushed to x.com pages (contentSettings() below filters them).
+const privateStorageReady =
+  typeof chrome.storage.local.setAccessLevel === 'function'
+    ? chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {})
+    : Promise.resolve();
 // Explicit capture/UI preferences; helper credentials, saved views and local paths stay private.
 const contentSettingKeys = [
   'xBadgeEdits',
@@ -1182,6 +1190,7 @@ async function writeSettingsPatch(p) {
     queueMicrotask(() => syncScheduler.schedule().catch(() => {}));
   if ('watchLists' in p) queueMicrotask(() => watchLists.schedule().catch(() => {}));
   if ('integrityScheduleDays' in p) queueMicrotask(() => scheduleIntegrity().catch(() => {}));
+  if ('autoBackupDays' in p) queueMicrotask(() => autoBackup.schedule().catch(() => {}));
   if (
     ['downloadWindowEnabled', 'downloadWindowStart', 'downloadWindowEnd', 'downloadRespectSaveData'].some(
       key => key in p
@@ -1297,7 +1306,27 @@ async function queryJoinsFor(database, compiled, sort = '') {
     }
   }
   if (needs.clusterIds) joins.clusterIds = await clusterIdMap().catch(() => new Map());
+  if (needs.asOf) {
+    joins.historicText = await historicTextAt(database, needs.asOf);
+    joins.asOfDay = needs.asOf;
+  }
   return joins;
+}
+// XVault 22 asof: the text each post had on a day = `before` of its first revision observed after that day.
+let historicTextCache = { key: '', map: null };
+async function historicTextAt(database, end) {
+  const revision = await readLibraryRevision(database),
+    key = `${revision}:${end}`;
+  if (historicTextCache.key === key && historicTextCache.map) return historicTextCache.map;
+  if (!database.objectStoreNames.contains('revisions')) return new Map();
+  const rows = await new Promise((resolve, reject) => {
+    const request = database.transaction('revisions', 'readonly').objectStore('revisions').getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+  const map = globalThis.XVaultLibrarySearch.historicTextFrom(rows, end);
+  historicTextCache = { key, map };
+  return map;
 }
 function searchIdentity(settings) {
   return [settings.searchSynonyms || '', settings.searchFoldDiacritics !== false, Number(settings.searchHybridWeight)];
@@ -1314,6 +1343,14 @@ function stableRandomOrder(id, seed) {
 function compareLibraryRank(a, b, sort) {
   const compared = globalThis.XVaultLibrarySearch.compareRows(a, b, sort);
   return compared || String(a.id).localeCompare(String(b.id));
+}
+// asof: rows show the day's text; `asOfText` keeps the current one so the card can say it changed later.
+function withHistoricText(row, historic, end) {
+  const id = String(row?.id || '');
+  if (!(historic instanceof Map) || !historic.has(id)) return row;
+  const text = historic.get(id);
+  if (text === String(row.text || '')) return row;
+  return { ...row, text, asOfText: { current: String(row.text || ''), before: Number(end) || 0 } };
 }
 async function scanSortedLibraryPage(database, message, settings, control) {
   const sort = String(message.sort || 'new'),
@@ -1349,6 +1386,7 @@ async function scanSortedLibraryPage(database, message, settings, control) {
     ocrText.revision,
     semanticScores.revision,
     joins.snapshotIds ? joins.snapshotIds.size : -1,
+    joins.historicText ? joins.historicText.size : -1,
     ...searchIdentity(settings),
   ]);
   let downloadsByTweet = new Map(),
@@ -1467,7 +1505,10 @@ async function scanSortedLibraryPage(database, message, settings, control) {
       selected.map(row => row.id)
     ),
     recordsById = new Map(records.map(row => [String(row.id), row])),
-    rows = selected.map(rank => recordsById.get(String(rank.id))).filter(Boolean);
+    rows = selected
+      .map(rank => recordsById.get(String(rank.id)))
+      .filter(Boolean)
+      .map(row => withHistoricText(row, joins.historicText, joins.asOfDay));
   const detailsStarted = performance.now(),
     downloads = await readDownloadRows(
       database,
@@ -1721,6 +1762,9 @@ async function executeLibraryPage(message = {}, control = { cancelled: false }) 
     return {
       ok: true,
       ...page,
+      rows: joins?.historicText
+        ? page.rows.map(row => withHistoricText(row, joins.historicText, joins.asOfDay))
+        : page.rows,
       downloads: downloadRows,
       downloadRowsRead: (Number(page.downloadRowsRead) || 0) + downloadRows.length,
       downloadCursorOperations: Number(page.downloadCursorOperations) || 0,
@@ -3654,11 +3698,8 @@ router.register('RENAME_PLAN', async m => {
   const limit = Math.max(1, Math.min(20000, Number(m.limit) || 5000));
   return { ...plan, total: plan.moves.length, moves: plan.moves.slice(0, limit), truncated: plan.moves.length > limit };
 });
-router.register('RENAME_RECORD', async m => {
-  const plan = await renamePlan(m);
-  if (!plan.ok) return plan;
-  const wanted = new Set((Array.isArray(m.keys) ? m.keys : []).map(String));
-  const moves = plan.moves.filter(move => !wanted.size || wanted.has(String(move.key)));
+// Re-point download records at their new paths (only rows still at move.from are touched).
+async function recordRenames(moves) {
   let updated = 0;
   for (let at = 0; at < moves.length; at += 200) {
     const batch = moves.slice(at, at + 200),
@@ -3685,9 +3726,127 @@ router.register('RENAME_RECORD', async m => {
     if (rows.length) await putMany('downloads', rows);
     updated += rows.length;
   }
+  return updated;
+}
+router.register('RENAME_RECORD', async m => {
+  const plan = await renamePlan(m);
+  if (!plan.ok) return plan;
+  const wanted = new Set((Array.isArray(m.keys) ? m.keys : []).map(String));
+  const updated = await recordRenames(plan.moves.filter(move => !wanted.size || wanted.has(String(move.key))));
   if (updated)
     void action('downloads', `Recorded ${updated} renamed files`, { template: m.fileTemplate }).catch(() => {});
   return { ok: true, updated };
+});
+// With the local helper (v22+), XVault performs the plan itself: the helper moves files inside its
+// XVault folder without ever overwriting, and only moves it confirms are recorded.
+async function helperFileOps(capability) {
+  const status = await helperStatusCore();
+  if (!status.connected) return { ok: false, error: 'The XVault helper is not running' };
+  if (!(status.capabilities || []).includes(capability))
+    return { ok: false, error: 'Update the XVault helper to 22.0 or newer for file operations' };
+  const root = String(status.watching || '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+  return { ok: true, rootName: root.slice(root.lastIndexOf('/') + 1), status };
+}
+const firstSegment = path =>
+  String(path || '')
+    .replace(/\\/g, '/')
+    .split('/')[0] || '';
+router.register('HELPER_RENAME_APPLY', async m => {
+  const helper = await helperFileOps('rename');
+  if (!helper.ok) return helper;
+  const plan = await renamePlan(m);
+  if (!plan.ok) return plan;
+  const wanted = new Set((Array.isArray(m.keys) ? m.keys : []).map(String));
+  const dryRun = !!m.dryRun;
+  const counts = {},
+    problems = [];
+  const confirmed = [];
+  // Both ends must stay inside the folder the helper watches; anything else stays a script job.
+  const moves = plan.moves.filter(move => !wanted.size || wanted.has(String(move.key)));
+  const inside = moves.filter(move => {
+    const ok =
+      firstSegment(move.from).toLowerCase() === helper.rootName.toLowerCase() &&
+      firstSegment(move.to).toLowerCase() === helper.rootName.toLowerCase();
+    if (!ok)
+      problems.push({ key: move.key, state: 'outside', reason: `Not inside the helper folder ${helper.rootName}` });
+    return ok;
+  });
+  for (let at = 0; at < inside.length; at += 200) {
+    const batch = inside.slice(at, at + 200);
+    const out = await helperPost('/files/rename', {
+      dryRun,
+      moves: batch.map(move => ({ key: move.key, from: move.from, to: move.to })),
+    });
+    if (!out.ok) return { ok: false, error: out.error || `Helper returned HTTP ${out.status}`, counts, problems };
+    const byKey = new Map(batch.map(move => [String(move.key), move]));
+    for (const result of out.results || []) {
+      counts[result.state] = (counts[result.state] || 0) + 1;
+      if (['moved', 'already-moved'].includes(result.state) && byKey.has(String(result.key)))
+        confirmed.push(byKey.get(String(result.key)));
+      else if (!['would-move', 'unchanged'].includes(result.state))
+        problems.push({ key: result.key, state: result.state, reason: result.reason || '' });
+    }
+  }
+  const updated = dryRun ? 0 : await recordRenames(confirmed);
+  if (updated)
+    void action('downloads', `Renamed ${updated} files with the helper`, { template: m.fileTemplate }).catch(() => {});
+  return { ok: true, dryRun, planned: moves.length, updated, counts, problems: problems.slice(0, 200) };
+});
+router.register('DUPLICATE_LINK', async m => {
+  const helper = await helperFileOps('link-duplicates');
+  if (!helper.ok) return helper;
+  const keys = new Set((Array.isArray(m.keys) ? m.keys : []).map(String).slice(0, 5000));
+  const report = duplicateReport(await all('downloads'), { assetOf: row => assetIdentity(row.item?.url).asset });
+  // The helper hashes both files and links only byte-identical copies on the same drive, so
+  // "same media and size" groups are safe to offer too: a near-match is simply left alone.
+  const pairs = report.groups
+    .filter(group => group.keep.file)
+    .flatMap(group =>
+      group.remove
+        .filter(entry => entry.file && (!keys.size || keys.has(String(entry.key))))
+        .map(entry => ({ key: entry.key, keep: group.keep.file, duplicate: entry.file, keepKey: group.keep.key }))
+    );
+  const dryRun = !!m.dryRun;
+  const counts = {},
+    problems = [];
+  let linked = 0,
+    bytes = 0;
+  for (let at = 0; at < pairs.length; at += 200) {
+    const batch = pairs.slice(at, at + 200);
+    const out = await helperPost('/files/link-duplicates', {
+      dryRun,
+      pairs: batch.map(({ key, keep, duplicate }) => ({ key, keep, duplicate })),
+    });
+    if (!out.ok) return { ok: false, error: out.error || `Helper returned HTTP ${out.status}`, counts, problems };
+    const byKey = new Map(batch.map(pair => [String(pair.key), pair]));
+    const rows = [];
+    for (const result of out.results || []) {
+      counts[result.state] = (counts[result.state] || 0) + 1;
+      const pair = byKey.get(String(result.key));
+      if (!pair) continue;
+      if (['linked', 'already-linked'].includes(result.state) && !dryRun) {
+        const row = await store('downloads', 'readonly', os => req(os.get(pair.key)));
+        if (row) {
+          // The file still exists (it is the same inode as the kept copy), so the row stays a normal
+          // completed download; linkedAt only keeps it out of future duplicate reports.
+          row.linkedAt = Date.now();
+          row.linkedTo = pair.keepKey;
+          rows.push(row);
+        }
+        if (result.state === 'linked') {
+          linked++;
+          bytes += Number(result.bytes) || 0;
+        }
+      } else if (result.state === 'would-link') bytes += Number(result.bytes) || 0;
+      else if (!['linked', 'already-linked'].includes(result.state))
+        problems.push({ key: result.key, state: result.state, reason: result.reason || '' });
+    }
+    if (rows.length) await putMany('downloads', rows);
+  }
+  if (linked) void action('downloads', `Linked ${linked} duplicate files`, { bytes }).catch(() => {});
+  return { ok: true, dryRun, pairs: pairs.length, linked, bytes, counts, problems: problems.slice(0, 200) };
 });
 const INTEGRITY_ALARM = 'xv-integrity-reverify';
 async function reverifyCompletedDownloads({ limit = 400 } = {}) {
@@ -3724,6 +3883,32 @@ async function scheduleIntegrity() {
   else await chrome.alarms.clear(INTEGRITY_ALARM).catch(() => {});
 }
 scheduleIntegrity().catch(() => {});
+// Scheduled recovery-file backups (XVault 22, sw/auto-backup.mjs).
+const autoBackup = createAutoBackup({
+  getSettings,
+  notify: (title, message) => void notify(title, message),
+  builder: chrome.offscreen?.createDocument
+    ? createOffscreenBackupBuilder(chrome, createOffscreenHost(chrome), holdOffscreen)
+    : createInlineBackupBuilder(async (type, payload = {}) => {
+        const out = await router.dispatch({ type, ...payload }, DESKTOP, { id: chrome.runtime.id });
+        if (!out.handled || out.value?.ok === false) throw Error(out.value?.error || `${type} failed`);
+        return out.value;
+      }),
+  currentRevision: async () => {
+    const database = await db();
+    try {
+      const page = await readLibraryBackupPage(database, 'tweets', null, 1, null);
+      return `${page.revision ?? ''}:${page.downloadRevision ?? ''}`;
+    } finally {
+      database.close();
+    }
+  },
+});
+autoBackup.schedule().catch(() => {});
+router.register('AUTO_BACKUP_STATUS', () => autoBackup.status());
+router.register('AUTO_BACKUP_RUN', () => autoBackup.run({ reason: 'manual', force: true }));
+router.register('AUTO_BACKUP_UNLOCK', m => autoBackup.unlock(m.passphrase));
+router.register('AUTO_BACKUP_LOCK', () => autoBackup.lock());
 router.register('INTEGRITY_REVERIFY', async m => ({
   ok: true,
   ...(await reverifyCompletedDownloads({ limit: Math.max(1, Math.min(5000, Number(m.limit) || 400)) })),
@@ -4375,6 +4560,76 @@ route('GET_LIBRARY_RECORDS', async m => {
 route('QUERY_LIBRARY_PAGE', async m => {
   return await queryLibraryPage(m);
 });
+// Library timeline (XVault 22): a histogram of every matching post by posting (or archiving) date.
+// Scans the whole archive once per (query, revision) in 1,000-record pages; cached for repeat paints.
+const timelineCache = new Map();
+route('LIBRARY_TIMELINE', async m => {
+  const query = String(m.query || '').slice(0, 1000),
+    field = m.field === 'archived' ? 'archived' : 'posted';
+  const Search = globalThis.XVaultLibrarySearch;
+  if (Search.queryIssues(query).length) return { ok: true, buckets: [], unit: null, invalid: true };
+  const settings = await getSettings(),
+    database = await db();
+  try {
+    const revision = await readLibraryRevision(database),
+      zone = Search.getCalendarTimeZone?.() || 'utc',
+      key = `${revision}|${zone}|${field}|${query}`;
+    if (timelineCache.has(key)) return timelineCache.get(key);
+    const compiled = Search.compileQuery(query);
+    if (Search.usesRuleKind(compiled, ['downloaded', 'missing', 'size']))
+      return { ok: true, buckets: [], unit: null, unsupported: 'Download filters are not charted on the timeline' };
+    const ocrText = await ocrTextFor(compiled),
+      semanticScores = await semanticFor(compiled),
+      boardNames = boardNamesOf(settings),
+      joins = await queryJoinsFor(database, compiled);
+    const stamps = [];
+    let scanned = 0,
+      after = null,
+      truncated = false;
+    for (;;) {
+      const range = after == null ? null : IDBKeyRange.lowerBound(after, true);
+      const batch = await new Promise((resolve, reject) => {
+        const request = database.transaction('tweets', 'readonly').objectStore('tweets').getAll(range, 1000);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      for (const post of batch) {
+        scanned++;
+        if (query) {
+          const projection = Search.projectPost(post, 0, {
+            inboxSince: settings.inboxSince,
+            ocrText: ocrText.map?.get(String(post.id)),
+            semanticScores: semanticScoresFor(semanticScores, String(post.id)),
+            boardNames,
+            ...joins,
+          });
+          if (!Search.matchesCompiledQuery(projection, compiled)) continue;
+        }
+        stamps.push(field === 'archived' ? Number(post.archivedAt || 0) : new Date(post.createdAt || 0).getTime());
+      }
+      if (batch.length < 1000) break;
+      after = batch.at(-1).id;
+      if (scanned >= 400000) {
+        truncated = true;
+        break;
+      }
+    }
+    const result = {
+      ok: true,
+      revision,
+      field,
+      scanned,
+      matched: stamps.length,
+      truncated,
+      ...timelineBuckets(stamps, { zone }),
+    };
+    timelineCache.set(key, result);
+    while (timelineCache.size > 24) timelineCache.delete(timelineCache.keys().next().value);
+    return result;
+  } finally {
+    database.close();
+  }
+});
 route('GET_LIBRARY_QUERY_PROGRESS', async m => {
   const queryId = String(m.queryId || '');
   return { ok: true, progress: activeLibraryQueryProgress.get(queryId) || null };
@@ -4898,7 +5153,7 @@ route('WAKE', async m => {
 
 chrome.runtime.onMessage.addListener((m, s, reply) => {
   (async () => {
-    const messageCapability = authorizeMessage(m, s, chrome.runtime.id);
+    const messageCapability = authorizeMessage(m, s, chrome.runtime.id, chrome.runtime.getURL(''));
     await privateStorageReady;
     const routed = await router.dispatch(m, messageCapability, s);
     return routed.handled ? routed.value : unknownMessage();
@@ -6063,7 +6318,7 @@ async function startOne(row, s) {
     const local =
       row.item.localSource &&
       !row.localSourceTried &&
-      String(row.item.localSource).startsWith(`blob:chrome-extension://${chrome.runtime.id}/`)
+      String(row.item.localSource).startsWith(`blob:${chrome.runtime.getURL('').replace(/\/$/, '')}/`)
         ? String(row.item.localSource)
         : '';
     if (local) row.localSourceTried = true;
@@ -6793,6 +7048,7 @@ chrome.alarms.onAlarm.addListener(async alarm => {
   if (derived.onAlarm(alarm?.name)) return;
   if (syncScheduler.onAlarm(alarm?.name)) return;
   if (watchLists.onAlarm(alarm?.name)) return;
+  if (autoBackup.onAlarm(alarm?.name)) return;
   if (alarm?.name === INTEGRITY_ALARM) {
     const settings = await getSettings(),
       last = (await chrome.storage.local.get('xvIntegrityReverify')).xvIntegrityReverify;
@@ -7013,7 +7269,9 @@ async function helperFetch(path, options = {}) {
     signal: options.signal || AbortSignal.timeout(1500),
   });
   if (r.status === 401) {
+    // POST: Chromium omits the Origin header on extension GETs, and the helper only pairs with a known origin.
     const boot = await fetch(`http://127.0.0.1:${port}/bootstrap`, {
+      method: 'POST',
       cache: 'no-store',
       signal: AbortSignal.timeout(1200),
     }).catch(() => null);

@@ -97,12 +97,25 @@
 <p class="xv-pass-hint" id="xvPassHint">At least 8 characters. Four random words beat one clever word.</p>
 <div class="xv-vault-actions"><button type="submit" class="primary">Create encrypted backup</button><button type="button" class="quiet" data-vault="plain-backup">Unencrypted recovery file</button><button type="button" class="quiet" data-vault="restore">Restore from a backup…</button></div>
 </form></section>
+<section class="panel" aria-labelledby="xvAutoTitle"><div class="panelhead"><div><h3 id="xvAutoTitle">Automatic backups</h3><p>On a schedule XVault writes the same recovery file into a <code>Backups</code> folder inside your download folder and keeps only the newest ones it made. Copy that folder somewhere else (a sync drive, a USB disk) to be safe from a lost computer.</p></div></div>
+<form class="xv-auto-form" id="xvAutoForm" autocomplete="off">
+<label class="xv-field"><span>Back up</span><select name="days"><option value="0">Off</option><option value="1">Every day</option><option value="3">Every 3 days</option><option value="7">Every week</option><option value="30">Every month</option></select></label>
+<label class="xv-field"><span>Keep the newest</span><input type="number" name="keep" min="1" max="60" inputmode="numeric"></label>
+<label class="xv-check"><input type="checkbox" name="encrypt"> Encrypt with a passphrase</label>
+<label class="xv-check"><input type="checkbox" name="skip"> Skip when nothing changed</label>
+</form>
+<form class="xv-auto-unlock" id="xvAutoUnlock" autocomplete="off" hidden><p>Encrypted backups need the passphrase once per browser session. It is kept in memory only and forgotten when the browser closes.</p><label class="xv-field"><span>Backup passphrase</span><input type="password" name="pass" minlength="8" autocomplete="new-password" required></label><label class="xv-field"><span>Repeat passphrase</span><input type="password" name="again" minlength="8" autocomplete="new-password" required></label><div class="xv-vault-actions"><button type="submit" class="primary">Unlock encrypted backups</button></div></form>
+<div class="xv-backup-state" id="xvAutoState" aria-live="polite"></div>
+<ul class="xv-auto-files" id="xvAutoFiles"></ul>
+<div class="xv-vault-actions"><button type="button" data-vault="auto-run">Back up now</button><button type="button" class="quiet" data-vault="auto-lock" hidden>Forget passphrase</button></div></section>
 <section class="panel" aria-labelledby="xvImportTitle"><div class="panelhead"><div><h3 id="xvImportTitle">Import your X data archive</h3><p>Bring years of history in at once: choose the ZIP that X emails from <em>Settings › Your account › Download an archive of your data</em> (or an extracted <code>tweets.js</code> / <code>like.js</code>). It is read on this device; only your posts, likes and bookmarks are imported. Posts XVault already captured keep their richer live data.</p></div></div>
 <div class="xv-import" id="xvImport"><label class="xv-drop" tabindex="0"><input type="file" accept=".zip,.js,application/zip" id="xvImportFile" hidden><b>Choose your X archive</b><span>or drop the .zip here</span></label></div></section>
 </div>`;
     page.addEventListener('click', onClick);
     page.querySelector('#xvBackupForm').addEventListener('submit', onBackup);
     page.querySelector('#xvBackupForm').addEventListener('input', strength);
+    page.querySelector('#xvAutoForm').addEventListener('change', onAutoChange);
+    page.querySelector('#xvAutoUnlock').addEventListener('submit', onAutoUnlock);
     const file = page.querySelector('#xvImportFile'),
       drop = page.querySelector('.xv-drop');
     drop.addEventListener(
@@ -196,6 +209,23 @@
     }
     if (act === 'restore') return $('#recoveryFile')?.click();
     if (act === 'plain-backup') return window.XVaultCreateRecoveryFile?.();
+    if (act === 'auto-run') {
+      button.disabled = true;
+      button.textContent = 'Backing up…';
+      const result = await call({ type: 'AUTO_BACKUP_RUN' }).catch(error => ({ ok: false, error: String(error) }));
+      button.disabled = false;
+      button.textContent = 'Back up now';
+      autoSay(
+        result?.ok
+          ? `Saved ${fmt(result.file?.recordCount || 0)} records · ${bytes(result.file?.bytes)}${result.pruned ? ` · removed ${fmt(result.pruned)} older backups` : ''}`
+          : result?.error || 'The backup failed'
+      );
+      return paintAuto();
+    }
+    if (act === 'auto-lock') {
+      await call({ type: 'AUTO_BACKUP_LOCK' });
+      return paintAuto();
+    }
     const run = async (label, message, confirmText) => {
       if (confirmText && !confirm(confirmText)) return;
       button.disabled = true;
@@ -239,6 +269,72 @@
         { type: 'PRUNE_ACTIONS', keep: 50 },
         'Keep only the 50 most recent activity entries?'
       );
+  }
+
+  // ── Automatic backups (XVault 22) ──
+  let autoMessage = '';
+  const autoSay = text => {
+    autoMessage = text;
+  };
+  async function paintAuto() {
+    const form = $('#xvAutoForm');
+    if (!form) return;
+    const status = await call({ type: 'AUTO_BACKUP_STATUS' }).catch(() => null);
+    if (!status?.ok) return;
+    form.elements.days.value = String([0, 1, 3, 7, 30].includes(status.days) ? status.days : status.days ? 7 : 0);
+    form.elements.keep.value = String(status.keep || 7);
+    form.elements.encrypt.checked = !!status.encrypted;
+    form.elements.skip.checked = settings.autoBackupSkipUnchanged !== false;
+    const needsKey = status.encrypted && !status.unlocked;
+    $('#xvAutoUnlock').hidden = !needsKey;
+    $('[data-vault="auto-lock"]').hidden = !(status.encrypted && status.unlocked);
+    $('[data-vault="auto-run"]').disabled = needsKey || status.running;
+    const node = $('#xvAutoState'),
+      last = status.status;
+    const problem = last && ['failed', 'locked'].includes(last.state);
+    node.className = `xv-backup-state${problem || (!status.enabled && !status.lastSavedAt) ? ' is-overdue' : ''}`;
+    const line = !status.enabled
+      ? '<b>Automatic backups are off</b>'
+      : `<b>${needsKey ? 'Paused — waiting for the passphrase' : `Next backup ${status.nextDueAt > Date.now() ? when(status.nextDueAt) : 'within the hour'}`}</b>`;
+    const detail = [
+      status.lastSavedAt ? `last saved ${ago(status.lastSavedAt)} (${when(status.lastSavedAt)})` : 'nothing saved yet',
+      last?.state === 'unchanged' ? `checked ${ago(last.at)} — nothing had changed` : '',
+    ].filter(Boolean);
+    node.innerHTML = `${line}<span>${html(detail.join(' · '))}</span>${problem ? `<em>${html(last.message)}</em>` : ''}${autoMessage ? `<span>${html(autoMessage)}</span>` : ''}`;
+    $('#xvAutoFiles').innerHTML = (status.files || [])
+      .map(
+        file =>
+          `<li><code>${html(
+            String(file.relative || file.filename)
+              .split(/[\\/]/)
+              .pop()
+          )}</code><span>${when(file.at)} · ${fmt(file.recordCount || 0)} records · ${bytes(file.bytes)}${file.encrypted ? ' · encrypted' : ''}</span></li>`
+      )
+      .join('');
+  }
+  async function onAutoChange() {
+    const form = $('#xvAutoForm');
+    autoSay('');
+    await save(
+      {
+        autoBackupDays: Number(form.elements.days.value) || 0,
+        autoBackupKeep: Math.max(1, Math.min(60, Number(form.elements.keep.value) || 7)),
+        autoBackupEncrypt: form.elements.encrypt.checked,
+        autoBackupSkipUnchanged: form.elements.skip.checked,
+      },
+      false
+    );
+    return paintAuto();
+  }
+  async function onAutoUnlock(event) {
+    event.preventDefault();
+    const form = event.currentTarget,
+      pass = form.elements.pass.value;
+    if (pass !== form.elements.again.value) return (autoSay('The passphrases do not match.'), paintAuto());
+    const result = await call({ type: 'AUTO_BACKUP_UNLOCK', passphrase: pass });
+    form.reset();
+    autoSay(result?.ok ? 'Unlocked for this browser session.' : result?.error || 'Could not unlock');
+    return paintAuto();
   }
 
   // ── Backups ──
@@ -516,6 +612,7 @@ ${
     skeleton();
     paintStorage();
     paintBackup();
+    paintAuto();
   });
   hooks.after('queueStats', () => paintEngine());
   hooks.after('apply', () => paintEngine());
@@ -525,6 +622,11 @@ ${
       name: 'Create encrypted backup',
       hint: 'passphrase-protected recovery file',
       run: () => (page('vault'), setTimeout(() => $('#xvBackupForm input')?.focus(), 80)),
+    },
+    {
+      name: 'Automatic backups',
+      hint: 'schedule recovery files into Downloads/XVault/Backups',
+      run: () => (page('vault'), setTimeout(() => $('#xvAutoTitle')?.scrollIntoView({ block: 'start' }), 80)),
     },
     {
       name: 'Import X data archive',

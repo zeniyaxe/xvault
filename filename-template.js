@@ -141,9 +141,13 @@
       moves = [],
       conflicts = [];
     for (const row of rows) {
+      // A folder template is applied inside the archive folder the file already lives in (its first
+      // segment, e.g. XVault/), the same way new downloads are placed; files never leave it.
+      const segments = String(row.path).split('/'),
+        top = segments.length > 1 ? segments[0] : '';
       const folderPart = folderTemplate
-        ? render(folderTemplate, row.item, { folder: true }).name
-        : String(row.path).split('/').slice(0, -1).join('/');
+        ? [top, render(folderTemplate, row.item, { folder: true }).name].filter(Boolean).join('/')
+        : segments.slice(0, -1).join('/');
       const next = `${folderPart ? `${folderPart}/` : ''}${filename(fileTemplate, row.item, row.ext)}`;
       if (next === row.path) continue;
       if (taken.has(next)) {

@@ -1170,7 +1170,23 @@ try {
   }
   if (!dead)
     try {
+      // Answer only the types this script owns: instant-actions.js listens on the same channel, and the
+      // first sendResponse wins, so a catch-all answer here would swallow its replies (and vice versa).
+      const OWN_TYPES = new Set([
+        'XV_GET_TEMPLATES',
+        'XV_SMART_START',
+        'XV_SCROLL_START',
+        'XV_SCROLL_STOP',
+        'XV_DIRECT_PAUSE',
+        'XV_DIRECT_RESUME',
+        'XV_DIRECT_CANCEL',
+        'XV_DOWNLOAD_CURRENT',
+        'XV_VALIDATE_PROFILE',
+        'XV_TEST_CRAWLER',
+        'XV_REFRESH_INSTANT_SETTINGS',
+      ]);
       chrome.runtime.onMessage.addListener((m, _s, reply) => {
+        if (!OWN_TYPES.has(m?.type)) return false;
         (async () => {
           if (m.type === 'XV_GET_TEMPLATES') {
             const z = await getCaptureTemplates();

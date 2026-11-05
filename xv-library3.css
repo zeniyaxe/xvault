@@ -1142,6 +1142,45 @@ body[data-contrast='high'] :focus-visible {
   font-style: normal;
   font-size: 12.5px;
 }
+.xv-auto-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+  align-items: end;
+  margin: 0 0 12px;
+}
+.xv-auto-unlock {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px 16px;
+  align-items: end;
+  margin: 0 0 12px;
+}
+.xv-auto-unlock p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--soft);
+  font-size: 12.5px;
+}
+.xv-auto-files {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.xv-auto-files li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 12.5px;
+}
+.xv-auto-files code {
+  overflow-wrap: anywhere;
+}
+.xv-auto-files span {
+  color: var(--soft);
+}
 .xv-backup-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

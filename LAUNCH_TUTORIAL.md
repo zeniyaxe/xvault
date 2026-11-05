@@ -33,6 +33,8 @@ The Helper supports local animation conversion and related local media previews.
 4. Keep the Helper console open while using it. Its local status endpoint is `http://127.0.0.1:17843/status`.
 5. In XVault, open **Health** and confirm **FFmpeg Helper bridge** and **FFmpeg detected** are healthy.
 
+With the Helper running, **Downloads › Files & health** can also rename files to a new template in place (**Rename N files now**) and replace identical copies with hard links (**Link identical copies**, shown as a dry run first). Both only touch files inside the Helper's watched Downloads folder and never overwrite; without the Helper, XVault offers a rename script instead.
+
 To launch it later, double-click `FFmpeg_Helper\run_helper.bat`. Press Ctrl+C in its console to stop it. The Helper uses `FFmpeg_Helper\config.json`; its default download layout keeps originals and converted GIF/WebP files in separate folders. Check that file before running setup if you have customized an existing installation.
 
 ## 4. Optional: pair the phone over the same Wi-Fi

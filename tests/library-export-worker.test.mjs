@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
-import { pathToFileURL } from 'node:url';
 
 const root = new URL('../', import.meta.url);
 const messages = [];

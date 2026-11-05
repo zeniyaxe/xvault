@@ -21,6 +21,14 @@ assert.equal(
   2,
   'only startOne and the explicit self-test may start a Chrome download'
 );
+// The one other caller: scheduled backups save their own recovery file, always into <media folder>/Backups/.
+const backupSource = compactSource(readSource('sw/auto-backup.mjs'));
+assert.equal((backupSource.match(/downloads\.download\(/g) || []).length, 1, 'auto backups start exactly one download');
+assert.match(
+  backupSource,
+  /const filename=`\$\{clean\(settings\.mediaFolder\)\}\/Backups\//,
+  'backups only go to Backups/'
+);
 const startOne = source.slice(
   source.indexOf('async function startOne('),
   source.indexOf('function classifyDownloadError(')

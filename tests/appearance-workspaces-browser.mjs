@@ -21,7 +21,7 @@ try {
   assert.equal(await frame.locator('.theme-card').count(), 12);
   const contrast = await frame.evaluate(() => {
     const lum = hex => {
-      if (hex.length == 4)
+      if (hex.length === 4)
         hex =
           '#' +
           hex

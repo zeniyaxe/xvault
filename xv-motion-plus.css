@@ -1,0 +1,238 @@
+/* XVault 22 motion layer, part two: notices, sliding segmented pills, lightbox zoom sparks and
+   scroll-driven reveals. Calm settings (html.xv-calm) and the reduced-motion preference remove movement. */
+
+/* ───────── Notices ───────── */
+#toast,
+.xt-ghost {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+}
+.xt-ghost {
+  position: fixed;
+  z-index: 2999;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--raised-hi);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+  font-size: 13px;
+  pointer-events: none;
+}
+#toast.has-action.show {
+  pointer-events: auto;
+}
+.xt-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+}
+.xt-icon::before {
+  content: 'i' / '';
+}
+[data-tone='success'] > .xt-icon {
+  background: color-mix(in srgb, var(--ok, #3fb950) 22%, transparent);
+  color: var(--ok, #3fb950);
+}
+[data-tone='success'] > .xt-icon::before {
+  content: '✓' / '';
+}
+[data-tone='error'] > .xt-icon {
+  background: color-mix(in srgb, var(--danger, #f85149) 22%, transparent);
+  color: var(--danger, #f85149);
+}
+[data-tone='error'] > .xt-icon::before {
+  content: '!' / '';
+}
+[data-tone='warn'] > .xt-icon {
+  background: color-mix(in srgb, var(--warn, #d29922) 22%, transparent);
+  color: var(--warn, #d29922);
+}
+[data-tone='warn'] > .xt-icon::before {
+  content: '!' / '';
+}
+#toast[data-tone='error'] {
+  border-color: color-mix(in srgb, var(--danger, #f85149) 45%, var(--line));
+}
+.xt-msg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.xt-count {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: var(--sunk);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.xt-action {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--sunk);
+  color: var(--text);
+  font-weight: 650;
+}
+.xt-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.xt-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: color-mix(in srgb, var(--accent) 65%, transparent);
+  transform-origin: left center;
+  animation: xt-countdown linear forwards;
+  animation-duration: 2600ms;
+}
+[data-tone='error'] > .xt-bar {
+  background: color-mix(in srgb, var(--danger, #f85149) 65%, transparent);
+}
+[data-tone='success'] > .xt-bar {
+  background: color-mix(in srgb, var(--ok, #3fb950) 65%, transparent);
+}
+#toast:not(.show) > .xt-bar,
+#toast.is-paused > .xt-bar {
+  animation-play-state: paused;
+}
+@keyframes xt-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+html.xv-calm .xt-bar {
+  animation: none;
+  opacity: 0.4;
+}
+.xt-history {
+  width: min(520px, calc(100vw - 32px));
+}
+.xt-history header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.xt-history h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.xt-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+}
+.xt-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.xt-list time {
+  color: var(--soft);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.xt-list .xt-empty {
+  display: block;
+  color: var(--muted);
+}
+
+/* ───────── Segmented controls ───────── */
+.seg.xv-pilled {
+  position: relative;
+}
+.seg.xv-pilled > :not(.xv-seg-pill) {
+  position: relative;
+  z-index: 1;
+}
+.seg.xv-pilled > :is([aria-checked='true'], .active, [aria-pressed='true'], [aria-selected='true']) {
+  background: transparent;
+  box-shadow: none;
+}
+.xv-seg-pill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 0;
+  border-radius: var(--r-s);
+  background: var(--raised-hi);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    transform calc(340ms * var(--motion-k, 1) / var(--motion-scale, 1)) var(--xv-spring-snappy),
+    width calc(340ms * var(--motion-k, 1) / var(--motion-scale, 1)) var(--xv-spring-snappy),
+    height calc(340ms * var(--motion-k, 1) / var(--motion-scale, 1)) var(--xv-spring-snappy),
+    opacity 120ms linear;
+  will-change: transform;
+}
+body.light .xv-seg-pill {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
+}
+.xv-seg-pill.is-instant,
+html.xv-calm .xv-seg-pill {
+  transition: none;
+}
+
+/* ───────── Favourite sparks ───────── */
+.xv-spark {
+  position: fixed;
+  z-index: 2147483000;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+/* ───────── Scroll-driven reveals ─────────
+   Sections glide up during the first 140px of entering the viewport. Anything already on screen is
+   past that range and renders normally; browsers without scroll timelines show everything at once.
+   Transform only — fading opacity would leave half-entered text below contrast minimums. */
+@supports (animation-timeline: view()) {
+  @keyframes xv-reveal {
+    from {
+      transform: translateY(22px) scale(0.98);
+    }
+    to {
+      transform: none;
+    }
+  }
+  html:not(.xv-calm)
+    body.xv-motion-ready
+    :is(.xa-section, .xa-kpi, .xa-badge, #page-files section.panel, #page-quality section.panel) {
+    animation: xv-reveal linear both;
+    animation-timeline: view();
+    animation-range: entry 0px entry 140px;
+  }
+}

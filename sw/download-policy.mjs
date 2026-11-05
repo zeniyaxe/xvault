@@ -230,7 +230,7 @@ export function hostHealth(rows, { now = Date.now(), recentDays = 14 } = {}) {
 export function duplicateReport(rows, { assetOf = () => '' } = {}) {
   const groups = new Map();
   for (const row of rows) {
-    if (row.state !== 'complete' || !(Number(row.downloadId) > 0) || row.reclaimedAt) continue;
+    if (row.state !== 'complete' || !(Number(row.downloadId) > 0) || row.reclaimedAt || row.linkedAt) continue;
     if (['missing', 'corrupt', 'mismatch'].includes(row.verification?.state)) continue;
     const size = Number(row.totalBytes) || 0;
     const key = row.sha256 ? `sha:${row.sha256}` : assetOf(row) && size ? `asset:${assetOf(row)}:${size}` : '';

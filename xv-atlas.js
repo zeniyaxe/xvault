@@ -359,10 +359,10 @@
         : [],
     };
   }
-  function review(data) {
-    const years = (data.years || []).filter(year => year.posted || year.archived);
-    if (!years.length)
-      return `<div class="empty xa-empty"><h2>Year in Review needs a fresh count</h2><p>Recount the archive to add yearly statistics, topic drift and achievements.</p><button type="button" class="primary" data-act="recount">Recount now</button></div>`;
+  // One model feeds the page, the image card and the Markdown summary, so they never disagree.
+  function reviewModel(data) {
+    const years = (data?.years || []).filter(year => year.posted || year.archived);
+    if (!years.length) return null;
     if (!years.some(year => year.year === state.reviewYear))
       state.reviewYear = (years.find(year => year.posted) || years[0]).year;
     const index = years.findIndex(year => year.year === state.reviewYear),
@@ -381,6 +381,13 @@
       topics = drift(year, previous),
       badges = achievements(data),
       earned = badges.filter(badge => badge.earned).length;
+    return { years, year, previous, months, peak, maxMonth, busiestDay, change, topics, badges, earned };
+  }
+  function review(data) {
+    const model = reviewModel(data);
+    if (!model)
+      return `<div class="empty xa-empty"><h2>Year in Review needs a fresh count</h2><p>Recount the archive to add yearly statistics, topic drift and achievements.</p><button type="button" class="primary" data-act="recount">Recount now</button></div>`;
+    const { years, year, previous, months, peak, maxMonth, busiestDay, change, topics, badges, earned } = model;
     const yearChips = years
       .slice(0, 16)
       .map(
@@ -392,7 +399,7 @@
       rows.length
         ? `<div class="xa-cloud">${rows.map(row => `<button type="button" class="xa-chip is-${sign}" data-q="#${html(row.key)} year:${html(year.year)}" title="${count(row.count)} posts in ${html(year.year)}">#${html(row.key)}<small>${sign === 'up' ? '▲' : '▼'}</small></button>`).join('')}</div>`
         : `<p class="xa-quiet">${sign === 'up' ? 'No hashtag stands out this year.' : previous ? 'Nothing faded noticeably.' : 'No earlier year to compare with.'}</p>`;
-    return `<section class="xa-review-head"><div class="seg xa-years" role="radiogroup" aria-label="Year">${yearChips}</div><p>${html(year.year)} in your vault — posts written that year, whenever you archived them.</p></section>
+    return `<section class="xa-review-head"><div class="seg xa-years" role="radiogroup" aria-label="Year">${yearChips}</div><div class="xa-review-line"><p>${html(year.year)} in your vault — posts written that year, whenever you archived them.</p><span class="xa-review-export"><button type="button" class="quiet" data-act="review-png" title="Save ${html(year.year)} as a shareable PNG card">Save image</button><button type="button" class="quiet" data-act="review-md" title="Save ${html(year.year)} as a Markdown summary">Save summary</button></span></div></section>
 <section class="xa-kpis" aria-label="${html(year.year)} totals">
 ${kpi('Posts written', year.posted, change == null ? `${count(year.archived)} archived during ${year.year}` : `${change >= 0 ? '+' : ''}${change}% vs ${previous.year}`)}
 ${kpi('People', year.authors, `${count(year.newAuthors)} first seen this year`)}
@@ -417,6 +424,181 @@ ${year.tags?.length ? `<section class="xa-section"><header class="xa-section-hea
       )
       .join('')}</ul></section>
 <p class="xa-foot">Counted locally from ${count(data.total)} archived posts. Years follow ${data.timeZone === 'utc' ? 'UTC' : 'local time'}.</p>`;
+  }
+  /* ── Year in Review export (XVault 22): a PNG card drawn on a canvas and a Markdown summary ──
+     Text only: no avatars or media are drawn, so the canvas is never tainted and nothing leaves the device. */
+  function reviewMarkdown(data, model = reviewModel(data)) {
+    if (!model) return '';
+    const { year, previous, months, peak, busiestDay, change, topics, badges, earned } = model,
+      lines = [`# ${year.year} in my XVault`, ''];
+    lines.push(
+      `- **Posts written:** ${count(year.posted)}${change == null ? '' : ` (${change >= 0 ? '+' : ''}${change}% vs ${previous.year})`}`,
+      `- **Archived during ${year.year}:** ${count(year.archived)}`,
+      `- **People:** ${count(year.authors)} (${count(year.newAuthors)} first seen this year)`,
+      `- **Media files:** ${count(year.media)}`,
+      `- **Likes on them:** ${count(year.likes)} (as last captured)`,
+      `- **Highlights:** ${count(year.highlights)}`,
+      ''
+    );
+    if (peak?.count) {
+      lines.push(`**Busiest month:** ${monthText(peak.key, 'long')} (${count(peak.count)})`);
+      if (busiestDay) lines.push(`**Top day:** ${dayText(busiestDay[0])} (${count(busiestDay[1])})`);
+      lines.push('', '## Month by month', '', '| Month | Posts |', '| --- | ---: |');
+      months.forEach(month => lines.push(`| ${monthText(month.key, 'long')} | ${count(month.count)} |`));
+      lines.push('');
+    }
+    const authors = (year.topAuthors || []).slice(0, 10);
+    if (authors.length) {
+      lines.push('## Who I kept', '');
+      authors.forEach((item, index) => lines.push(`${index + 1}. @${item.key} — ${count(item.count)}`));
+      lines.push('');
+    }
+    if (topics.rising.length) lines.push(`**Rising topics:** ${topics.rising.map(row => `#${row.key}`).join(', ')}`);
+    if (topics.fading.length) lines.push(`**Fading topics:** ${topics.fading.map(row => `#${row.key}`).join(', ')}`);
+    if (topics.rising.length || topics.fading.length) lines.push('');
+    lines.push(`## Achievements (${earned} of ${badges.length})`, '');
+    badges.forEach(badge => lines.push(`- [${badge.earned ? 'x' : ' '}] ${badge.title} — ${badge.detail}`));
+    lines.push(
+      '',
+      `_Counted locally by XVault from ${count(data.total)} archived posts; years follow ${data.timeZone === 'utc' ? 'UTC' : 'local time'}._`,
+      ''
+    );
+    return lines.join('\n');
+  }
+  function reviewColors() {
+    const style = getComputedStyle(document.querySelector('#page-atlas') || document.body),
+      read = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
+    return {
+      bg: read('--bg', '#0f1115'),
+      panel: read('--panel', '#181b22'),
+      text: read('--text', '#f2f4f8'),
+      muted: read('--muted', '#9aa3b2'),
+      accent: read('--accent', '#1d9bf0'),
+    };
+  }
+  function reviewCanvas(data, model = reviewModel(data)) {
+    if (!model) return null;
+    const { year, previous, months, peak, maxMonth, change, topics, earned, badges } = model,
+      width = 1080,
+      height = 1350,
+      canvas = document.createElement('canvas'),
+      ctx = canvas.getContext('2d'),
+      colors = reviewColors(),
+      font = (weight, size) => `${weight} ${size}px system-ui, -apple-system, "Segoe UI", sans-serif`,
+      fit = (text, max) => {
+        let value = String(text);
+        while (value.length > 1 && ctx.measureText(value).width > max) value = value.slice(0, -2) + '…';
+        return value;
+      };
+    canvas.width = width;
+    canvas.height = height;
+    ctx.fillStyle = colors.bg;
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = colors.accent;
+    ctx.fillRect(0, 0, width, 12);
+    ctx.fillStyle = colors.text;
+    ctx.font = font(800, 92);
+    ctx.fillText(year.year, 72, 170);
+    ctx.font = font(500, 36);
+    ctx.fillStyle = colors.muted;
+    ctx.fillText('in my XVault', 72, 222);
+    const tiles = [
+      ['Posts written', year.posted, change == null ? '' : `${change >= 0 ? '+' : ''}${change}% vs ${previous.year}`],
+      ['People', year.authors, `${count(year.newAuthors)} new`],
+      ['Media files', year.media, ''],
+      ['Highlights', year.highlights, ''],
+    ];
+    tiles.forEach(([label, value, note], index) => {
+      const x = 72 + (index % 2) * 476,
+        y = 280 + Math.floor(index / 2) * 190;
+      ctx.fillStyle = colors.panel;
+      ctx.fillRect(x, y, 460, 170);
+      ctx.fillStyle = colors.muted;
+      ctx.font = font(600, 26);
+      ctx.fillText(label, x + 28, y + 48);
+      ctx.fillStyle = colors.text;
+      ctx.font = font(800, 64);
+      ctx.fillText(fit(count(value), 400), x + 28, y + 120);
+      if (note) {
+        ctx.fillStyle = colors.accent;
+        ctx.font = font(600, 24);
+        ctx.fillText(fit(note, 400), x + 28, y + 154);
+      }
+    });
+    // Month bars.
+    const chartTop = 700,
+      chartHeight = 220,
+      slot = (width - 144) / 12;
+    ctx.fillStyle = colors.muted;
+    ctx.font = font(600, 26);
+    ctx.fillText(peak?.count ? `Busiest: ${monthText(peak.key, 'long')}` : 'Month by month', 72, chartTop - 20);
+    months.forEach((month, index) => {
+      const barHeight = Math.max(month.count ? 4 : 1, (month.count / maxMonth) * chartHeight),
+        x = 72 + index * slot + 6;
+      // The peak month is solid accent, the others a lighter accent; empty months a faint baseline.
+      ctx.fillStyle = month.count ? colors.accent : colors.panel;
+      if (month.count && month !== peak) ctx.globalAlpha = 0.45;
+      ctx.fillRect(x, chartTop + chartHeight - barHeight, slot - 12, barHeight);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = colors.muted;
+      ctx.font = font(500, 20);
+      ctx.fillText(monthText(month.key).slice(0, 3), x, chartTop + chartHeight + 30);
+    });
+    // Top people and topics.
+    const listTop = 1010;
+    ctx.fillStyle = colors.muted;
+    ctx.font = font(600, 26);
+    ctx.fillText('Who I kept', 72, listTop);
+    ctx.fillText(topics.rising.length ? 'Rising topics' : 'Achievements', 560, listTop);
+    ctx.font = font(600, 30);
+    (year.topAuthors || []).slice(0, 5).forEach((item, index) => {
+      ctx.fillStyle = colors.text;
+      ctx.fillText(fit(`@${item.key}`, 340), 72, listTop + 50 + index * 46);
+      ctx.fillStyle = colors.muted;
+      ctx.fillText(count(item.count), 420, listTop + 50 + index * 46);
+    });
+    const right = topics.rising.length
+      ? topics.rising.slice(0, 5).map(row => `#${row.key}`)
+      : [
+          `${earned} of ${badges.length} earned`,
+          ...badges
+            .filter(badge => badge.earned)
+            .slice(0, 4)
+            .map(badge => `★ ${badge.title}`),
+        ];
+    right.forEach((line, index) => {
+      ctx.fillStyle = index || topics.rising.length ? colors.text : colors.accent;
+      ctx.fillText(fit(line, 440), 560, listTop + 50 + index * 46);
+    });
+    ctx.fillStyle = colors.muted;
+    ctx.font = font(500, 22);
+    ctx.fillText(`Counted locally from ${count(data.total)} archived posts · XVault`, 72, height - 48);
+    return canvas;
+  }
+  function saveBlob(blob, name) {
+    const url = URL.createObjectURL(blob),
+      link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+  async function exportReview(kind) {
+    const model = reviewModel(state.data);
+    if (!model) return toast('Recount the archive first');
+    const base = `xvault-${model.year.year}-in-review`;
+    if (kind === 'md') {
+      saveBlob(new Blob([reviewMarkdown(state.data, model)], { type: 'text/markdown' }), `${base}.md`);
+      return toast(`Saved ${base}.md`);
+    }
+    const canvas = reviewCanvas(state.data, model),
+      blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) return toast('The image could not be drawn');
+    saveBlob(blob, `${base}.png`);
+    toast(`Saved ${base}.png`);
   }
   // People graph: the most archived people on a circle, linked when one mentions the other.
   function connections(data) {
@@ -1598,6 +1780,8 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
     const act = set.act;
     if (act === 'recount') return load(true);
     if (act === 'close-sheet') return sheet?.close();
+    if (act === 'review-png') return exportReview('png');
+    if (act === 'review-md') return exportReview('md');
     if (act === 'more-people') {
       state.peopleLimit += 120;
       return paintPeople();
@@ -1715,5 +1899,10 @@ ${detail.topLiked?.length ? `<section class="xa-sheet-section"><h3>Most liked</h
     { name: 'Atlas: Topics', hint: 'posts grouped by meaning', run: () => openView('topics') },
   ]);
 
-  window.XVaultAtlas = { show, open: openView, person: openPerson };
+  window.XVaultAtlas = {
+    show,
+    open: openView,
+    person: openPerson,
+    review: { markdown: () => reviewMarkdown(state.data), canvas: () => reviewCanvas(state.data) },
+  };
 })();

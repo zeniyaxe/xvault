@@ -1,0 +1,112 @@
+/* XVault 22 "Keystone" — Library timeline */
+.xk-timeline {
+  margin: 6px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-m, 10px);
+  background: var(--raised);
+  padding: 6px 10px;
+}
+.xk-timeline header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 30px;
+}
+.xk-summary {
+  color: var(--soft);
+  font-size: 12.5px;
+  flex: 1 1 auto;
+}
+.xk-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.xk-toggle::before {
+  content: '▸ ';
+}
+.xk-timeline.is-open .xk-toggle::before {
+  content: '▾ ';
+}
+.xk-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 64px;
+  padding: 6px 0 2px;
+  touch-action: none;
+  user-select: none;
+}
+.xk-bar {
+  flex: 1 1 0;
+  min-width: 2px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: flex-end;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.xk-bar i {
+  display: block;
+  width: 100%;
+  height: var(--h);
+  background: color-mix(in srgb, var(--accent, #7aa2ff) 70%, transparent);
+  border-radius: 2px 2px 0 0;
+}
+.xk-bar.is-empty i {
+  background: var(--line);
+}
+.xk-bar:hover i,
+.xk-bar:focus-visible i,
+.xk-bar.is-brushed i {
+  background: var(--accent, #7aa2ff);
+}
+.xk-bar.is-brushed {
+  background: color-mix(in srgb, var(--accent, #7aa2ff) 14%, transparent);
+}
+.xk-bar:focus-visible {
+  outline: 2px solid var(--accent, #7aa2ff);
+  outline-offset: 1px;
+}
+@media (max-width: 520px) {
+  .xk-bars {
+    height: 48px;
+  }
+}
+
+/* v22 polish: loading dim, peak, axis, hover lift */
+.xk-bars .xk-bar i {
+  transition:
+    background-color var(--t-fast, 120ms) linear,
+    filter var(--t-fast, 120ms) linear;
+}
+.xk-timeline.is-loading .xk-bars {
+  opacity: 0.45;
+  filter: saturate(0.6);
+  transition: opacity 160ms linear;
+}
+.xk-bar.is-peak i {
+  background: var(--accent, #7aa2ff);
+}
+.xk-bar:hover i {
+  filter: brightness(1.15);
+}
+.xk-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--soft);
+  font-size: 11px;
+  line-height: 1.4;
+  padding-top: 2px;
+}
+.xk-axis-peak {
+  color: var(--muted);
+}
+.xk-axis[hidden] {
+  display: none;
+}

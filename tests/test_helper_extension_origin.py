@@ -45,6 +45,19 @@ class HelperExtensionOriginTests(unittest.TestCase):
                 error.exception.close()
                 self.assertNotIn(b'local-helper-secret', denied_body)
                 self.assertIsNone(error.exception.headers.get('Access-Control-Allow-Origin'))
+                # POST /bootstrap (what the extension sends since 22.0: Chromium drops Origin on extension GETs)
+                # needs no token but the same exact origin; no Origin at all is refused.
+                for origin, expected in ((f'chrome-extension://{extension_id}', 200), (f'chrome-extension://{attacker}', 403), (None, 403)):
+                    headers = {'Origin': origin} if origin else {}
+                    request = urllib.request.Request(base + '/bootstrap', data=b'', method='POST', headers=headers)
+                    try:
+                        with urllib.request.urlopen(request, timeout=3) as response:
+                            status, body = response.status, response.read()
+                    except urllib.error.HTTPError as denied:
+                        status, body = denied.code, denied.read()
+                        denied.close()
+                    self.assertEqual(status, expected, origin)
+                    self.assertEqual(b'local-helper-secret' in body, expected == 200)
             finally:
                 server.shutdown(); server.server_close(); thread.join(timeout=2)
 

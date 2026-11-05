@@ -601,7 +601,7 @@
         else if (!same(validateAnnotation(found), validateAnnotation(annotation)))
           addConflict(conflicts, currentKeys[index], `annotation:${annotation.id}`, found, annotation);
       }
-      for (const [field, existing, values] of [
+      for (const [, existing, values] of [
         ['provenance', local.provenance, incoming.provenance || []],
         ['derivatives', local.derivatives, incoming.derivatives || []],
       ]) {

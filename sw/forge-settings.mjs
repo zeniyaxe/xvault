@@ -37,6 +37,11 @@ export const FORGE_DEFAULTS = {
   importMediaFromZip: true,
   captureHistoryLimit: 60,
   capturePresets: [],
+  // XVault 22 "Keystone": scheduled recovery-file backups into <media folder>/Backups.
+  autoBackupDays: 0,
+  autoBackupKeep: 7,
+  autoBackupEncrypt: false,
+  autoBackupSkipUnchanged: true,
 };
 
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -173,6 +178,10 @@ export function normalizeForgeSettings(out) {
   out.linkSnapshotMaxKB = Math.round(clamp(out.linkSnapshotMaxKB, 32, 4096, 512));
   out.quoteChainDepth = Math.round(clamp(out.quoteChainDepth, 0, 5, 2));
   out.captureHistoryLimit = Math.round(clamp(out.captureHistoryLimit, 10, 400, 60));
+  out.autoBackupDays = Math.round(clamp(out.autoBackupDays, 0, 90, 0));
+  out.autoBackupKeep = Math.round(clamp(out.autoBackupKeep, 1, 60, 7));
+  out.autoBackupEncrypt = out.autoBackupEncrypt === true;
+  out.autoBackupSkipUnchanged = out.autoBackupSkipUnchanged !== false;
   return out;
 }
 

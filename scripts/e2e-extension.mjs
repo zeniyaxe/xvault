@@ -54,6 +54,35 @@ try {
       await page.close();
     }
   }
+  // Content scripts on a routed x.com fixture: each tab message is answered by the script that owns it
+  // (content.js and instant-actions.js share the channel; the first sendResponse wins).
+  await context.route('https://x.com/**', route =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: `<!doctype html><title>X fixture</title><main><article data-testid="tweet"><a href="https://x.com/nasa/status/1800000000000000001"><time datetime="2024-05-01T00:00:00Z">May 1</time></a><div data-testid="tweetText">Fixture post</div></article></main>`,
+    })
+  );
+  const xPage = await context.newPage();
+  await xPage.goto('https://x.com/nasa/status/1800000000000000001');
+  await xPage.waitForTimeout(1500);
+  const probe = await context.newPage();
+  await probe.goto(`chrome-extension://${id}/sidepanel.html`);
+  const replies = await probe.evaluate(async () => {
+    const [tab] = await chrome.tabs.query({ url: 'https://x.com/*' });
+    if (!tab) return { error: 'no x.com tab' };
+    const ask = type => chrome.tabs.sendMessage(tab.id, { type }).catch(error => ({ error: String(error) }));
+    return { templates: await ask('XV_GET_TEMPLATES'), copy: await ask('XV_COPY_CENTERED') };
+  });
+  const tabChecks = [
+    ['content.js answers XV_GET_TEMPLATES', replies.templates?.ok === true && !!replies.templates?.templates],
+    ['instant-actions.js answers XV_COPY_CENTERED', !!replies.copy && 'ok' in replies.copy],
+  ];
+  for (const [name, ok] of tabChecks) {
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}`);
+    if (!ok) failures.push(`${name}: ${JSON.stringify(replies).slice(0, 300)}`);
+  }
+  await probe.close();
+  await xPage.close();
 } finally {
   await context.close();
   rmSync(profile, { recursive: true, force: true });

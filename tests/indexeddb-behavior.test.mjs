@@ -10,6 +10,7 @@ import {
   readLibraryPage,
   readLibraryRecords,
   validAvailability,
+  mergeLibraryCapture,
 } from '../library-storage.mjs';
 import { createDerivedStore, DERIVED_DB, DERIVED_VERSION } from '../sw/derived-store.mjs';
 
@@ -25,6 +26,7 @@ async function openArchive(name, posts = [], revisions = []) {
     database.createObjectStore('tweets', { keyPath: 'id' });
     database.createObjectStore('checkpoints', { keyPath: 'key' });
     database.createObjectStore('revisions', { keyPath: 'key' });
+    database.createObjectStore('trash', { keyPath: 'id' });
   };
   const database = await request(open);
   const tx = database.transaction(['tweets', 'revisions'], 'readwrite');
@@ -173,5 +175,20 @@ assert.ok(checked.checkedAt > 0);
   await store.clear('snapshots');
   assert.equal(await store.count('snapshots'), 0);
   assert.ok((await store.revision('snapshots')) > 0, 'clearing bumps the store revision');
+}
+// ── XVault 22 regression: captures advance the library revision ──
+// mergeLibraryCapture used to overwrite bumpLibraryRevision's success handler, so a capture never
+// wrote the new revision; stale detection, caches and skip-unchanged backups all missed captures.
+{
+  const database = await openArchive('capture-revision');
+  assert.equal(await readLibraryRevision(database), 0);
+  const first = await mergeLibraryCapture(database, { id: '10', text: 'first' });
+  assert.equal(first.stored, true);
+  assert.equal(await readLibraryRevision(database), 1, 'a new capture bumps the revision');
+  const second = await mergeLibraryCapture(database, { id: '10', text: 'edited' });
+  assert.equal(second.changed, true);
+  assert.equal(second.revision, 2);
+  assert.equal(await readLibraryRevision(database), 2, 'an updated capture bumps it again');
+  assert.equal((await read(database, '10')).text, 'edited');
 }
 console.log('IndexedDB behaviour: system-field patches, revision counters, paging and derived v3 upgrade passed');
