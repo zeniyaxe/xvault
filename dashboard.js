@@ -49,6 +49,8 @@ let settings = {},
   lightboxReturnTarget = null,
   librarySearchInitialized = false;
 const fmt = n => (n == null ? '—' : new Intl.NumberFormat().format(n)),
+  compactFormat = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }),
+  fmtCompact = n => (n == null ? '—' : Math.abs(Number(n)) < 10000 ? fmt(n) : compactFormat.format(n)),
   bytes = n => {
     if (n == null) return '—';
     let v = Number(n) || 0,
@@ -1083,6 +1085,56 @@ function mediaLogical(m) {
   if (m.type === 'photo') return 'image';
   return /gif|animated/i.test(m.type || '') ? 'gif' : 'media';
 }
+// XVault 24 rich post previews: reply/thread context, quoted posts (filled in by xv-library4.js from the
+// archive), link cards, polls, Community Notes and the private note. Only stored fields are shown; nothing is fetched.
+function postContextHtml(t, handle) {
+  const to = String(t.replyToHandle || '').replace(/[^A-Za-z0-9_]/g, '');
+  if (!to) return '';
+  const thread = to.toLowerCase() === String(handle || '').toLowerCase();
+  const icon = window.XVaultIcons?.svg(thread ? 'thread' : 'replyArrow') || '';
+  return thread
+    ? `<div class="postContext thread">${icon}<span>Continues a thread</span>${t.conversationId ? `<button type="button" class="linkish" data-thread-filter="${esc(t.conversationId)}">Show thread</button>` : ''}</div>`
+    : `<div class="postContext">${icon}<span>Replying to</span><button type="button" class="linkish" data-author-filter="${esc(to)}">@${esc(to)}</button></div>`;
+}
+function postExtrasHtml(t, um, mediaCount, view) {
+  if (['gallery', 'masonry'].includes(view)) return '';
+  let out = '';
+  if (t.quotedPostId && /^\d{1,32}$/.test(String(t.quotedPostId)))
+    out += `<div class="quoteEmbed" data-quoted="${esc(t.quotedPostId)}" aria-busy="true"><span class="quoteLabel">${window.XVaultIcons?.svg('quote') || ''}Quoted post</span></div>`;
+  const card = t.card && typeof t.card === 'object' ? t.card : null;
+  if (card && !mediaCount && (card.title || card.url)) {
+    let domain = card.domain || '';
+    try {
+      domain ||= new URL(card.url).hostname.replace(/^www\./, '');
+    } catch {}
+    const image = card.image?.url && /^https:\/\//.test(card.image.url) ? card.image.url : '';
+    const href = card.url && /^https:\/\//.test(card.url) ? card.url : '';
+    const body = `${image ? `<span class="linkCardMedia"><img loading="lazy" src="${esc(image)}" alt=""></span>` : ''}<span class="linkCardBody"><small>${window.XVaultIcons?.svg('globe') || ''}${esc(domain)}</small>${card.title ? `<b>${esc(card.title)}</b>` : ''}${card.description ? `<span>${esc(String(card.description).slice(0, 220))}</span>` : ''}</span>`;
+    out += href
+      ? `<a class="linkCard${image ? ' hasImage' : ''}" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${body}</a>`
+      : `<div class="linkCard">${body}</div>`;
+  }
+  const poll = t.poll && Array.isArray(t.poll.choices) ? t.poll : null;
+  if (poll && poll.choices.length >= 2) {
+    const total = Math.max(
+      1,
+      Number(poll.totalVotes) || poll.choices.reduce((sum, c) => sum + (Number(c.count) || 0), 0)
+    );
+    const top = Math.max(...poll.choices.map(c => Number(c.count) || 0));
+    out += `<div class="postPoll" role="group" aria-label="Poll">${poll.choices
+      .slice(0, 4)
+      .map(c => {
+        const share = Math.round(((Number(c.count) || 0) / total) * 100);
+        return `<div class="pollChoice${(Number(c.count) || 0) === top ? ' lead' : ''}" style="--share:${share}%"><span>${esc(c.label)}</span><b>${share}%</b></div>`;
+      })
+      .join('')}<small>${fmt(poll.totalVotes ?? total)} votes${poll.final ? ' · final results' : ''}</small></div>`;
+  }
+  if (t.communityNote?.text)
+    out += `<div class="postCommunityNote"><b>${window.XVaultIcons?.svg('info') || ''}Community note</b><span>${esc(String(t.communityNote.text).slice(0, 280))}${String(t.communityNote.text).length > 280 ? '…' : ''}</span></div>`;
+  if (um?.note && typeof um.note === 'string' && um.note.trim())
+    out += `<div class="postNote" data-note-open="${esc(t.id)}" role="button" tabindex="0" aria-label="Your note — open in Inspector">${window.XVaultIcons?.svg('note') || ''}<span>${esc(um.note.trim().slice(0, 180))}${um.note.trim().length > 180 ? '…' : ''}</span></div>`;
+  return out;
+}
 function renderLib(...args) {
   return dashboardHooks.invoke('renderLib', builtinRenderLib, this, args);
 }
@@ -1163,7 +1215,7 @@ function builtinRenderLib(options = {}) {
         const metrics =
           settings.libraryShowMetrics === false
             ? ''
-            : `<div class="metricBar"><span>♥ <b>${fmt(t.metrics?.likes)}</b></span><span>↻ <b>${fmt(t.metrics?.reposts)}</b></span><span>💬 <b>${fmt(t.metrics?.replies)}</b></span><span>◉ <b>${fmt(t.metrics?.views)}</b></span><span>◆ <b>${fmt(t.metrics?.bookmarks)}</b></span><span class="disk" title="Media files saved to disk"><b>${local}/${(t.media || []).length}</b> on disk</span></div>`;
+            : `<div class="metricBar"><span>♥ <b title="${fmt(t.metrics?.likes)}">${fmtCompact(t.metrics?.likes)}</b></span><span>↻ <b title="${fmt(t.metrics?.reposts)}">${fmtCompact(t.metrics?.reposts)}</b></span><span>💬 <b title="${fmt(t.metrics?.replies)}">${fmtCompact(t.metrics?.replies)}</b></span><span>◉ <b title="${fmt(t.metrics?.views)}">${fmtCompact(t.metrics?.views)}</b></span><span>◆ <b title="${fmt(t.metrics?.bookmarks)}">${fmtCompact(t.metrics?.bookmarks)}</b></span><span class="disk${local && local >= allMedia.length ? ' complete' : ''}" title="Media files saved to disk"><b>${local}/${(t.media || []).length}</b> on disk</span></div>`;
         const allTags = um.tags || [],
           shownTags = allTags.slice(0, 8),
           tags =
@@ -1190,7 +1242,7 @@ function builtinRenderLib(options = {}) {
             ?.slice(0, 2)
             .map(x => `<span>${esc(x)}</span>`)
             .join('') || ''
-        }</div><p class="tweetText">${linkifyText(textPreview)}</p>${rawText.length > 1200 ? `<button type="button" class="textOverflow" data-details="${esc(t.id)}" aria-label="Open full post text in Inspector, ${fmt(rawText.length)} characters">Open full post text · ${fmt(rawText.length)} characters</button>` : ''}${media ? `<div class="mediaGrid" data-count="${allMedia.length}" data-visible="${visibleMedia.length}" data-more="${Math.max(0, allMedia.length - (['gallery', 'masonry'].includes(box.dataset.view) ? 1 : visibleMedia.length))}">${media}${allMedia.length > visibleMedia.length && !['gallery', 'masonry'].includes(box.dataset.view) ? `<button type="button" class="mediaOverflow" data-media-more="${idx}" aria-label="Open viewer to browse ${allMedia.length} media items">+${allMedia.length - visibleMedia.length} more media</button>` : ''}</div>` : ''}${metrics}<div class="tweetTags">${tags}<button data-addtag="${esc(t.id)}" title="Add a tag">Tag</button></div><div class="tweetActions"><button data-fav="${esc(t.id)}" aria-pressed="${um.favorite ? 'true' : 'false'}" title="${um.favorite ? 'Remove favorite (F)' : 'Favorite (F)'}"><span class="lbl">${um.favorite ? 'Remove favorite' : 'Favorite'}</span></button><button class="primary" data-download-post="${esc(t.id)}" title="Download media"><span class="lbl">Download post</span></button><button data-quicklook="${esc(t.id)}" title="Quick Look (Space)"><span class="lbl">Quick Look</span></button><button data-details="${esc(t.id)}" title="Inspector"><span class="lbl">Details</span></button><button data-copy="${esc(t.url || '')}" title="Copy link"><span class="lbl">Copy link</span></button><button data-open="${esc(t.url || '')}" title="Open on X"><span class="lbl">Open X</span></button>${dls[0]?.downloadId ? `<button data-show="${dls[0].downloadId}" title="Show file"><span class="lbl">Show file</span></button>` : ''}</div></article>`;
+        }</div>${postContextHtml(t, handle)}<p class="tweetText">${linkifyText(textPreview)}</p>${rawText.length > 1200 ? `<button type="button" class="textOverflow" data-details="${esc(t.id)}" aria-label="Open full post text in Inspector, ${fmt(rawText.length)} characters">Open full post text · ${fmt(rawText.length)} characters</button>` : ''}${media ? `<div class="mediaGrid" data-count="${allMedia.length}" data-visible="${visibleMedia.length}" data-more="${Math.max(0, allMedia.length - (['gallery', 'masonry'].includes(box.dataset.view) ? 1 : visibleMedia.length))}">${media}${allMedia.length > visibleMedia.length && !['gallery', 'masonry'].includes(box.dataset.view) ? `<button type="button" class="mediaOverflow" data-media-more="${idx}" aria-label="Open viewer to browse ${allMedia.length} media items">+${allMedia.length - visibleMedia.length} more media</button>` : ''}</div>` : ''}${postExtrasHtml(t, um, allMedia.length, box.dataset.view)}${metrics}<div class="tweetTags">${tags}<button data-addtag="${esc(t.id)}" title="Add a tag">Tag</button></div><div class="tweetActions"><button data-fav="${esc(t.id)}" aria-pressed="${um.favorite ? 'true' : 'false'}" title="${um.favorite ? 'Remove favorite (F)' : 'Favorite (F)'}"><span class="lbl">${um.favorite ? 'Remove favorite' : 'Favorite'}</span></button><button class="primary" data-download-post="${esc(t.id)}" title="Download media"><span class="lbl">Download post</span></button><button data-quicklook="${esc(t.id)}" title="Quick Look (Space)"><span class="lbl">Quick Look</span></button><button data-details="${esc(t.id)}" title="Inspector"><span class="lbl">Details</span></button><button data-copy="${esc(t.url || '')}" title="Copy link"><span class="lbl">Copy link</span></button><button data-open="${esc(t.url || '')}" title="Open on X"><span class="lbl">Open X</span></button>${dls[0]?.downloadId ? `<button data-show="${dls[0].downloadId}" title="Show file"><span class="lbl">Show file</span></button>` : ''}</div></article>`;
       })
       .join('') || '<div class="empty">No matches. Try removing filters or archive a source first.</div>';
   if ($('#libShown')) $('#libShown').textContent = fmt(totalRows);
