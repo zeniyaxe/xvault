@@ -2,42 +2,7 @@
 
 /* shared: a row of large figures, set on one baseline, divided by hairlines */
 .vault-stats {
-  display: flex;
   flex-wrap: wrap;
-  gap: 0;
-  margin: 0;
-}
-.vault-stats > div {
-  padding: 0 28px 0 0;
-  margin-right: 28px;
-  border-right: 1px solid var(--line);
-}
-.vault-stats > div:last-child {
-  margin-right: 0;
-  padding-right: 0;
-  border-right: 0;
-}
-.vault-stats dt {
-  order: 2;
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.vault-stats dd {
-  order: 1;
-  margin: 0;
-  font-size: 30px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-}
-.vault-stats > div {
-  display: flex;
-  flex-direction: column;
-}
-.queue-stats {
-  margin-bottom: 26px;
 }
 
 .disclose {
@@ -74,24 +39,10 @@
 
 /* ── Capture › Overview ── */
 .home-top {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
   justify-content: space-between;
-  gap: 20px 40px;
-  margin-bottom: 34px;
 }
 .home-actions {
-  display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-}
-.home-recent {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 8px;
-  scroll-snap-type: x proximity;
 }
 .home-recent .empty {
   width: 100%;
@@ -99,27 +50,13 @@
   text-align: left;
 }
 .recent-tile {
-  position: relative;
   flex: none;
-  width: 148px;
-  height: 148px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--r-s);
-  background: var(--surface);
-  overflow: hidden;
-  scroll-snap-align: start;
-  transition: transform var(--t-med) var(--ease);
 }
 .recent-tile:hover {
-  transform: translateY(-2px);
   background: var(--surface);
 }
 .recent-tile img {
   display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 .recent-tile span {
   position: absolute;
@@ -156,7 +93,6 @@
 }
 .home-grid canvas {
   display: block;
-  width: 100%;
   height: 110px;
   margin-top: 10px;
   border-bottom: 1px solid var(--line);
@@ -405,16 +341,9 @@
 .mega span {
   color: var(--muted);
 }
-.bigprogress {
-  height: 6px;
-}
 .qmeta {
-  display: flex;
-  justify-content: space-between;
   gap: 12px;
   margin: 8px 0 18px;
-  color: var(--muted);
-  font-size: 12px;
 }
 .downloadhistory,
 .activitylist,
@@ -519,12 +448,6 @@
 .healthrow[data-ok='false'] small {
   color: var(--danger);
 }
-.repairgrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 10px;
-}
 .activityrow span {
   width: 92px;
   color: var(--muted);
@@ -569,9 +492,7 @@
   font-size: 12px;
 }
 .actionGrid {
-  display: flex;
   flex-wrap: wrap;
-  gap: 8px;
   margin: 12px 0;
 }
 .xv-recovery-status {

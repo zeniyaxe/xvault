@@ -94,9 +94,6 @@
 .xd-hold b {
   margin-right: 4px;
 }
-.xd-page .mega {
-  align-items: center;
-}
 .xd-spark {
   width: 160px;
   height: 30px;
@@ -137,9 +134,7 @@
   overflow: hidden;
 }
 .xd-active {
-  display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 10px;
   margin: 4px 0 16px;
 }
 .xd-active[hidden] {
@@ -205,12 +200,8 @@
   background: var(--muted);
 }
 .xd-historybar {
-  display: flex;
   flex-wrap: wrap;
-  align-items: center;
   justify-content: space-between;
-  gap: 8px 12px;
-  margin: 4px 0 6px;
 }
 .xd-historybar input {
   flex: 0 1 260px;

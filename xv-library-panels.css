@@ -162,10 +162,6 @@ body.reduce .xv-collection-import[open] {
 }
 .xv-query-issues {
   margin: 0;
-  padding: 6px 16px;
-  background: var(--danger-soft);
-  color: var(--danger);
-  font-size: 12px;
 }
 .tweetLink {
   color: color-mix(in srgb, var(--accent) 82%, var(--text));
@@ -184,7 +180,6 @@ body.reduce .xv-collection-import[open] {
   min-height: 30px;
   padding: 0;
   border-color: rgba(255, 255, 255, 0.16);
-  background: rgba(8, 9, 10, 0.72);
   color: #f3f1ec;
   opacity: 0;
   transition: opacity var(--t-fast);
@@ -206,12 +201,6 @@ dialog {
   background: var(--raised);
   color: var(--text);
   box-shadow: var(--shadow-pop);
-}
-dialog::backdrop {
-  background: var(--scrim);
-}
-dialog[open] {
-  animation: popIn var(--t-med) var(--ease);
 }
 .xv-export-dialog {
   width: min(460px, 92vw);
@@ -413,10 +402,6 @@ dialog[open] {
   }
 }
 @keyframes slidePrev {
-  from {
-    opacity: 0;
-    transform: translateX(-24px);
-  }
 }
 .xv-preview-stage.text-only {
   padding: 40px;
@@ -636,9 +621,6 @@ body.light .lightbox {
 }
 .lbContent.imageMode img {
   cursor: zoom-in;
-}
-.lbContent.imageMode.isZoomed img {
-  cursor: zoom-out;
 }
 .lbVideoShell {
   position: relative;
@@ -2217,10 +2199,6 @@ body.light .lightbox {
   }
 }
 @keyframes vtIn {
-  from {
-    opacity: 0;
-    transform: scale(0.985) translateY(6px);
-  }
 }
 ::view-transition-group(root) {
   animation: none;
@@ -2273,7 +2251,7 @@ body.light .lightbox {
   color: var(--muted);
   font: 500 11px var(--font-mono);
 }
-body:has(.xv-undo-toast.show) #toast {
+body.xv-undo-visible #toast {
   bottom: 84px;
 }
 /* ── Shared dialog body ── */
@@ -2466,14 +2444,6 @@ body:has(.xv-undo-toast.show) #toast {
 .xv-boards #facetBoards {
   display: grid;
   gap: 1px;
-}
-.xv-board-item small {
-  color: var(--accent);
-}
-.xv-board-item.is-drop {
-  background: color-mix(in srgb, var(--board, var(--accent)) 18%, var(--raised));
-  box-shadow: inset 0 0 0 1px var(--accent-line);
-  color: var(--text);
 }
 /* ── Board banner (when a board is open) ── */
 .xv-board-banner {
@@ -3295,23 +3265,8 @@ body[data-contrast='high'] :focus-visible {
   border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line));
 }
 .xv-engine {
-  display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 10px 0 0;
-  padding: 8px 12px;
-  border-radius: var(--r-m);
-  background: var(--raised);
   border: 1px solid var(--line-soft);
-  color: var(--soft);
-  font-size: 12.5px;
-}
-.xv-engine b {
-  color: var(--text);
-}
-.xv-engine button {
-  margin-left: auto;
 }
 @media (prefers-reduced-motion: reduce) {
   .xv-quota-bar i,
