@@ -2273,7 +2273,7 @@ body.light .lightbox {
   color: var(--muted);
   font: 500 11px var(--font-mono);
 }
-body:has(.xv-undo-toast.show) #toast {
+body.xv-undo-visible #toast {
   bottom: 84px;
 }
 /* ── Shared dialog body ── */

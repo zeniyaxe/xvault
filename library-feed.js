@@ -576,7 +576,7 @@
    * @param {Function} options.selected returns the selected-id Set
    * @param {Function} options.nearEnd  called when the reader reaches the last loaded row
    */
-  function render({ rows, key, view, selected, nearEnd }) {
+  function render({ rows, key, view, selected, nearEnd, anchor = null }) {
     const root = list();
     if (!root) return;
     const scroll = scroller();
@@ -592,6 +592,19 @@
       sameQuery &&
       rows.length >= state.rows.length &&
       rows.slice(0, state.rows.length).every((row, i) => String(row.id) === String(state.rows[i]?.id));
+    // XVault 26: the reader's place is measured before the new layout's classes apply. Measuring after configure()
+    // read the new geometry, so a Cards → Timeline switch anchored on a post far above the one on screen. A switch
+    // from List or Table passes the anchor in (`anchor`), because those layouts are not mounted by this feed.
+    const remount = !(sameQuery && !layoutChanged && !stale);
+    const anchorCard = remount && sameQuery ? firstVisibleCard(root) : null,
+      anchorId = anchorCard?.dataset.id || (remount && anchor?.id ? String(anchor.id) : ''),
+      // Where the anchor sat under the header: a card that was fully in view stays exactly there (so a switch at
+      // the top of the Library does not scroll the header away); one cut off at the top is aligned just below it.
+      anchorOffset = anchorCard
+        ? anchorCard.getBoundingClientRect().top - viewportFacts().top
+        : Number.isFinite(anchor?.offset)
+          ? anchor.offset
+          : 8;
     state.rows = rows;
     configure(root, view);
     if (!root.querySelector(':scope > .lib5-end')) {
@@ -600,15 +613,10 @@
       end.setAttribute('aria-hidden', 'true');
       root.append(end);
     }
-    if (sameQuery && !layoutChanged && !stale) {
+    if (!remount) {
       patch(root);
       if (grown) schedule();
     } else {
-      const anchorCard = sameQuery ? firstVisibleCard(root) : null,
-        anchorId = anchorCard?.dataset.id || '',
-        // Where the anchor sat under the header: a card that was fully in view stays exactly there (so a switch at
-        // the top of the Library does not scroll the header away); one cut off at the top is aligned just below it.
-        anchorOffset = anchorCard ? anchorCard.getBoundingClientRect().top - viewportFacts().top : 8;
       for (const node of cards(root)) releaseNode(node);
       state.key = key;
       state.cols = 1;

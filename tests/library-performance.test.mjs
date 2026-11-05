@@ -384,11 +384,19 @@ assert.match(feed, /const BLOCK_ROWS = \d+;/, 'cards should mount in row-aligned
 assert.match(feed, /const MAX_MOUNTED_BLOCKS = \d+;/, 'the mounted card window should be bounded');
 assert.match(feed, /releaseNode/, 'recycled cards should release their media and observers');
 assert.doesNotMatch(feed, /library\.map|GET_ALL/, 'the feed renderer must not materialize the archive');
-const selectionRenderer = workspaceText.match(/function renderSelection\(\) \{([\s\S]*?)\n  \}/)?.[1] || '';
+// XVault 26: one pass over the mounted cards (paintSelectedCards) shared by renderSelection and the selection bar.
+const selectionRenderer =
+  (workspaceText.match(/function paintSelectedCards\(\) \{([\s\S]*?)\n  \}/)?.[1] || '') +
+  (workspaceText.match(/function renderSelection\(\) \{([\s\S]*?)\n  \}/)?.[1] || '');
 assert.match(
   selectionRenderer,
-  /XVaultLibraryFeed\?\.syncSelection\(selected\)/,
+  /feed\.syncSelection\(selected\)/,
   'selection decoration should patch only mounted cards'
+);
+assert.match(
+  selectionRenderer,
+  /updateSelectionBar\(false\)/,
+  'the selection bar must not walk the cards a second time'
 );
 assert.doesNotMatch(
   selectionRenderer,

@@ -188,7 +188,7 @@ async function init() {
   await Promise.allSettled([refresh(), queueStats()]);
   if (settings.healthCheckOnStartup) health().catch(error => console.error('XVault health check unavailable', error));
   setInterval(() => stats().catch(() => {}), 4000);
-  setInterval(() => queueStats().catch(() => {}), 1000);
+  setInterval(() => document.hidden || queueStats().catch(() => {}), 1000);
   setInterval(sampleGraphs, 1000);
 }
 let statsSnapshot = null,

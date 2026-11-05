@@ -65,10 +65,16 @@
     }
     node.innerHTML = `<span>${html(entry.label)}</span><button type="button" data-undo>Undo</button><kbd>Ctrl Z</kbd>`;
     node.querySelector('[data-undo]').onclick = () => undo();
-    node.classList.remove('show');
-    requestAnimationFrame(() => node.classList.add('show'));
+    showUndo(node, false);
+    requestAnimationFrame(() => showUndo(node, true));
     clearTimeout(node._timer);
-    node._timer = setTimeout(() => node.classList.remove('show'), 7000);
+    node._timer = setTimeout(() => showUndo(node, false), 7000);
+  }
+  // The regular toast moves up while the undo toast shows. A body class instead of `body:has(.xv-undo-toast.show)`
+  // keeps that selector out of every style invalidation on the page.
+  function showUndo(node, on) {
+    node?.classList.toggle('show', on);
+    document.body.classList.toggle('xv-undo-visible', !!(on && node));
   }
   async function restoreEntries(entries) {
     for (let start = 0; start < entries.length; start += 1000) {
@@ -78,7 +84,7 @@
   }
   async function undo() {
     const entry = undoStack.pop();
-    $('#xvUndoToast')?.classList.remove('show');
+    showUndo($('#xvUndoToast'), false);
     if (!entry) return toast('Nothing to undo');
     try {
       if (entry.entries?.length) await restoreEntries(entry.entries);

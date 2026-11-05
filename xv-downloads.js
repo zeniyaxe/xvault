@@ -580,11 +580,24 @@
     paintHosts();
   }
 
-  async function refresh() {
+  // XVault 26: the dashboard polls queueStats every second for the status pill. Painting the Downloads page
+  // (counts, transfers, hosts, and every fifth tick the 200-row history) while another page is open cost a few ms
+  // of main thread per second and contended with Library work; it now only paints while the page is visible and
+  // catches up the moment it is opened.
+  const pageVisible = () => {
+    const page = $('#page-media');
+    return !!page && !document.hidden && (page.classList.contains('show') || page.classList.contains('active'));
+  };
+  async function refresh({ force = false } = {}) {
     const q = await send({ type: 'DOWNLOAD_QUEUE_STATS' });
     if (!q?.ok || !$('#qQueued')) return q;
-    ensureLayout();
     state.last = q;
+    if (!force && !pageVisible()) {
+      state.stale = true;
+      return q;
+    }
+    state.stale = false;
+    ensureLayout();
     paintCounts(q);
     paintHold(q);
     paintProgress(q);
@@ -594,13 +607,11 @@
     const engine = $('#qEngine'),
       meta = $('#page-media .qmeta');
     if (engine && meta && engine.previousElementSibling !== meta) meta.after(engine);
-    const onPage =
-      !!$('#page-media.active, #page-media:not([hidden]).is-active') || $('#page-media')?.offsetParent != null;
-    // History is heavier: every tick while the page is open, otherwise every fifth.
+    // History is heavier: on the first paint, when the totals move, and every third tick.
     const changed =
       state.counts.complete !== q.complete || state.counts.failed !== q.failed || state.counts.queued !== q.queued;
     state.counts = { complete: q.complete, failed: q.failed, queued: q.queued };
-    if (state.tick === 0 || changed || (onPage ? state.tick % 3 === 0 : state.tick % 5 === 0)) await loadHistory();
+    if (state.tick === 0 || force || changed || state.tick % 3 === 0) await loadHistory();
     state.tick++;
     return q;
   }
@@ -613,6 +624,9 @@
     } finally {
       state.busy = false;
     }
+  });
+  hooks.after?.('page', (result, name) => {
+    if (name === 'media' || name === 'files') void refresh({ force: true }).catch(() => {});
   });
   const openWith = filter => {
     page('media');
