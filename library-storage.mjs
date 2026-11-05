@@ -3015,7 +3015,6 @@ export function commitArchiveImportBatch(
       stale = false,
       failure = null,
       result = null,
-      bumped = false,
       imported = 0,
       identical = 0,
       conflicts = 0;
@@ -3111,7 +3110,6 @@ export function commitArchiveImportBatch(
         assetReferenceCount: Number(job.assetReferenceCount || 0) + (storeName === 'assets' ? imported : 0),
       };
       if (imported && ['tweets', 'trash', 'revisions'].includes(storeName)) {
-        bumped = true;
         const request = bumpLibraryRevision(tx);
         if (request) {
           const original = request.onsuccess;
@@ -3708,12 +3706,16 @@ export function mergeLibraryCapture(database, snapshot, merge = null) {
         store.put({ ...next, userMeta: request.result ? request.result.userMeta || {} : next.userMeta || {} });
         if (revision && tx.objectStoreNames.contains('revisions')) tx.objectStore('revisions').put(revision);
         const revisionRequest = bumpLibraryRevision(tx);
-        if (revisionRequest)
-          revisionRequest.onsuccess = () => {
+        if (revisionRequest) {
+          // Chain, do not replace: bumpLibraryRevision's own handler is what writes the new revision.
+          // (Before XVault 22 this assignment overwrote it, so captures never advanced the revision.)
+          const bump = revisionRequest.onsuccess;
+          revisionRequest.onsuccess = event => {
+            bump?.call(revisionRequest, event);
             const value = Number(revisionRequest.result?.revision || 0) + 1;
             result = { stored: true, revision: value, row: next, changed: !!request.result };
           };
-        else result = { stored: true, row: next, changed: !!request.result };
+        } else result = { stored: true, row: next, changed: !!request.result };
       };
       if (request.result) {
         write();
