@@ -225,6 +225,12 @@ export const REMOTE_ICONS = {
   moon: 'moon',
   lock: 'lock',
   info: 'info',
+  verified: 'badge-check',
+  feed: 'layout-list',
+  globe: 'globe',
+  users: 'users-round',
+  hourglass: 'hourglass',
+  'reply-to': 'message-circle-reply',
 };
 
 async function inner(name) {

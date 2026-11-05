@@ -120,7 +120,7 @@ try {
   );
   await page.locator('#viewerBack').click();
   const cached = await page.evaluate(async () => {
-    const cache = await caches.open('xvault-remote-shell-v6');
+    const cache = await caches.open('xvault-remote-shell-v7');
     return {
       paths: (await cache.keys()).map(req => new URL(req.url).pathname),
       session: !!(await caches.match('/api/session')),

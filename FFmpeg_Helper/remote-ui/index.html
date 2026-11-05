@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#111315" />
+    <meta name="theme-color" content="#0b0c0f" />
     <meta name="color-scheme" content="dark" />
     <title>XVault Remote</title>
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -313,6 +313,43 @@
         <path d="M12 16v-4" />
         <path d="M12 8h.01" />
       </symbol>
+      <symbol id="i-verified" viewBox="0 0 24 24">
+        <path
+          d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"
+        />
+        <path d="m16 9-5.5 5.5L8 12" />
+      </symbol>
+      <symbol id="i-feed" viewBox="0 0 24 24">
+        <rect width="7" height="7" x="3" y="3" rx="1" />
+        <rect width="7" height="7" x="3" y="14" rx="1" />
+        <path d="M14 4h7" />
+        <path d="M14 9h7" />
+        <path d="M14 15h7" />
+        <path d="M14 20h7" />
+      </symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+        <path d="M2 12h20" />
+      </symbol>
+      <symbol id="i-users" viewBox="0 0 24 24">
+        <path d="M18 21a8 8 0 0 0-16 0" />
+        <circle cx="10" cy="8" r="5" />
+        <path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3" />
+      </symbol>
+      <symbol id="i-hourglass" viewBox="0 0 24 24">
+        <path d="M5 22h14" />
+        <path d="M5 2h14" />
+        <path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22" />
+        <path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2" />
+      </symbol>
+      <symbol id="i-reply-to" viewBox="0 0 24 24">
+        <path
+          d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"
+        />
+        <path d="m10 15-3-3 3-3" />
+        <path d="M7 12h8a2 2 0 0 1 2 2v1" />
+      </symbol>
     </svg>
     <!-- xv-icons:end -->
 
@@ -382,6 +419,13 @@
               ><button class="filter" data-query="has:image">Photos</button
               ><button class="filter" data-query="has:video">Video</button>
             </div>
+            <div id="layoutToggle" class="layout-toggle" role="radiogroup" aria-label="Library layout">
+              <button type="button" role="radio" data-layout="feed" aria-checked="true" aria-label="Feed">
+                <svg><use href="#i-feed" /></svg></button
+              ><button type="button" role="radio" data-layout="grid" aria-checked="false" aria-label="Grid">
+                <svg><use href="#i-grid" /></svg>
+              </button>
+            </div>
             <label class="sort-label"
               ><span>Sort</span
               ><select id="sortSelect" aria-label="Sort results">
@@ -408,10 +452,30 @@
           <div id="loadStatus" class="load-status" role="status" tabindex="-1"></div>
         </section>
 
-        <section id="recentView" class="view" aria-labelledby="recentHeading" hidden>
+        <section id="downloadsView" class="view" aria-labelledby="downloadsHeading" hidden>
           <div class="view-heading">
-            <div><h1 id="recentHeading">Recent activity</h1></div>
+            <div>
+              <h1 id="downloadsHeading">Downloads</h1>
+              <p class="view-sub">The download queue on your computer, live.</p>
+            </div>
+            <span id="downloadsUpdated" class="result-count" aria-live="off"></span>
           </div>
+          <div id="downloadsBody" class="downloads-body" aria-live="polite">
+            <div class="skeleton-stack" aria-hidden="true"><i></i><i></i><i></i></div>
+          </div>
+        </section>
+
+        <section id="overviewView" class="view" aria-labelledby="overviewHeading" hidden>
+          <div class="view-heading">
+            <div>
+              <h1 id="overviewHeading">Overview</h1>
+              <p class="view-sub">What your archive holds, counted on your computer.</p>
+            </div>
+          </div>
+          <div id="overviewBody" class="overview-body">
+            <div class="skeleton-stack" aria-hidden="true"><i></i><i></i><i></i></div>
+          </div>
+          <h2 class="section-title" id="recentHeading">Recent activity</h2>
           <div id="activityList" class="activity-list">
             <div class="loading-state">
               <span class="spinner"></span>
@@ -432,7 +496,7 @@
             <label class="setting-row"
               ><span><b>Appearance</b><small>A quiet surface for your media</small></span
               ><select id="remoteTheme" aria-label="Remote theme">
-                <option value="graphite">Graphite</option>
+                <option value="graphite">Aurora</option>
                 <option value="oled">True black</option>
                 <option value="paper">Paper</option>
               </select></label
@@ -485,13 +549,17 @@
 
       <nav class="bottom-nav" aria-label="Primary navigation">
         <button class="nav-item active" data-view="libraryView" aria-current="page">
-          <svg><use href="#i-grid" /></svg><span>Library</span>
+          <svg><use href="#i-library" /></svg><span>Library</span>
         </button>
-        <button class="nav-item" data-view="recentView">
-          <svg><use href="#i-clock" /></svg><span>Recent</span>
+        <button class="nav-item" data-view="downloadsView">
+          <svg><use href="#i-downloads" /></svg><span>Downloads</span
+          ><i id="navDownloadsBadge" class="nav-badge" hidden></i>
+        </button>
+        <button class="nav-item" data-view="overviewView">
+          <svg><use href="#i-atlas" /></svg><span>Overview</span>
         </button>
         <button class="nav-item" data-view="settingsView">
-          <svg><use href="#i-wifi" /></svg><span>Device</span>
+          <svg><use href="#i-device" /></svg><span>Phone</span>
         </button>
       </nav>
     </div>
@@ -572,7 +640,9 @@
           <svg><use href="#i-close" /></svg>
         </button>
       </div>
+      <div id="sheetPreview" class="sheet-preview"></div>
       <p id="sheetText" class="sheet-text"></p>
+      <div id="sheetExtras" class="sheet-extras"></div>
       <p id="sheetTags" class="sheet-tags"></p>
       <div class="sheet-download">
         <button id="sheetDownloadPC" class="save-pc-button" type="button">
@@ -603,9 +673,11 @@
       </section>
       <div class="sheet-actions">
         <button id="sheetOpen" class="sheet-action">
-          <svg><use href="#i-share" /></svg><span>Open source link</span></button
+          <svg><use href="#i-external" /></svg><span>Open source link</span></button
         ><button id="sheetCopy" class="sheet-action">
-          <svg><use href="#i-share" /></svg><span>Copy post link</span></button
+          <svg><use href="#i-copy" /></svg><span>Copy post link</span></button
+        ><button id="sheetShare" class="sheet-action" hidden>
+          <svg><use href="#i-share" /></svg><span>Share…</span></button
         ><button id="sheetFavorite" class="sheet-action" hidden>
           <svg><use href="#i-heart" /></svg><span>Save to Favorites</span>
         </button>
@@ -617,6 +689,8 @@
         <button id="viewerBack" class="icon-button" aria-label="Close viewer">
           <svg><use href="#i-close" /></svg></button
         ><span id="viewerPosition" aria-live="polite" aria-atomic="true"></span
+        ><button id="viewerZoom" class="icon-button" type="button" aria-label="Zoom in" aria-pressed="false" hidden>
+          <svg><use href="#i-zoom" /></svg></button
         ><button id="viewerMore" class="icon-button" aria-label="Post actions">
           <svg><use href="#i-more" /></svg>
         </button>

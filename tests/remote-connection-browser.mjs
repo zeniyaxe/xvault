@@ -8,7 +8,10 @@ const require = createRequire(import.meta.url),
 const html = await fs.readFile('dashboard.html', 'utf8');
 const start = html.indexOf('<section class="remote-panel'),
   end = html.indexOf('</section>', start) + 10;
-const browser = await chromium.launch({ headless: true, executablePath: process.argv[3] });
+const browser = await chromium.launch({
+  headless: true,
+  ...(process.argv[3] ? { executablePath: process.argv[3] } : {}),
+});
 try {
   const page = await browser.newPage({ viewport: { width: 1050, height: 1000 } });
   await page.addInitScript(() => {
