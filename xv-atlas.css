@@ -1318,6 +1318,17 @@ html.xv-calm .xa-ring {
   gap: 8px;
   margin-bottom: 18px;
 }
+.xa-review-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.xa-review-export {
+  display: inline-flex;
+  gap: 6px;
+}
 .xa-review-head p {
   margin: 0;
   color: var(--muted);

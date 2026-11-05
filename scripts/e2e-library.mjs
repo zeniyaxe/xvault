@@ -160,6 +160,53 @@ try {
   check('CSV export has header + rows', csv.split('\r\n').filter(Boolean).length === tweets.length + 1);
   writeFileSync(join(out, 'export-sample.html'), html);
   await page.screenshot({ path: join(out, 'export-dialog.png') });
+  // Atlas Year in Review export: both buttons produce real files (anchor downloads captured in-page).
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => {
+    window.__saved = [];
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.download && this.href.startsWith('blob:')) {
+        window.__saved.push(
+          fetch(this.href)
+            .then(response => response.blob())
+            .then(async blob => ({
+              name: this.download,
+              type: blob.type,
+              size: blob.size,
+              head: Array.from(new Uint8Array(await blob.slice(0, 8).arrayBuffer())),
+              text: blob.type.startsWith('text/') ? await blob.text() : '',
+            }))
+        );
+        return;
+      }
+      return click.call(this);
+    };
+    window.XVaultAtlas.open('review');
+  });
+  await page.waitForSelector('#page-atlas [data-act="review-md"]', { timeout: 30000 });
+  await page.evaluate(() => {
+    document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+    document.querySelector('#page-atlas [data-act="review-md"]').click();
+    document.querySelector('#page-atlas [data-act="review-png"]').click();
+  });
+  await page.waitForTimeout(1500);
+  const saved = await page.evaluate(() => Promise.all(window.__saved));
+  const md = saved.find(file => file.name.endsWith('.md')),
+    png = saved.find(file => file.name.endsWith('.png'));
+  check(
+    'Year in Review Markdown summary',
+    !!md && md.text.startsWith('# 2024 in my XVault') && md.text.includes(`**Posts written:** ${tweets.length}`),
+    md ? `${md.name} ${md.size} bytes` : 'not saved'
+  );
+  check(
+    'Year in Review PNG card',
+    !!png && png.type === 'image/png' && png.head.join(',') === '137,80,78,71,13,10,26,10' && png.size > 8000,
+    png ? `${png.name} ${png.size} bytes` : 'not saved'
+  );
+  if (md) writeFileSync(join(out, 'year-in-review.md'), md.text);
+  const card = await page.evaluate(() => window.XVaultAtlas.review.canvas()?.toDataURL('image/png') || '');
+  if (card) writeFileSync(join(out, 'year-in-review.png'), Buffer.from(card.split(',')[1], 'base64'));
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 } finally {
   await context.close();
