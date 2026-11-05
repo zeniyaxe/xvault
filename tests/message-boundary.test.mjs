@@ -67,3 +67,28 @@ test('captured relationship and entity fields are validated at the content bound
   ])
     assert.throws(() => authorizeMessage({ type: 'STORE_RECORDS', tweets: [{ ...row, ...bad }] }, sender, 'ext'));
 });
+
+test('Firefox extension pages are identified by their per-install moz-extension origin', () => {
+  const ff = 'moz-extension://11111111-2222-4333-8444-555555555555/';
+  const page = { id: ID, url: `${ff}dashboard.html`, frameId: 0, tab: { id: 9 } };
+  assert.equal(authorizeMessage({ type: 'CLEAR_LIBRARY' }, page, ID, ff), 'desktop');
+  // Another add-on's page (different UUID) or a page claiming our id in its host is not ours.
+  assert.throws(
+    () =>
+      authorizeMessage(
+        { type: 'CLEAR_LIBRARY' },
+        { ...page, url: 'moz-extension://99999999-2222-4333-8444-555555555555/dashboard.html' },
+        ID,
+        ff
+      ),
+    /content-script origin/
+  );
+  assert.throws(
+    () => authorizeMessage({ type: 'CLEAR_LIBRARY' }, { ...page, url: `moz-extension://${ID}/dashboard.html` }, ID, ff),
+    /content-script origin/
+  );
+  // A chrome-extension URL is not accepted when our own origin is moz-extension (and vice versa).
+  assert.throws(() => authorizeMessage({ type: 'CLEAR_LIBRARY' }, dash, ID, ff));
+  assert.throws(() => authorizeMessage({ type: 'CLEAR_LIBRARY' }, page, ID, `chrome-extension://${ID}/`));
+  assert.throws(() => authorizeMessage({ type: 'CLEAR_LIBRARY' }, page, ID, 'not a url'));
+});

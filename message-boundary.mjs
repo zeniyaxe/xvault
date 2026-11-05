@@ -63,7 +63,12 @@ function context(value) {
 /** Message types an X content script may send (the service worker's router uses the same list). */
 export const isContentAction = type => CONTENT_ACTIONS.has(type);
 
-export function authorizeMessage(message, sender, extensionId) {
+/**
+ * `extensionOrigin` is this extension's own page origin (`chrome.runtime.getURL('')`). Chrome uses
+ * chrome-extension://<id>/, Firefox moz-extension://<random per-install UUID>/ — so the id alone cannot
+ * identify our pages there.
+ */
+export function authorizeMessage(message, sender, extensionId, extensionOrigin = `chrome-extension://${extensionId}`) {
   if (!plain(message) || typeof message.type !== 'string' || message.type.length > 80)
     throw Error('Invalid extension message');
   if (sender?.id !== extensionId) throw Error('Untrusted extension sender');
@@ -73,7 +78,18 @@ export function authorizeMessage(message, sender, extensionId) {
   } catch {
     throw Error('Message origin is unavailable');
   }
-  if (url.protocol === 'chrome-extension:' && url.hostname === extensionId) {
+  let own = null;
+  try {
+    own = new URL(extensionOrigin);
+  } catch {}
+  // Compare scheme + host explicitly: URL#origin is "null" for these schemes in some runtimes.
+  if (
+    own &&
+    (url.protocol === 'chrome-extension:' || url.protocol === 'moz-extension:') &&
+    url.protocol === own.protocol &&
+    !!url.hostname &&
+    url.hostname === own.hostname
+  ) {
     if (
       message.type === 'REMOTE_COMMAND' &&
       (url.pathname !== '/dashboard.html' || (sender.frameId && sender.frameId !== 0))

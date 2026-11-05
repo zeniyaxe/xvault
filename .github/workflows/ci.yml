@@ -33,7 +33,8 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
   firefox:
-    # Experimental Firefox package: build it and run Mozilla's linter (errors fail; warnings are reported).
+    # Firefox package: build it, run Mozilla's linter (errors fail; warnings are reported) and run it in a real
+    # headless Firefox (scripts/e2e-firefox.py).
     runs-on: ubuntu-latest
     needs: verify
     steps:
@@ -49,6 +50,12 @@ jobs:
           mkdir -p output/firefox && unzip -q dist/XVault-*-firefox.zip -d output/firefox
           npx --yes web-ext@8 lint --source-dir output/firefox --output json > web-ext-lint.json || true
           node -e "const r=require('./web-ext-lint.json');console.log(r.summary);for(const e of r.errors)console.log('::error file='+(e.file||'manifest.json')+'::'+e.code+' '+e.message);if(r.errors.length)process.exit(1)"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install selenium
+      - name: Real Firefox e2e (temporary add-on via geckodriver)
+        run: python scripts/e2e-firefox.py dist/XVault-*-firefox.zip
       - uses: actions/upload-artifact@v4
         with:
           name: xvault-firefox

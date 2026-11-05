@@ -105,7 +105,12 @@ function announceLibraryChanges(ids, kind = 'metadata', forceTruncated = false) 
     at: Date.now(),
   });
 }
-const privateStorageReady = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+// Firefox has no storage.local.setAccessLevel (content scripts there can always read storage.local); the
+// dashboard-only keys are still never pushed to x.com pages (contentSettings() below filters them).
+const privateStorageReady =
+  typeof chrome.storage.local.setAccessLevel === 'function'
+    ? chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {})
+    : Promise.resolve();
 // Explicit capture/UI preferences; helper credentials, saved views and local paths stay private.
 const contentSettingKeys = [
   'xBadgeEdits',
@@ -4898,7 +4903,7 @@ route('WAKE', async m => {
 
 chrome.runtime.onMessage.addListener((m, s, reply) => {
   (async () => {
-    const messageCapability = authorizeMessage(m, s, chrome.runtime.id);
+    const messageCapability = authorizeMessage(m, s, chrome.runtime.id, chrome.runtime.getURL(''));
     await privateStorageReady;
     const routed = await router.dispatch(m, messageCapability, s);
     return routed.handled ? routed.value : unknownMessage();
@@ -6063,7 +6068,7 @@ async function startOne(row, s) {
     const local =
       row.item.localSource &&
       !row.localSourceTried &&
-      String(row.item.localSource).startsWith(`blob:chrome-extension://${chrome.runtime.id}/`)
+      String(row.item.localSource).startsWith(`blob:${chrome.runtime.getURL('').replace(/\/$/, '')}/`)
         ? String(row.item.localSource)
         : '';
     if (local) row.localSourceTried = true;

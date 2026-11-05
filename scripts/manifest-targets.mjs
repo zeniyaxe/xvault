@@ -1,7 +1,7 @@
 // Per-browser manifest transforms for scripts/build.mjs (XVault 20).
 // Chrome is the reference build. Edge runs the same Chromium MV3 code; only the store listing differs.
-// Firefox support is EXPERIMENTAL: Firefox MV3 has no extension service workers (background scripts run as
-// an event page), no chrome.offscreen (since XVault 21 local OCR runs inside the event page, which has a
+// Firefox support is BETA (XVault 22: exercised in a real headless Firefox by scripts/e2e-firefox.py in CI).
+// Firefox MV3 has no extension service workers (background scripts run as an event page), no chrome.offscreen (since XVault 21 local OCR runs inside the event page, which has a
 // DOM — sw/ocr.mjs createInlineHost), no chrome.sidePanel (sidebar_action is
 // used instead) and no "power" permission. Capture, Library, search, downloads and exports are expected
 // to work; every Firefox-only gap is listed in the build output.
