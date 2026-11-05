@@ -29,6 +29,10 @@
     data: null,
     query: null,
     at: 0,
+    // Zoom stack: each timeline filter remembers the search it replaced, so "Back" steps out again.
+    zoom: [],
+    heights: new Map(),
+    unit: '',
   };
   let timer = 0,
     serial = 0;
@@ -66,7 +70,7 @@
     box.id = 'xkTimeline';
     box.className = 'xk-timeline';
     box.setAttribute('aria-label', 'Timeline of matching posts');
-    box.innerHTML = `<header><button type="button" class="quiet xk-toggle" data-xk="toggle" aria-expanded="false" aria-controls="xkBars">Timeline</button><span class="xk-summary" aria-live="polite"></span><span class="xk-tools"><label class="xk-field"><span class="xv-sr-only">Date</span><select data-xk="field" aria-label="Timeline date"><option value="posted">Posted</option><option value="archived">Archived</option></select></label><button type="button" class="quiet" data-xk="clear" hidden>All dates</button></span></header><div class="xk-bars" id="xkBars" role="group" aria-label="Posts per period — drag across bars to choose a range"></div>`;
+    box.innerHTML = `<header><button type="button" class="quiet xk-toggle" data-xk="toggle" aria-expanded="false" aria-controls="xkBars">Timeline</button><span class="xk-summary" aria-live="polite"></span><span class="xk-tools"><label class="xk-field"><span class="xv-sr-only">Date</span><select data-xk="field" aria-label="Timeline date"><option value="posted">Posted</option><option value="archived">Archived</option></select></label><button type="button" class="quiet" data-xk="back" hidden>‹ Back</button><button type="button" class="quiet" data-xk="clear" hidden>All dates</button></span></header><div class="xk-bars" id="xkBars" role="group" aria-label="Posts per period — drag across bars to choose a range"></div><div class="xk-axis" aria-hidden="true"><span class="xk-axis-start"></span><span class="xk-axis-peak"></span><span class="xk-axis-end"></span></div>`;
     filters.after(box);
     box.addEventListener('click', onClick);
     box.querySelector('[data-xk="field"]').addEventListener('change', event => {
@@ -92,31 +96,82 @@
     const bars = box.querySelector('.xk-bars'),
       summary = box.querySelector('.xk-summary'),
       data = state.data;
+    const axis = box.querySelector('.xk-axis');
+    // The zoom stack only applies while the search is still the one a timeline step produced.
+    if (state.zoom.length && state.zoom.at(-1).to !== query) state.zoom = [];
+    const back = box.querySelector('[data-xk="back"]');
+    back.hidden = !state.zoom.length;
+    if (state.zoom.length)
+      back.title = `Back to the previous range (${state.zoom.length} step${state.zoom.length === 1 ? '' : 's'})`;
     bars.hidden = !state.open;
+    axis.hidden = !state.open;
+    box.classList.remove('is-loading');
     if (!state.open) {
       summary.textContent = '';
       return;
     }
     if (!data) {
       summary.textContent = 'Counting…';
-      bars.innerHTML = '';
+      // Keep the previous bars, dimmed, so a new search morphs instead of flashing empty.
+      if (bars.children.length) box.classList.add('is-loading');
       return;
     }
     if (data.unsupported || data.invalid || !data.buckets?.length) {
       summary.textContent = data.unsupported || (data.invalid ? '' : 'No dated posts match');
       bars.innerHTML = '';
+      delete bars.dataset.signature;
+      axis.hidden = true;
+      state.heights = new Map();
       return;
     }
     const peak = Math.max(1, ...data.buckets.map(bucket => bucket.count));
     const first = data.buckets[0],
       last = data.buckets.at(-1);
     summary.textContent = `${n(data.matched)} posts · ${label(first, data.unit)} – ${label(last, data.unit)}${data.truncated ? ' · first 400,000 scanned' : ''}`;
+    const height = bucket => (bucket.count ? Math.max(6, Math.round((bucket.count / peak) * 100)) : 2);
+    const signature = `${data.unit}|${state.field}|${data.buckets.length}|${data.buckets.map(bucket => bucket.count).join(',')}`;
+    if (bars.dataset.signature === signature) return; // same numbers: leave the DOM (and focus) alone
+    bars.dataset.signature = signature;
+    const peakIndex = data.buckets.findIndex(bucket => bucket.count === peak);
     bars.innerHTML = data.buckets
       .map(
         (bucket, index) =>
-          `<button type="button" class="xk-bar${bucket.count ? '' : ' is-empty'}" data-index="${index}" style="--h:${bucket.count ? Math.max(6, Math.round((bucket.count / peak) * 100)) : 2}%" aria-label="${html(label(bucket, data.unit))}: ${n(bucket.count)} posts" title="${html(label(bucket, data.unit))}: ${n(bucket.count)} posts"${index ? ' tabindex="-1"' : ''}><i></i></button>`
+          `<button type="button" class="xk-bar${bucket.count ? '' : ' is-empty'}${index === peakIndex ? ' is-peak' : ''}" data-index="${index}" data-from="${html(bucket.from)}" style="--h:${height(bucket)}%" aria-label="${html(label(bucket, data.unit))}: ${n(bucket.count)} posts" title="${html(label(bucket, data.unit))}: ${n(bucket.count)} posts"${index ? ' tabindex="-1"' : ''}><i></i></button>`
       )
       .join('');
+    axis.querySelector('.xk-axis-start').textContent = label(first, data.unit);
+    axis.querySelector('.xk-axis-end').textContent = data.buckets.length > 1 ? label(last, data.unit) : '';
+    axis.querySelector('.xk-axis-peak').textContent = `peak ${n(peak)} · ${label(data.buckets[peakIndex], data.unit)}`;
+    morph(bars, data, height);
+  }
+
+  // Bars that existed before (same period) grow or shrink from their old height; a new set of periods
+  // rises from the baseline left to right. Calm motion settings skip all of it.
+  function morph(bars, data, height) {
+    const motion = window.XVaultMotion,
+      previous = state.heights,
+      sameUnit = state.unit === data.unit;
+    state.heights = new Map(data.buckets.map(bucket => [bucket.from, height(bucket)]));
+    state.unit = data.unit;
+    if (!motion || motion.calm()) return;
+    const items = [...bars.querySelectorAll('.xk-bar i')];
+    const overlap = sameUnit && data.buckets.some(bucket => previous.has(bucket.from));
+    items.forEach((item, index) => {
+      const bucket = data.buckets[index],
+        now = height(bucket),
+        before = overlap ? previous.get(bucket.from) : 0;
+      if (overlap && before === now) return;
+      const from = Math.max(0.001, (before || 0) / now);
+      motion.play(
+        item,
+        [
+          { transform: `scaleY(${from})`, transformOrigin: 'bottom' },
+          { transform: 'none', transformOrigin: 'bottom' },
+        ],
+        overlap ? 320 : 420,
+        { spring: overlap ? 'snappy' : 'gentle', delay: overlap ? 0 : Math.min(index, 80) * 5, fill: 'backwards' }
+      );
+    });
   }
 
   async function refresh(force = false) {
@@ -155,8 +210,34 @@
     const low = Math.min(fromIndex, toIndex),
       high = Math.max(fromIndex, toIndex);
     if (!buckets[low] || !buckets[high]) return;
-    const query = withRange($('#search')?.value || '', state.field, buckets[low].from, buckets[high].to);
+    const current = $('#search')?.value || '',
+      query = withRange(current, state.field, buckets[low].from, buckets[high].to);
+    if (query === current) return;
+    state.zoom.push({ from: current, to: query });
+    if (state.zoom.length > 20) state.zoom.shift();
     window.XVaultLibraryRunQuery?.(query);
+  }
+  /** "Back": restore the search from before the last timeline step. */
+  function zoomOut() {
+    const step = state.zoom.pop();
+    if (!step) return;
+    window.XVaultLibraryRunQuery?.(step.from);
+    // The restored search ends the step it came from; the next paint keeps older steps whose result matches.
+    if (state.zoom.length && state.zoom.at(-1).to !== step.from) state.zoom = [];
+  }
+  /** Live summary while brushing: the range and how many posts it holds, before anything is searched. */
+  function preview(from, to) {
+    const buckets = state.data?.buckets || [],
+      low = Math.min(from, to),
+      high = Math.max(from, to),
+      total = buckets.slice(low, high + 1).reduce((sum, bucket) => sum + bucket.count, 0),
+      summary = $('#xkTimeline .xk-summary');
+    if (!summary || !buckets[low]) return;
+    const range =
+      low === high
+        ? label(buckets[low], state.data.unit)
+        : `${label(buckets[low], state.data.unit)} – ${label(buckets[high], state.data.unit)}`;
+    summary.textContent = `${range} · ${n(total)} posts — release to filter`;
   }
   function onClick(event) {
     const button = event.target.closest('[data-xk]');
@@ -166,8 +247,11 @@
       write(OPEN_KEY, state.open ? '1' : '0');
       return state.open ? refresh(true) : paint();
     }
-    if (button.dataset.xk === 'clear')
+    if (button.dataset.xk === 'back') return zoomOut();
+    if (button.dataset.xk === 'clear') {
+      state.zoom = [];
       window.XVaultLibraryRunQuery?.(withRange($('#search')?.value || '', state.field));
+    }
   }
   // Brush: press on a bar, drag across others, release to search that range. A plain click is a 1-bar range.
   function onPointerDown(event) {
@@ -177,10 +261,12 @@
     const bars = [...document.querySelectorAll('#xkBars .xk-bar')],
       from = Number(start.dataset.index);
     let to = from;
-    const mark = () =>
+    const mark = () => {
       bars.forEach((bar, index) =>
         bar.classList.toggle('is-brushed', index >= Math.min(from, to) && index <= Math.max(from, to))
       );
+      preview(from, to);
+    };
     mark();
     const move = moveEvent => {
       const over = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)?.closest?.('#xkBars .xk-bar');
@@ -218,6 +304,10 @@
       event.preventDefault();
       apply(index, index);
     }
+    if (event.key === 'Backspace' && state.zoom.length) {
+      event.preventDefault();
+      zoomOut();
+    }
   }
 
   // Results events fire only for non-empty searches with hits; renderLib covers "all posts" and no results.
@@ -241,5 +331,5 @@
       },
     },
   ]);
-  window.XVaultTimeline = { withRange, refresh };
+  window.XVaultTimeline = { withRange, refresh, zoomOut, zoomDepth: () => state.zoom.length };
 })();

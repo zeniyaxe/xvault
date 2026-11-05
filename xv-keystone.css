@@ -77,3 +77,36 @@
     height: 48px;
   }
 }
+
+/* v22 polish: loading dim, peak, axis, hover lift */
+.xk-bars .xk-bar i {
+  transition:
+    background-color var(--t-fast, 120ms) linear,
+    filter var(--t-fast, 120ms) linear;
+}
+.xk-timeline.is-loading .xk-bars {
+  opacity: 0.45;
+  filter: saturate(0.6);
+  transition: opacity 160ms linear;
+}
+.xk-bar.is-peak i {
+  background: var(--accent, #7aa2ff);
+}
+.xk-bar:hover i {
+  filter: brightness(1.15);
+}
+.xk-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--soft);
+  font-size: 11px;
+  line-height: 1.4;
+  padding-top: 2px;
+}
+.xk-axis-peak {
+  color: var(--muted);
+}
+.xk-axis[hidden] {
+  display: none;
+}
