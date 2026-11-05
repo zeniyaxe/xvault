@@ -527,5 +527,24 @@
       state.busy = false;
     }
   });
+  const openWith = filter => {
+    page('media');
+    setTimeout(() => setFilter(filter), 60);
+  };
+  hooks.commands(() => [
+    state.last?.pausedByUser
+      ? {
+          name: 'Resume download queue',
+          hint: 'continue held transfers and start waiting files',
+          run: () => $('#xdPause')?.click(),
+        }
+      : {
+          name: 'Pause download queue',
+          hint: 'hold transfers; stays paused after a restart',
+          run: () => $('#xdPause')?.click(),
+        },
+    { name: 'Failed downloads', hint: 'retry or copy the reason', run: () => openWith('failed') },
+    { name: 'Downloads in progress', hint: 'live transfers', run: () => openWith('active') },
+  ]);
   window.XVaultDownloads = { refresh, setFilter, state };
 })();

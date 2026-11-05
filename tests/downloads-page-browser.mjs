@@ -150,6 +150,8 @@ try {
   );
   await page.locator('#page-media .xd-filters [data-xd-filter="all"]').click();
 
+  const commandNames = () => page.evaluate(() => (window.XVaultExtraCommands?.('') || []).map(row => row.name));
+  assert.ok((await commandNames()).includes('Pause download queue'), 'Command Center can pause the queue');
   // Pause the queue: the running transfer is held, new work waits, the choice is stored.
   await page.click('#xdPause');
   await page.waitForFunction(() => document.querySelector('#xdPause').textContent === 'Resume queue');
@@ -168,6 +170,7 @@ try {
   assert.equal(held.hold?.code, 'paused');
   assert.ok(held.queued >= 1, `new work waits while paused: ${JSON.stringify({ queued: held.queued })}`);
   assert.equal(await page.textContent('#qTitle'), 'Paused');
+  assert.ok((await commandNames()).includes('Resume download queue'), 'Command Center offers Resume while paused');
   await fs.mkdir(path.join(root, 'output', 'e2e'), { recursive: true });
   await page.screenshot({ path: path.join(root, 'output', 'e2e', 'downloads-page.png'), fullPage: false });
   // Reopening the page keeps showing the stored pause.
