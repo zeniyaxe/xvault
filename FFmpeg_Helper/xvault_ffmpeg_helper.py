@@ -1,6 +1,10 @@
 import json,time,subprocess,shutil,pathlib,threading,urllib.parse,secrets,hmac,re,os,copy
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
-BASE=pathlib.Path(__file__).resolve().parent; CFG=BASE/'config.json'; LOG=BASE/'helper.log'; STATE_FILE=BASE/'.xvault-state.json'; TOKEN_FILE=BASE/'.xvault-token'
+import sys
+BASE=pathlib.Path(__file__).resolve().parent
+if str(BASE) not in sys.path:sys.path.insert(0,str(BASE))
+import file_ops
+CFG=BASE/'config.json'; LOG=BASE/'helper.log'; STATE_FILE=BASE/'.xvault-state.json'; TOKEN_FILE=BASE/'.xvault-token'
 STATE={'started_at':time.time(),'watching':'','ffmpeg':None,'last_error':None,'last_conversion':None,'active':0,'converted':0,'failed':0,'conversions':{}}
 CANCEL_REQUESTS=set(); ACTIVE_PROCESSES={}; STATE_LOCK=threading.RLock()
 def auth_token():
@@ -265,7 +269,7 @@ class API(BaseHTTPRequestHandler):
   if u.path!='/media' and not self.allowed(): return self.sendj({'error':'Authentication required'},401)
   if u.path=='/media' and not self.authorized(): return self.sendj({'error':'Authentication required'},401)
   if u.path=='/status':
-   with STATE_LOCK:status={'connected':True,'version':'16.0','ffmpeg':STATE['ffmpeg'],'watching':STATE['watching'],'active':STATE['active'],'converted':STATE['converted'],'failed':STATE['failed'],'lastError':STATE['last_error'],'lastConversion':copy.deepcopy(STATE['last_conversion'])}
+   with STATE_LOCK:status={'connected':True,'version':'22.0','capabilities':['convert','rename','link-duplicates'],'ffmpeg':STATE['ffmpeg'],'watching':STATE['watching'],'active':STATE['active'],'converted':STATE['converted'],'failed':STATE['failed'],'lastError':STATE['last_error'],'lastConversion':copy.deepcopy(STATE['last_conversion'])}
    return self.sendj(status)
   if u.path=='/conversions':
    key=(q.get('key')or[''])[0]
@@ -279,7 +283,8 @@ class API(BaseHTTPRequestHandler):
   self.sendj({'error':'Not found'},404)
  def do_POST(self):
   if not self.authorized(): return self.sendj({'error':'Authentication required'},401)
-  if int(self.headers.get('Content-Length','0') or 0)>16384:return self.sendj({'error':'Request too large'},413)
+  limit=1048576 if urllib.parse.urlparse(self.path).path.startswith('/files/') else 16384
+  if int(self.headers.get('Content-Length','0') or 0)>limit:return self.sendj({'error':'Request too large'},413)
   try: body=json.loads(self.rfile.read(int(self.headers.get('Content-Length','0') or 0)) or b'{}')
   except:return self.sendj({'error':'Malformed JSON'},400)
   u=urllib.parse.urlparse(self.path)
@@ -297,6 +302,14 @@ class API(BaseHTTPRequestHandler):
     else:
      job_id=stable_job_id(key);STATE['conversions'][key]={'key':key,'jobId':job_id,'input':key,'state':'queued','started':None,'requestedGif':requested_gif,'requestedWebP':requested_webp,'keepSource':bool(body.get('keepSource',True)),'fps':int(body.get('fps') or 20),'maxWidth':int(body.get('maxWidth') or 1280),'webpQuality':int(body.get('webpQuality') or 90),'progress':0};persist_state();response={'ok':True,'jobId':job_id,'state':'queued'}
     return self.sendj(response)
+  # XVault 22: safe renames and duplicate hard links inside the watched XVault root (see file_ops.py).
+  if u.path in ('/files/rename','/files/link-duplicates'):
+   root=STATE.get('watching') or ''
+   if not root or not pathlib.Path(root).is_dir():return self.sendj({'ok':False,'error':'The XVault folder is not available'},409)
+   if u.path=='/files/rename':result=file_ops.rename_files(root,body.get('moves'),bool(body.get('dryRun')))
+   else:result=file_ops.link_duplicates(root,body.get('pairs'),bool(body.get('dryRun')))
+   if result.get('ok') and not result.get('dryRun'):log(f"{u.path}: {sum(1 for r in result['results'] if r['state'] in ('moved','linked'))} done")
+   return self.sendj(result,200 if result.get('ok') else 400)
   if u.path=='/conversions/remove-output':
    result=remove_conversion_output(body.get('jobId'),body.get('format'),load_cfg())
    return self.sendj(result,200 if result.get('ok') else (404 if result.get('state')=='not-found' else 409))
