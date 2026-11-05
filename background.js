@@ -4,6 +4,7 @@ import {
   classifyRetryReason,
   classifyVerification,
   expectedKind,
+  explainDownloadError,
   matchRecoveryDownload,
 } from './reliability.mjs';
 import { createInsightsAccumulator, orderThread, compactPost, previewUrl, mediaKind } from './vault-insights.mjs';
@@ -14,6 +15,7 @@ import { createOffscreenHost, holdOffscreen } from './sw/ocr.mjs';
 import { createSemanticService } from './sw/semantic-service.mjs';
 import { createMessageRouter, DESKTOP, CONTENT } from './sw/router.mjs';
 import { createConcurrencyGovernor } from './sw/adaptive-concurrency.mjs';
+import { createHostBreaker } from './sw/host-breaker.mjs';
 import { sanitizeBoards, sanitizeAutoTagRules, planRules, rulePatch } from './sw/organize.mjs';
 import { createSyncScheduler } from './sw/sync-scheduler.mjs';
 import { createMissingPostFetcher } from './sw/missing-posts.mjs';
@@ -611,7 +613,56 @@ function downloadHostOf(row) {
     return '';
   }
 }
-const hostPaused = row => pausedHostSet.size > 0 && pausedHostSet.has(downloadHostOf(row));
+// XVault 26: a host whose circuit breaker is open (several push-back failures in a row) is treated like a paused
+// host until its cooldown ends; the pump is woken then and the parked rows are read again.
+const hostBreaker = createHostBreaker();
+let hostBreakerTimer = 0;
+const hostPaused = row => {
+  if (!pausedHostSet.size && !hostBreakerTimer) return false;
+  const host = downloadHostOf(row);
+  return pausedHostSet.has(host) || hostBreaker.isOpen(host);
+};
+function dropBufferedHost(host) {
+  for (let index = queue.length - 1; index >= 0; index--)
+    if (downloadHostOf(queue[index]) === host) {
+      queuedKeys.delete(String(queue[index].key));
+      queue.splice(index, 1);
+    }
+}
+function rescanParkedHosts() {
+  queueFillKey = null;
+  hostSkipsSinceAdd = 0;
+  hostScanWraps = 0;
+  hostHeldSeen = 0;
+}
+function armHostBreakerTimer() {
+  clearTimeout(hostBreakerTimer);
+  hostBreakerTimer = 0;
+  const next = hostBreaker.nextChange();
+  if (!next) return;
+  hostBreakerTimer = setTimeout(
+    () => {
+      hostBreakerTimer = 0;
+      rescanParkedHosts();
+      armHostBreakerTimer();
+      scheduleQueuePump();
+    },
+    Math.max(500, next - Date.now() + 50)
+  );
+}
+function noteHostFailure(row, reason) {
+  const host = downloadHostOf(row);
+  const trip = hostBreaker.failure(host, reason);
+  if (!trip.opened) return;
+  dropBufferedHost(host);
+  armHostBreakerTimer();
+  const seconds = Math.round((trip.until - Date.now()) / 1000);
+  void action(
+    'download',
+    `${host} keeps refusing downloads; its files wait ${seconds < 90 ? `${seconds} s` : `${Math.round(seconds / 60)} min`} while other hosts continue`,
+    { host, reason: String(reason).slice(0, 80), until: trip.until }
+  ).catch(() => {});
+}
 function queueRow(row) {
   const key = String(row?.key || '');
   if (!key || active.has(key) || queuedKeys.has(key)) return false;
@@ -3559,6 +3610,7 @@ async function integrityRepairApply(ids = [], confirm = false) {
     if (!row || (row.state === 'complete' && Number(row.totalBytes || 0) > 0) || !row.item?.url) continue;
     if (!transitionDownload(row, 'queued')) continue;
     row.error = null;
+    row.errorHelp = null;
     row.failureReason = 'integrity-repair';
     row.downloadId = null;
     row.nextAttemptAt = null;
@@ -3792,11 +3844,14 @@ const visitor = createStatusVisitor({
 visitor.recover().catch(() => {});
 // XVault 25: the capture inbox — post links from a paired phone, the Capture page or the Remote share target.
 const captureInboxChannel = new BroadcastChannel('xvault-capture-inbox');
+const CAPTURE_INBOX_ALARM = 'xv-capture-inbox';
 const captureInbox = createCaptureInbox({
   activeXTab,
   readPost: readOnePost,
   getSettings,
   onChange: () => captureInboxChannel.postMessage({ at: Date.now() }),
+  // XVault 26: retries after a backoff or an X rate-limit cooldown survive the worker sleeping.
+  wake: when => chrome.alarms?.create?.(CAPTURE_INBOX_ALARM, { when: Math.max(Date.now() + 30000, when) }),
   log: (item, outcome) =>
     outcome === 'archived'
       ? action(
@@ -6647,6 +6702,7 @@ async function queueStats() {
     pausedByUser: !!manualQueuePause,
     pausedHosts: pausedHosts,
     hostHeld: pausedHosts.length ? hostHeldSeen : 0,
+    coolingHosts: hostBreaker.snapshot(),
     activeRows: [...active.values()].slice(0, 12).map(row => ({
       key: row.key,
       downloadId: Number(row.downloadId) || 0,
@@ -6867,6 +6923,7 @@ async function startOne(row, s) {
     row.downloadId = id;
     row.lastDownloadId = id;
     row.error = null;
+    row.errorHelp = null;
     row.lastSampleAt = Date.now();
     await putMany('downloads', [row]);
     if (row.downloadId === id && ['downloading', 'paused', 'verifying', 'converting'].includes(row.state))
@@ -6956,6 +7013,8 @@ async function failOrRetryCore(row, error, s) {
   }
   row.error = error;
   row.failureReason = classifyDownloadError(error);
+  // XVault 26: what the Downloads page says first; the raw code stays in row.error for diagnostics.
+  row.errorHelp = explainDownloadError(error, row.failureReason);
   row.updatedAt = Date.now();
   if (['expired-url', 'missing', 'wrong-content'].includes(row.failureReason) && (row.urlRefreshAttempts || 0) < 1) {
     row.urlRefreshAttempts = (row.urlRefreshAttempts || 0) + 1;
@@ -7023,16 +7082,12 @@ async function setDownloadHostPaused(value, paused) {
   pausedHostSet = hosts;
   if (paused) {
     // Drop that host's rows from the in-memory buffer; they stay queued and are read again on resume.
-    for (let index = queue.length - 1; index >= 0; index--)
-      if (downloadHostOf(queue[index]) === host) {
-        queuedKeys.delete(String(queue[index].key));
-        queue.splice(index, 1);
-      }
+    dropBufferedHost(host);
   } else {
-    queueFillKey = null;
-    hostSkipsSinceAdd = 0;
-    hostScanWraps = 0;
-    hostHeldSeen = 0;
+    // Resuming a host also ends its breaker cooldown: the user asked for it now.
+    hostBreaker.reset(host);
+    armHostBreakerTimer();
+    rescanParkedHosts();
   }
   scheduleQueuePump();
   void action('downloads', paused ? `Downloads from ${host} paused` : `Downloads from ${host} resumed`, { host }).catch(
@@ -7465,10 +7520,12 @@ async function reconcileDownloadChange(d, rowOverride = null) {
       if (row.state !== 'verifying' && !transitionDownload(row, 'verifying')) return;
       row.completedAt = Date.now();
       row.error = null;
+      row.errorHelp = null;
       await putMany('downloads', [row]);
       await action('download', 'Download complete; verifying', { file: row.target?.filename, key: row.key });
       await finalizeVerifiedDownload(row, d.id);
       downloadGovernor.success();
+      hostBreaker.success(downloadHostOf(row));
       pump();
     } catch (error) {
       await action('error', 'Download completion could not be finalized', {
@@ -7483,6 +7540,7 @@ async function reconcileDownloadChange(d, rowOverride = null) {
       void action('download', `X is pushing back; parallel downloads reduced to ${downloadGovernor.status().limit}`, {
         reason: String(d.error?.current || 'interrupted'),
       }).catch(() => {});
+    noteHostFailure(row, d.error?.current || 'interrupted');
     await failOrRetry(row, d.error?.current || 'interrupted', await getSettings());
   } else {
     row.updatedAt = Date.now();
@@ -7613,6 +7671,10 @@ chrome.alarms.onAlarm.addListener(async alarm => {
   if (syncScheduler.onAlarm(alarm?.name)) return;
   if (watchLists.onAlarm(alarm?.name)) return;
   if (autoBackup.onAlarm(alarm?.name)) return;
+  if (alarm?.name === CAPTURE_INBOX_ALARM) {
+    await captureInbox.run().catch(() => {});
+    return;
+  }
   if (alarm?.name === INTEGRITY_ALARM) {
     const settings = await getSettings(),
       last = (await chrome.storage.local.get('xvIntegrityReverify')).xvIntegrityReverify;

@@ -310,6 +310,11 @@
               </label>
               <button class="primary" id="captureInboxAdd" type="submit">Add to inbox</button>
             </form>
+            <div class="capture-inbox-banner" id="captureInboxBanner" role="status" hidden>
+              <p id="captureInboxNotice"></p>
+              <button id="captureInboxResume" type="button" hidden>Resume now</button>
+            </div>
+            <progress id="captureInboxProgress" class="capture-inbox-progress" max="1" value="0" hidden></progress>
             <div class="capture-inbox-tools">
               <span id="captureInboxSummary" class="capture-inbox-summary" aria-live="polite"></span>
               <button id="captureInboxPause" type="button">Pause</button>

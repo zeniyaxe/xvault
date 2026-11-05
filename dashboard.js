@@ -2507,7 +2507,8 @@ function builtinRenderLightbox() {
     const im = box.querySelector('img');
     const init = () => {
       computeFit(im);
-      setLightboxZoom(100, false);
+      // Keep a zoom the viewer chose while the image was still loading.
+      setLightboxZoom(lightboxZoom || 100, false);
     };
     if (im.complete) init();
     else im.addEventListener('load', init, { once: true });

@@ -625,12 +625,65 @@
       animations.clear();
     }
   }
+  // XVault 26: connection recovery. Losing the computer starts a quiet reconnect loop (2 s doubling to 30 s while
+  // the page is visible, immediately on `online` and when the phone wakes the page); coming back says so once and
+  // lets every view catch up (the capture outbox flushes, an empty or failed Library reloads).
+  const reconnect = { timer: 0, tick: 0, delay: 0, at: 0, attempts: 0, since: 0 };
   function setConnection(online) {
+    const was = document.documentElement.dataset.connection;
     document.documentElement.dataset.connection = online ? 'online' : 'offline';
     $('#connectionLabel').textContent = online ? `Paired · ${state.device?.name || 'phone'}` : 'Computer unreachable';
     const banner = $('#offlineBanner');
     if (banner) banner.hidden = online;
+    if (online) {
+      const away = reconnect.since ? Date.now() - reconnect.since : 0;
+      clearTimeout(reconnect.timer);
+      clearInterval(reconnect.tick);
+      Object.assign(reconnect, { timer: 0, tick: 0, delay: 0, at: 0, attempts: 0, since: 0 });
+      if (was === 'offline') {
+        if (away > 3000) toast('Reconnected to your computer');
+        dispatchEvent(new CustomEvent('xvault-remote-reconnected', { detail: { away } }));
+      }
+      return;
+    }
+    if (!reconnect.since) reconnect.since = Date.now();
+    if (!reconnect.timer) scheduleReconnect();
   }
+  function renderReconnect() {
+    const label = $('#offlineBannerText');
+    if (!label) return;
+    const seconds = Math.max(0, Math.ceil((reconnect.at - Date.now()) / 1000));
+    label.textContent =
+      reconnect.at && !document.hidden && navigator.onLine !== false
+        ? `Your computer is unreachable. Trying again in ${seconds} s — loaded posts and drafts stay here.`
+        : navigator.onLine === false
+          ? 'This phone is offline. XVault reconnects when the network is back — loaded posts and drafts stay here.'
+          : 'Your computer is unreachable. Loaded references and local drafts remain here.';
+  }
+  function scheduleReconnect(now = false) {
+    clearTimeout(reconnect.timer);
+    clearInterval(reconnect.tick);
+    reconnect.timer = 0;
+    reconnect.tick = 0;
+    if (document.documentElement.dataset.connection !== 'offline' || $('#app')?.hidden) return;
+    if (document.hidden || navigator.onLine === false) return renderReconnect();
+    reconnect.delay = now ? 0 : Math.min(30000, reconnect.delay ? reconnect.delay * 2 : 2000);
+    reconnect.at = Date.now() + reconnect.delay;
+    renderReconnect();
+    reconnect.tick = setInterval(renderReconnect, 1000);
+    reconnect.timer = setTimeout(async () => {
+      reconnect.timer = 0;
+      clearInterval(reconnect.tick);
+      reconnect.attempts++;
+      await refreshSession();
+      if (document.documentElement.dataset.connection === 'offline') scheduleReconnect();
+    }, reconnect.delay);
+  }
+  addEventListener('online', () => scheduleReconnect(true));
+  addEventListener('offline', () => renderReconnect());
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && document.documentElement.dataset.connection === 'offline') scheduleReconnect(true);
+  });
   function resetRemoteBrowse() {
     state.libraryRevision = null;
     state.observedRevision = null;
@@ -3281,7 +3334,16 @@
     $('#reconnect').onclick = async () => {
       await refreshSession();
       if (document.documentElement.dataset.connection === 'online') search(true);
+      else {
+        toast('Still cannot reach your computer');
+        scheduleReconnect();
+      }
     };
+    // Back online: a Library that never loaded (or failed while away) loads again; a loaded one keeps its place and
+    // the archive-revision banner tells the phone if anything changed meanwhile.
+    addEventListener('xvault-remote-reconnected', () => {
+      if (!state.rows.size && state.permissions.has('library.read')) search(true);
+    });
     matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', applyMotion);
     $('#viewerMore').addEventListener('click', () => openSheet(state.currentPost));
     $('#pairRetry').addEventListener('click', retryPair);
