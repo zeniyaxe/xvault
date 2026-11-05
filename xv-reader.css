@@ -668,3 +668,205 @@ dialog.xv-reader::backdrop {
     animation: none;
   }
 }
+
+/* ───────── Thread map ─────────
+   A minimap of the conversation: the spine down the left lane, replies stepping right by depth, quote
+   links as dashed curves. Lives in the free gutter beside the reading column on wide screens only. */
+.xr-map {
+  position: absolute;
+  top: 70px;
+  right: 14px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: 196px;
+  max-height: calc(100% - 92px);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--raised, var(--ground));
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.22);
+  animation: xr-map-in var(--t-med, 220ms) var(--ease) both;
+}
+.xr-map[hidden] {
+  display: none;
+}
+.xr-map header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px 7px;
+  border-bottom: 1px solid var(--line-soft);
+  font: 600 11px/1.2 var(--font-ui);
+}
+.xr-map header b {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.xr-map-count {
+  color: var(--muted);
+  font: 500 11px/1.2 var(--font-ui);
+  text-align: right;
+}
+.xr-map-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 4px;
+  scrollbar-width: thin;
+}
+.xr-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 7px 12px 9px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font: 500 10.5px/1.2 var(--font-ui);
+}
+.xr-map-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: -4px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.xr-map-legend i.is-spine {
+  background: var(--accent);
+}
+.xr-map-legend i.is-quote {
+  width: 12px;
+  height: 0;
+  border-top: 2px dashed var(--accent-line, var(--accent));
+  border-radius: 0;
+  background: none;
+}
+.tm-svg {
+  display: block;
+  overflow: visible;
+}
+.tm-svg path {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.tm-svg path.is-spine {
+  stroke: var(--accent-line, var(--accent));
+  stroke-width: 2;
+}
+.tm-svg path.tm-quote {
+  stroke: var(--accent);
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+.tm-node {
+  cursor: pointer;
+  outline: none;
+}
+.tm-hit {
+  fill: transparent;
+  transition: fill var(--t-fast) linear;
+}
+.tm-node:hover .tm-hit,
+.tm-node:focus-visible .tm-hit {
+  fill: var(--accent-soft);
+}
+.tm-node.is-current .tm-hit {
+  fill: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+}
+.tm-label {
+  fill: var(--muted);
+  font: 500 10.5px/1 var(--font-ui);
+  transition: fill var(--t-fast) linear;
+}
+.tm-node.is-spine .tm-label {
+  fill: var(--text);
+}
+.tm-node.is-hidden .tm-label {
+  opacity: 0.75;
+  font-style: italic;
+}
+.tm-node:is(:hover, :focus-visible, .is-current) .tm-label {
+  fill: var(--text);
+}
+.tm-node circle {
+  fill: var(--muted);
+  stroke: var(--ground);
+  stroke-width: 1.5;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    transform var(--t-fast, 140ms) var(--ease),
+    fill var(--t-fast, 140ms) linear;
+}
+.tm-node.is-spine circle {
+  fill: var(--accent);
+}
+.tm-node.is-hidden circle {
+  fill: none;
+  stroke: var(--muted);
+  stroke-dasharray: 2 2;
+}
+.tm-node.is-focus circle {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+.tm-node:hover circle,
+.tm-node:focus-visible circle {
+  transform: scale(1.45);
+}
+.tm-node:focus-visible circle {
+  stroke: var(--text);
+  stroke-width: 2.5;
+}
+.tm-node.is-current circle {
+  fill: var(--text);
+  transform: scale(1.6);
+}
+.xr-map-body.is-entering .tm-node circle {
+  animation: tm-pop 260ms var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 14ms);
+}
+.xr-map-body.is-entering .tm-label {
+  animation: tm-fade 300ms linear both;
+  animation-delay: calc(var(--i, 0) * 14ms + 60ms);
+}
+.xr-map-body.is-entering path {
+  animation: tm-fade 360ms linear both;
+}
+@keyframes tm-pop {
+  from {
+    transform: scale(0);
+  }
+}
+@keyframes tm-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes xr-map-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+html.xv-calm .xr-map,
+html.xv-calm .xr-map-body.is-entering :is(.tm-node circle, .tm-label, path) {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .xr-map,
+  .xr-map-body.is-entering :is(.tm-node circle, .tm-label, path) {
+    animation: none;
+  }
+}
+@media (max-width: 1099px) {
+  .xr-map,
+  .xr-map-toggle {
+    display: none !important;
+  }
+}
