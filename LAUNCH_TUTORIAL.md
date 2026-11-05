@@ -27,7 +27,7 @@ The Library's stuck worker-search bug is fixed in this source. If an older dashb
 
 The Helper supports local animation conversion and related local media previews. XVault's Library and archive do not require it.
 
-1. Run `FFmpeg_Helper\setup_helper.bat` once. The setup asks for the browser Downloads folder and XVault extension ID. Copy the ID from **Settings → Remote** in the dashboard; the same ID is used for the Helper's extension-origin allowlist.
+1. Run `FFmpeg_Helper\setup_helper.bat` once. The setup asks for the browser Downloads folder and XVault extension ID. Copy the ID from **Downloads → Files & health → Disk & helper** (the **Pairing ID**, with a Copy button) or from **Settings → Remote**; the same ID is used for the Helper's extension-origin allowlist. To use the Helper from several browsers, enter their IDs separated by commas (they are saved as `extension_ids`). In Firefox the pairing ID is the add-on's internal UUID shown in that panel (also listed in `about:debugging`), not the add-on ID; if the panel says the Helper refused this browser, add the shown ID to `extension_ids` in `config.json` and restart the Helper.
 2. Setup checks for FFmpeg. If it is missing, it may offer to install it with `winget`; you can also install FFmpeg separately and make `ffmpeg.exe` available on `PATH`.
 3. Choose whether the Helper should start with Windows. Setup then starts `run_helper.bat`.
 4. Keep the Helper console open while using it. Its local status endpoint is `http://127.0.0.1:17843/status`.

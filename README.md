@@ -18,7 +18,9 @@ computer: posts in IndexedDB, media through Chrome downloads with byte-level ver
   adaptive parallelism that backs off when X's media servers push back. Video quality (globally or per rule), a
   download window, Data Saver/cellular holds and a bandwidth cap; filename and folder templates with a live preview;
   per-host health, duplicate reclaim, scheduled re-verification and safe renames (Downloads › Files & health) —
-  with the helper running, XVault renames files itself and replaces identical copies with hard links.
+  with the helper running (Chrome, Edge or Firefox), XVault renames files itself, replaces identical copies with
+  hard links and measures real disk use. The Downloads page shows honest progress, live transfers with their own
+  controls, a pause that survives restarts, and a filterable history with Retry and Copy reason.
 - **Import your X archive** — drop the ZIP from X's "Download an archive of your data" to add every tweet (long posts
   with their full text), like, bookmark, community post and recently deleted post it contains, and save the media
   files inside it as local downloads; read in the browser without unpacking, direct messages are never read, and

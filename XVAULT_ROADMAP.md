@@ -2,6 +2,64 @@
 
 This file is the hand-off document: another session should be able to resume from here.
 
+## v23 "Lodestar" pass
+
+Branch: `xvault-23-meridian` (stacked on `xvault-22-keystone`, PR #6 targets that branch; the branch name predates
+the release name — "Meridian" was already v20). Version 23.0.0. Goal: close the two helper gaps left by v22
+(Firefox, double-counted hard links), make interrupted helper work recoverable, and rebuild the Downloads page
+around honest numbers and real controls.
+
+| Area | Change |
+| --- | --- |
+| Helper pairing | `extension_origins(cfg)` reads `extension_id` and `extension_ids`; Chrome IDs (`[a-p]{32}`) → `chrome-extension://`, Firefox UUIDs (braces stripped, lower-cased) → `moz-extension://`. Status 23.0 adds capabilities `usage`, `recover`, `firefox`; start-up logs the paired browsers. `setup_helper.ps1` takes comma-separated IDs; `setup_remote.ps1` accepts a Firefox add-on ID (`name@domain`) and writes `com.xvault.remote.firefox.json` + `HKCU\Software\Mozilla\NativeMessagingHosts`; the uninstaller removes it. |
+| Helper recovery | `file_ops.py`: a rename whose target is already the same inode as the source (link done, unlink not) finishes as `resumed`; `recover()` deletes `*.xvault-link` temporaries only when the file has another link (`st_nlink ≥ 2`), before each operation and at start-up. |
+| Disk usage | `GET /files/usage` → `disk_usage()`: apparent vs physical bytes keyed by `(dev, ino)`, linked files/names, folder count, bounded (400k files / 20 s, `truncated`). Background `MEDIA_STORAGE` sums records by kind (images/videos/GIFs/other), excludes linked/reclaimed copies from physical totals, and with `measure: true` asks the helper (cached in `helperDiskUsage`). |
+| Files & health | `xv-forge.js` panel `#xfDisk`: status pill (running / paired / refused / unreachable from `helperPairing`), capability chips, pairing ID + Copy, refused-pairing snippet for `config.json`, record bars and measured bars with **Measure on disk**. |
+| Firefox | `scripts/manifest-targets.mjs` keeps `nativeMessaging` for Firefox (Remote). `scripts/e2e-firefox.py` starts a real helper copy (temp config, port 17843): refuses an unknown UUID, pairs after adding it, measures a hard link (`savedBytes` 4096). `FF_SKIP_HELPER=1` skips. |
+| Downloads page | `xv-downloads.js/.css` own the page through `XVaultDashboard.provide('queueStats')` (dashboard.js keeps a minimal fallback that returns the stats; `queueSnapshot` is set by the wrapper). Background: `manualQueuePause` in `storage.local.downloadQueuePause` (awaited by `pump`, beats window/Data Saver holds, the bandwidth sampler skips while paused); `DOWNLOAD_QUEUE_STATS` returns `hold`, `pausedByUser`, `activeRows`. UI: primary Pause/Resume, **More** menu, hold banner, indeterminate progress when sizes are unknown, sparkline of real speed samples, live transfer cards with per-file controls, keyed in-place history with filters/search/Retry/Show in folder/Open source post/Regenerate/Copy reason, Command Center entries. The older `#xvQueueTools` strip is no longer mounted. |
+| Fixes | Invented 35 %/8 % progress; probe without timeout (12 s `AbortController`); bandwidth cap resuming a user pause; linked copies double-counted; interrupted move refused forever; duplicate filter/pause strip. |
+
+### Decisions (v23)
+
+- **IDs, not names, pair a browser.** Firefox gives each install a random internal UUID; the helper accepts that
+  (it is what the `Origin` header carries) and the dashboard shows it, rather than guessing from the add-on ID.
+- **Unknown sizes stay unknown.** When a server sends no length there is no percentage — an indeterminate bar and
+  "N so far" are shown, never an estimate dressed as progress.
+- **A pause you choose outranks every automatic hold** and is persisted; automatic holds (window, Data Saver)
+  still resume on their own.
+- **Recovery only removes what is provably a duplicate name.** A leftover `.xvault-link` is deleted only while
+  the same inode has another name; otherwise it is left for the user.
+- **Disk usage is measured by the helper, not estimated.** The browser only knows per-path sizes; physical usage
+  needs inode identity, so the panel shows records and measurement side by side.
+
+### Verification log (v23)
+
+| Check | Result |
+| --- | --- |
+| `npm run verify` (structure, ESLint, unit tests, Prettier) | pass: 154/154 tests |
+| `npm run e2e` | pass (Library 24/24) |
+| `node scripts/e2e-a11y.mjs` (axe-core) | 28 surfaces, 0 serious/critical violations (Downloads page included) |
+| `npm run e2e:helper` | pass: link + rename + disk usage counts the link once; automatic backups |
+| `npm run e2e:downloads` | pass: no invented percentage, live card with Pause/Cancel, filters/search, persistent pause holds new work, resume, retry |
+| `scripts/e2e-firefox.py` on the Firefox zip (real Firefox + geckodriver + real helper) | 22/22 (live x.com check skipped unless `FF_LIVE_X=1`) |
+| Python: `tests/python` and `tests/test_*.py` | 22 + 48 tests pass |
+| `npm run build:all` | Chrome, Edge and Firefox zips (189 files each) |
+| `web-ext lint` on the Firefox build | 0 errors, 157 warnings (minified-code and `innerHTML` notices) |
+
+Not verified: live X, a real X-issued archive, the helper and the PowerShell setup scripts on Windows/NTFS,
+Firefox Remote Native Messaging on Windows, the Edge store, and screen readers.
+
+### Remaining after v23
+
+1. Live X: capture of polls/cards/notes/tombstones on real payloads, visit and watch queues, badges; a real
+   (anonymised) X-issued archive including ZIP media.
+2. Windows: run the helper (renames, links, usage on NTFS) and the setup scripts, including Firefox Remote.
+3. Optional neural embeddings (opt-in, local model) as a second meaning engine; OCR languages beyond English.
+4. Keep replacing structural source tests with behavioural ones and delete superseded `dashboard.js` paths
+   (the Downloads history renderer is gone; health/activity renderers are next).
+5. Per-host pause and priority (move a file to the front) on the Downloads page.
+6. A reply/quote thread graph view in Atlas.
+
 ## v22 "Keystone" pass
 
 Branch: `xvault-22-keystone` (from `main` after PR #4 was merged). Version 22.0.0. Goal: run Firefox for real,
