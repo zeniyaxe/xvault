@@ -50,6 +50,7 @@ phone capture, per-host download control, Atlas thread/quote graphs, and measure
 | `tests/helper-files-browser.mjs`, `tests/auto-backup-browser.mjs` | pass |
 | `tests/downloads-page-browser.mjs` (real Chromium downloads) | pass, now including per-host pause/resume against a real local host |
 | `npm run e2e:remote` (aurora, product, shell, editor, connection, **capture**) | 6/6 pass |
+| `scripts/e2e-firefox.py` (real Firefox 159 + geckodriver 0.37.1, built package) | 22/22 pass; the filter checks now count the rows a query loaded, because the feed mounts only the cards near the viewport |
 | Python `tests/python`, `tests/test_*.py` | 22 + 56 pass (`test_remote_companion.py` 30, 6 new: capture parse/grant/projection, rate limit, share route + manifest, avatars, prioritize, item/host controls) |
 | `node --test` new units | `tests/capture-inbox.test.mjs`, `tests/avatar-archive.test.mjs`, `tests/vault-insights.test.mjs` (threads/quotes) |
 | Screenshots | `scripts/ui-gallery.mjs` at 1920×1080, 1440×900, 1366×768, 1280×720, 1024×768, 768×1024, 390×844, 320×700 for every Library layout and page; Remote 4.0 at 390, 320 and 768 px. Review found and fixed: the phone tab bar pushed System and Settings off-screen at 320 px (now always fits, icons only below 360 px), small Grid tiles clipped the video label against the "+N" badge |
