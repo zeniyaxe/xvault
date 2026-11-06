@@ -4,6 +4,7 @@
   const $ = selector => document.querySelector(selector);
   const PAIR_KEY = 'xvault.remote.device.v1';
   const SAVER_KEY = 'xvault.remote.data-saver.v1';
+  const LAYOUT_KEY = 'xvault.remote.layout.v1';
   const CLIENT_SESSION = crypto.randomUUID();
   const PAGE_SIZE = 40;
   const CACHE_PAGES = 3;
@@ -71,6 +72,9 @@
     scrollScheduled: false,
     pressTimer: 0,
     longPressed: false,
+    layout: 'feed',
+    downloadsTimer: 0,
+    downloadsBusy: false,
   };
 
   let browseController = null,
@@ -605,6 +609,7 @@
     $('#privacyScreen').setAttribute('aria-pressed', String(state.privacyEnabled));
     updateInstallUI();
     observeArchiveRevision(session, true);
+    setLayout(localChoice(LAYOUT_KEY) || 'feed', false);
     await search(true);
   }
 
@@ -789,8 +794,12 @@
     const gap = parseFloat(getComputedStyle(grid).rowGap) || 9;
     const width = grid.clientWidth;
     const tile = Math.max(100, (width - gap * (cols - 1)) / cols);
-    const measured = grid.querySelector('.post-tile')?.getBoundingClientRect().height || 0;
-    return Math.ceil(rows / cols) * ((measured || tile + (innerWidth <= 480 ? 90 : 68)) + gap);
+    const rendered = [...grid.querySelectorAll('.post-tile')].slice(0, 24);
+    const measured = rendered.length
+      ? rendered.reduce((sum, node) => sum + node.getBoundingClientRect().height, 0) / rendered.length
+      : 0;
+    const fallback = state.layout === 'feed' ? 260 : tile + (innerWidth <= 480 ? 90 : 68);
+    return Math.ceil(rows / cols) * ((measured || fallback) + gap);
   }
 
   function mediaPath(media, tier = 'thumb') {
@@ -826,6 +835,7 @@
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
     use.setAttribute('href', `#i-${name}`);
+    svg.setAttribute('aria-hidden', 'true');
     svg.append(use);
     return svg;
   }
@@ -844,6 +854,372 @@
   }
 
   function createTile(post) {
+    return state.layout === 'feed' ? createCard(post) : createGridTile(post);
+  }
+
+  // ── Phone Remote 3.0: rich post cards ──
+  // Everything drawn here comes from the archived record the computer sent; nothing is guessed. Avatars are
+  // monograms (the phone never contacts X), and missing media says why instead of showing a stand-in image.
+  function el(tag, className = '', text = null) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+  function compact(value) {
+    const number = Number(value) || 0;
+    if (number < 1000) return String(number);
+    const units = [
+      [1e9, 'B'],
+      [1e6, 'M'],
+      [1e3, 'K'],
+    ];
+    for (const [size, unit] of units)
+      if (number >= size) return `${(number / size).toFixed(number >= size * 10 ? 0 : 1).replace(/\.0$/, '')}${unit}`;
+    return String(number);
+  }
+  function relativeTime(value) {
+    const time = new Date(value || 0).getTime();
+    if (!Number.isFinite(time) || time <= 0) return '';
+    const seconds = Math.round((Date.now() - time) / 1000);
+    if (seconds < 60) return 'now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+    if (seconds < 86400 * 7) return `${Math.floor(seconds / 86400)}d`;
+    const date = new Date(time);
+    return date.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      ...(date.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }),
+    });
+  }
+  function makeAvatar(name, handle, size = '') {
+    const avatar = el('span', `avatar ${size}`.trim());
+    const source = String(handle || name || '?');
+    let hash = 0;
+    for (const char of source) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    avatar.style.setProperty('--hue', String(hash % 360));
+    avatar.textContent = (String(name || handle || '?').trim()[0] || '?').toUpperCase();
+    avatar.setAttribute('aria-hidden', 'true');
+    return avatar;
+  }
+  function makeIdentity(post, withTime = true) {
+    const identity = el('div', 'card-id');
+    const line = el('div', 'card-name');
+    const name = el('b', '', post.name || (post.handle ? `@${post.handle}` : 'Archived post'));
+    line.append(name);
+    if (post.verified) {
+      const badge = makeIcon('verified');
+      badge.classList.add('verified');
+      badge.removeAttribute('aria-hidden');
+      badge.setAttribute('role', 'img');
+      badge.setAttribute('aria-label', 'Verified');
+      line.append(badge);
+    }
+    const sub = el('small', '', post.handle ? `@${post.handle}` : 'XVault archive');
+    if (withTime) {
+      const when = relativeTime(post.createdAt || post.archivedAt);
+      if (when) {
+        const time = el('time', '', ` · ${when}`);
+        try {
+          time.dateTime = new Date(post.createdAt || post.archivedAt).toISOString();
+          time.title = new Date(post.createdAt || post.archivedAt).toLocaleString();
+        } catch {}
+        sub.append(time);
+      }
+    }
+    identity.append(line, sub);
+    return identity;
+  }
+  function makeContext(post) {
+    if (!post.replyTo) return null;
+    const line = el('div', 'card-context');
+    line.append(makeIcon(post.thread ? 'thread' : 'reply-to'));
+    line.append(el('span', '', post.thread ? 'Continues a thread' : `Replying to @${post.replyTo}`));
+    return line;
+  }
+  function makeQuote(post) {
+    const quote = post.quote;
+    if (!quote || typeof quote !== 'object') return null;
+    const box = el('div', 'card-quote');
+    if (quote.missing) {
+      box.classList.add('is-missing');
+      box.append(makeIcon('quote'), el('span', '', 'Quoted post · not in this archive'));
+      return box;
+    }
+    const head = el('div', 'quote-head');
+    head.append(makeAvatar(quote.name, quote.handle, 'xs'), el('b', '', quote.name || `@${quote.handle || 'post'}`));
+    if (quote.handle) head.append(el('small', '', `@${quote.handle}`));
+    box.append(head, el('p', '', String(quote.text || '').slice(0, 280) || 'Media post'));
+    if (Number(quote.mediaCount) > 0) {
+      const media = el('small', 'quote-media');
+      media.append(makeIcon('images'), document.createTextNode(` ${quote.mediaCount} media`));
+      box.append(media);
+    }
+    return box;
+  }
+  function makeLinkCard(post) {
+    const card = post.card;
+    if (!card || (!card.title && !card.domain)) return null;
+    const box = el('div', 'card-link');
+    box.append(makeIcon('globe'));
+    const body = el('div', 'card-link-body');
+    if (card.domain) body.append(el('small', '', card.domain));
+    if (card.title) body.append(el('b', '', card.title));
+    box.append(body);
+    return box;
+  }
+  function makeChips(post) {
+    const chips = el('div', 'card-chips');
+    if (post.readLater) {
+      const later = el('span', 'chip is-later');
+      later.append(makeIcon('bookmark'), document.createTextNode('Later'));
+      chips.append(later);
+    }
+    if (post.hasNote) {
+      const note = el('span', 'chip is-note');
+      note.append(makeIcon('note'), document.createTextNode('Note'));
+      chips.append(note);
+    }
+    if (post.sensitive) chips.append(el('span', 'chip is-sensitive', 'Sensitive'));
+    for (const tag of (post.tags || []).slice(0, 3)) chips.append(el('span', 'chip is-tag', `#${tag}`));
+    return chips.childElementCount ? chips : null;
+  }
+  function makeMetrics(post) {
+    const metrics = el('div', 'card-metrics');
+    const values = post.metrics || {};
+    for (const [key, icon, label] of [
+      ['replies', 'reply', 'replies'],
+      ['reposts', 'repost', 'reposts'],
+      ['likes', 'heart', 'likes'],
+      ['views', 'eye', 'views'],
+    ]) {
+      const value = Number(values[key]) || 0;
+      if (!value) continue;
+      const item = el('span', `metric is-${key}`);
+      const shown = el('b', '', compact(value));
+      shown.setAttribute('aria-hidden', 'true');
+      item.append(makeIcon(icon), shown, el('span', 'sr-only', `${value.toLocaleString()} ${label}`));
+      metrics.append(item);
+    }
+    return metrics;
+  }
+  function mediaStatusText(post) {
+    return state.dataSaver
+      ? 'Previews paused · Data Saver'
+      : post.mediaState === 'permission-required'
+        ? 'Media access is off for this phone'
+        : post.mediaState === 'missing'
+          ? 'Local file unavailable · open to recover'
+          : post.mediaState === 'not-downloaded'
+            ? 'Media not downloaded to PC yet'
+            : 'Preview unavailable · open media';
+  }
+  function makeCardMedia(post) {
+    const items = (Array.isArray(post.media) ? post.media : []).filter(item => mediaPath(item));
+    const count = Number(post.mediaCount) || 0;
+    if (!count) return null;
+    if (!items.length || state.dataSaver) {
+      const status = el('button', 'card-media-status tile-media');
+      status.type = 'button';
+      const kinds = post.mediaTypes || [];
+      const icon = kinds.some(kind => /video|gif|animation/.test(kind)) ? 'video' : count > 1 ? 'images' : 'photo';
+      status.append(makeIcon(icon));
+      const copy = el('span');
+      copy.append(
+        el(
+          'b',
+          '',
+          `${count} ${kinds.some(kind => /video|gif|animation/.test(kind)) ? 'media' : count === 1 ? 'photo' : 'photos'}`
+        ),
+        el('small', 'media-availability', mediaStatusText(post))
+      );
+      status.append(copy);
+      status.setAttribute('aria-label', 'Open post media and download options');
+      status.addEventListener('click', event => {
+        event.stopPropagation();
+        count && state.permissions.has('media.read') ? openViewer(post, 0) : openSheet(post);
+      });
+      return status;
+    }
+    const shown = items.slice(0, 4);
+    const grid = el('div', 'card-media');
+    grid.dataset.count = String(shown.length);
+    shown.forEach((media, index) => {
+      const button = el('button', 'tile-media has-media');
+      button.type = 'button';
+      button.setAttribute(
+        'aria-label',
+        `Open media ${index + 1} of ${count} from @${post.handle || post.name || 'post'}`
+      );
+      const width = Number(media.width) || 0,
+        height = Number(media.height) || 0;
+      if (shown.length === 1 && width && height)
+        button.style.setProperty('--ratio', String(Math.max(0.56, Math.min(1.9, width / height))));
+      const image = el('img');
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      image.fetchPriority = 'low';
+      image.alt = '';
+      image.src = mediaPath(media);
+      image.addEventListener(
+        'error',
+        () => {
+          image.remove();
+          button.classList.add('is-broken');
+          button.append(makeIcon('alert'), el('small', 'media-availability', 'Preview could not load'));
+        },
+        { once: true }
+      );
+      button.append(image);
+      if (/video|gif|animation/i.test(media.type || '')) {
+        const play = el('span', 'tile-play');
+        play.append(makeIcon('play'));
+        button.append(play);
+        if (/gif|animation/i.test(media.type || '')) button.append(el('span', 'media-kind', 'GIF'));
+      }
+      if (index === shown.length - 1 && count > shown.length)
+        button.append(el('span', 'media-more', `+${count - shown.length}`));
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        openViewer(post, index);
+      });
+      grid.append(button);
+    });
+    return grid;
+  }
+  function attachHold(tile, post) {
+    let holdPoint = null,
+      heldAt = 0;
+    tile.addEventListener(
+      'pointerdown',
+      event => {
+        if (event.target.closest('.tile-action') || !event.isPrimary) return;
+        holdPoint = { x: event.clientX, y: event.clientY };
+        clearTimeout(state.pressTimer);
+        state.pressTimer = setTimeout(() => {
+          if (tile.isConnected && holdPoint) {
+            heldAt = Date.now();
+            if (navigator.vibrate && !calm()) navigator.vibrate(8);
+            openSheet(post);
+          }
+        }, 460);
+      },
+      { passive: true }
+    );
+    tile.addEventListener(
+      'pointermove',
+      event => {
+        if (holdPoint && Math.hypot(event.clientX - holdPoint.x, event.clientY - holdPoint.y) > 12) {
+          holdPoint = null;
+          clearTimeout(state.pressTimer);
+        }
+      },
+      { passive: true }
+    );
+    for (const name of ['pointerup', 'pointerleave', 'pointercancel'])
+      tile.addEventListener(name, () => clearTimeout(state.pressTimer), { passive: true });
+    tile.addEventListener(
+      'click',
+      event => {
+        if (heldAt && Date.now() - heldAt < 800) {
+          event.preventDefault();
+          event.stopPropagation();
+          heldAt = 0;
+        }
+      },
+      true
+    );
+  }
+  function makeCardActions(post) {
+    const actions = el('div', 'tile-actions card-actions');
+    if (state.permissions.has('favorite.write'))
+      actions.append(
+        makeAction(
+          post,
+          'heart',
+          post.favorite ? 'Remove from favorites' : 'Save to favorites',
+          toggleFavorite,
+          post.favorite ? 'is-favorite' : ''
+        )
+      );
+    if (state.permissions.has('downloads.manage') && Number(post.mediaCount || post.media?.length)) {
+      const save = makeAction(post, 'pc-save', 'Save all media to PC', saveToPC, 'tile-pc-save');
+      save.dataset.pcPost = String(post.id);
+      actions.append(save);
+    }
+    if (postLink(post)) actions.append(makeAction(post, 'share', 'Share post link', sharePost));
+    return actions;
+  }
+  function createCard(post) {
+    const card = el('article', 'post-tile post-card');
+    card.dataset.postId = post.id;
+    if (post.favorite) card.classList.add('is-favorite');
+    const head = el('header', 'card-head');
+    head.append(makeAvatar(post.name, post.handle), makeIdentity(post));
+    head.append(makeAction(post, 'more', 'More post actions', openSheet, 'card-more'));
+    card.append(head);
+    const body = el('div', 'card-body');
+    const context = makeContext(post);
+    if (context) body.append(context);
+    const text = String(post.text || '').trim();
+    if (text) {
+      const copy = el('p', 'card-text', text);
+      if (text.length > 280) copy.classList.add('is-long');
+      body.append(copy);
+    }
+    for (const part of [makeCardMedia(post), makeQuote(post), makeLinkCard(post), makeChips(post)])
+      if (part) body.append(part);
+    body.addEventListener('click', event => {
+      if (event.target.closest('button,a')) return;
+      openSheet(post);
+    });
+    card.append(body);
+    const foot = el('footer', 'card-foot');
+    foot.append(makeMetrics(post), makeCardActions(post));
+    card.append(foot);
+    attachHold(card, post);
+    return card;
+  }
+  async function sharePost(post) {
+    const url = postLink(post);
+    if (!url) return toast('This post has no shareable link');
+    if (navigator.share) {
+      try {
+        await navigator.share({ url, title: post.name ? `Post by ${post.name}` : 'Archived post' });
+        return;
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+      }
+    }
+    return copyLink(post);
+  }
+  function setLayout(layout, persist = true) {
+    state.layout = layout === 'grid' ? 'grid' : 'feed';
+    if (persist)
+      try {
+        localStorage.setItem(LAYOUT_KEY, state.layout);
+      } catch {}
+    $('#gallery').dataset.layout = state.layout;
+    for (const button of document.querySelectorAll('#layoutToggle [data-layout]'))
+      button.setAttribute('aria-checked', String(button.dataset.layout === state.layout));
+  }
+  function skeletonCards(count = 4) {
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < count; index++) {
+      const card = el('div', 'skeleton-card');
+      card.setAttribute('aria-hidden', 'true');
+      card.innerHTML =
+        '<i class="sk-avatar"></i><i class="sk-line w60"></i><i class="sk-line w90"></i><i class="sk-line w75"></i><i class="sk-media"></i>';
+      fragment.append(card);
+    }
+    const status = el('p', 'sr-only', 'Searching your Library…');
+    status.setAttribute('role', 'status');
+    fragment.append(status);
+    return fragment;
+  }
+
+  function createGridTile(post) {
     const tile = document.createElement('article');
     tile.className = 'post-tile';
     tile.dataset.postId = post.id;
@@ -1065,12 +1441,7 @@
       $('#scrollRegion').scrollTop = 0;
       state.lastScrollTop = 0;
       viewScrollPositions.set('libraryView', 0);
-      $('#gallery').replaceChildren(
-        Object.assign(document.createElement('div'), {
-          className: 'loading-state',
-          innerHTML: '<span class="spinner" aria-hidden="true"></span><p>Searching your Library…</p>',
-        })
-      );
+      $('#gallery').replaceChildren(skeletonCards(state.layout === 'feed' ? 3 : 6));
       $('#gallery').setAttribute('aria-busy', 'true');
       setLoadStatus();
     }
@@ -1226,7 +1597,7 @@
   }
 
   function showView(viewId) {
-    const order = ['libraryView', 'recentView', 'settingsView'],
+    const order = ['libraryView', 'downloadsView', 'overviewView', 'settingsView'],
       before = document.querySelector('.view.active')?.id;
     const region = $('#scrollRegion');
     if (before && before !== viewId) viewScrollPositions.set(before, region.scrollTop);
@@ -1248,7 +1619,292 @@
       if (active) button.setAttribute('aria-current', 'page');
       else button.removeAttribute('aria-current');
     }
-    if (viewId === 'recentView') loadActivity();
+    if (viewId === 'overviewView') {
+      loadOverview();
+      loadActivity();
+    }
+    if (viewId === 'downloadsView') loadDownloads();
+    else stopDownloadsPolling();
+  }
+
+  // ── Downloads monitor: honest numbers from the computer; controls only when this phone may manage downloads ──
+  function formatBytes(value) {
+    const bytes = Number(value) || 0;
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let size = bytes / 1024,
+      unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+      size /= 1024;
+      unit++;
+    }
+    return `${size.toFixed(size >= 100 ? 0 : 1)} ${units[unit]}`;
+  }
+  function stopDownloadsPolling() {
+    clearTimeout(state.downloadsTimer);
+    state.downloadsTimer = 0;
+  }
+  function scheduleDownloads() {
+    stopDownloadsPolling();
+    if ($('#downloadsView').hidden || document.hidden) return;
+    state.downloadsTimer = setTimeout(() => loadDownloads(true), 3000);
+  }
+  async function loadDownloads(quiet = false) {
+    const body = $('#downloadsBody');
+    if (!state.permissions.has('library.read')) {
+      body.replaceChildren(el('p', 'empty-note', 'Allow Library access for this phone in XVault on your computer.'));
+      return;
+    }
+    if (state.downloadsBusy) return;
+    state.downloadsBusy = true;
+    try {
+      const result = await request('/api/downloads');
+      renderDownloads(result);
+      $('#downloadsUpdated').textContent =
+        `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+    } catch (error) {
+      if (!quiet || !body.querySelector('.dl-hero'))
+        body.replaceChildren(el('p', 'empty-note', error.message || 'The download queue is unavailable.'));
+    } finally {
+      state.downloadsBusy = false;
+      scheduleDownloads();
+    }
+  }
+  function renderDownloads(data) {
+    const body = $('#downloadsBody');
+    const fragment = document.createDocumentFragment();
+    const active = Number(data.downloading) || Number(data.active) || 0,
+      queued = Number(data.queued) || 0,
+      failed = Number(data.failed) || 0,
+      paused = !!data.pausedByUser;
+    const badge = $('#navDownloadsBadge');
+    badge.hidden = !(active + queued);
+    badge.textContent = active + queued > 99 ? '99+' : String(active + queued);
+    const hero = el('section', `dl-hero ${paused ? 'is-paused' : active ? 'is-active' : 'is-idle'}`);
+    const heroIcon = el('span', 'dl-hero-icon');
+    heroIcon.append(makeIcon(paused ? 'pause' : active ? 'downloads' : 'check'));
+    const heroCopy = el('div');
+    heroCopy.append(
+      el(
+        'b',
+        '',
+        paused ? 'Queue paused' : active ? `Downloading ${active}` : queued ? 'Waiting to start' : 'All caught up'
+      ),
+      el(
+        'small',
+        '',
+        paused
+          ? 'Resume to continue the remaining downloads.'
+          : data.hold
+            ? `Held: ${data.hold}`
+            : active && data.speedBps
+              ? `${formatBytes(data.speedBps)}/s${data.etaSeconds != null ? ` · about ${Math.max(1, Math.round(data.etaSeconds / 60))} min left` : ''}`
+              : queued
+                ? `${formatNumber(queued)} waiting`
+                : 'Nothing is downloading right now.'
+      )
+    );
+    hero.append(heroIcon, heroCopy);
+    if (data.totalBytes > 0) {
+      const bar = el('div', 'dl-bar');
+      bar.setAttribute('role', 'progressbar');
+      bar.setAttribute('aria-label', 'Active transfer progress');
+      const pct = Math.max(0, Math.min(100, Math.round((data.bytesReceived / data.totalBytes) * 100)));
+      bar.setAttribute('aria-valuenow', String(pct));
+      bar.style.setProperty('--pct', `${pct}%`);
+      bar.append(el('i'));
+      hero.append(
+        bar,
+        el('small', 'dl-bytes', `${formatBytes(data.bytesReceived)} of ${formatBytes(data.totalBytes)}`)
+      );
+    }
+    fragment.append(hero);
+    const tiles = el('div', 'stat-tiles');
+    for (const [label, value, tone] of [
+      ['Queued', data.queued, ''],
+      ['Active', data.downloading ?? data.active, 'accent'],
+      ['Complete', data.complete, 'ok'],
+      ['Failed', data.failed, failed ? 'danger' : ''],
+    ]) {
+      const tile = el('div', `stat ${tone ? `is-${tone}` : ''}`.trim());
+      tile.append(el('small', '', label), el('b', '', value == null ? '—' : compact(value)));
+      tiles.append(tile);
+    }
+    fragment.append(tiles);
+    if (data.canManage && state.permissions.has('downloads.manage')) {
+      const controls = el('div', 'dl-controls');
+      const control = (action, icon, label, primary = false) => {
+        const button = el('button', `pill-button ${primary ? 'is-primary' : ''}`.trim());
+        button.type = 'button';
+        button.append(makeIcon(icon), el('span', '', label));
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          button.setAttribute('aria-busy', 'true');
+          try {
+            const result = await request('/api/downloads/control', { action });
+            toast(
+              action === 'pause'
+                ? 'Queue paused on your computer'
+                : action === 'resume'
+                  ? 'Queue resumed'
+                  : `Retrying ${formatNumber(result.count || 0)} failed download${result.count === 1 ? '' : 's'}`
+            );
+          } catch (error) {
+            toast(error.message || 'The queue could not be changed');
+          } finally {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+            loadDownloads(true);
+          }
+        });
+        return button;
+      };
+      controls.append(
+        paused ? control('resume', 'play', 'Resume queue', true) : control('pause', 'pause', 'Pause queue')
+      );
+      if (failed) controls.append(control('retry', 'retry', 'Retry failed'));
+      fragment.append(controls);
+    } else {
+      fragment.append(
+        el(
+          'p',
+          'empty-note small',
+          'This phone can watch the queue. Allow “Save media to PC” on your computer to pause, resume or retry.'
+        )
+      );
+    }
+    const list = (title, rows, recent) => {
+      if (!rows?.length) return;
+      fragment.append(el('h2', 'section-title', title));
+      const box = el('div', 'dl-list');
+      for (const row of rows) {
+        const item = el('div', `dl-row is-${row.state || 'unknown'}`);
+        const icon = el('span', 'dl-kind');
+        icon.append(
+          makeIcon(
+            row.state === 'failed'
+              ? 'alert'
+              : row.state === 'complete'
+                ? 'check'
+                : /video|gif/.test(row.kind)
+                  ? 'video'
+                  : 'photo'
+          )
+        );
+        const copy = el('div', 'dl-copy');
+        copy.append(el('b', '', row.name || 'media'));
+        const meta = el('small');
+        if (recent)
+          meta.textContent = [row.state, row.at ? relativeTime(row.at) : '', row.error].filter(Boolean).join(' · ');
+        else
+          meta.textContent = row.totalBytes
+            ? `${formatBytes(row.bytesReceived)} of ${formatBytes(row.totalBytes)}${row.speedBps ? ` · ${formatBytes(row.speedBps)}/s` : ''}`
+            : `${formatBytes(row.bytesReceived)} received · size not reported`;
+        copy.append(meta);
+        if (!recent && row.totalBytes > 0) {
+          const bar = el('div', 'dl-bar small');
+          bar.style.setProperty('--pct', `${Math.min(100, Math.round((row.bytesReceived / row.totalBytes) * 100))}%`);
+          bar.append(el('i'));
+          copy.append(bar);
+        }
+        item.append(icon, copy);
+        box.append(item);
+      }
+      fragment.append(box);
+    };
+    list('Transferring now', data.transfers, false);
+    list('Recent', data.recent, true);
+    if (!data.transfers?.length && !data.recent?.length)
+      fragment.append(
+        el('p', 'empty-note', 'No downloads yet. Saves you start from this phone or the computer appear here.')
+      );
+    body.replaceChildren(fragment);
+  }
+
+  // ── Overview: archive totals, twelve months, the busiest authors ──
+  async function loadOverview() {
+    const body = $('#overviewBody');
+    if (!state.permissions.has('library.read')) {
+      body.replaceChildren(el('p', 'empty-note', 'Allow Library access for this phone in XVault on your computer.'));
+      return;
+    }
+    try {
+      const data = await request('/api/overview');
+      const fragment = document.createDocumentFragment();
+      const totals = data.totals || {};
+      const tiles = el('div', 'stat-tiles');
+      for (const [label, key, tone] of [
+        ['Posts', 'posts', 'accent'],
+        ['Media', 'media', ''],
+        ['People', 'people', ''],
+        ['Favorites', 'favorites', 'fav'],
+      ]) {
+        const tile = el('div', `stat ${tone ? `is-${tone}` : ''}`.trim());
+        tile.append(el('small', '', label), el('b', '', compact(totals[key] || 0)));
+        tiles.append(tile);
+      }
+      fragment.append(tiles);
+      const months = Array.isArray(data.months) ? data.months : [];
+      if (months.length) {
+        const peak = Math.max(1, ...months.map(month => month.count));
+        const chart = el('section', 'ov-chart');
+        chart.append(el('h2', 'section-title', 'Archived per month'));
+        const bars = el('div', 'ov-bars');
+        bars.setAttribute('role', 'list');
+        for (const month of months) {
+          const [year, number] = month.key.split('-').map(Number);
+          const label = new Date(year, number - 1, 1).toLocaleDateString(undefined, { month: 'short' });
+          const bar = el('button', 'ov-bar');
+          bar.type = 'button';
+          bar.setAttribute('role', 'listitem');
+          bar.setAttribute('aria-label', `${label} ${year}: ${formatNumber(month.count)} posts`);
+          bar.style.setProperty('--h', `${Math.max(month.count ? 6 : 2, Math.round((month.count / peak) * 100))}%`);
+          bar.append(el('i'), el('small', '', label.slice(0, 1)));
+          bar.addEventListener('click', () => {
+            const end = new Date(year, number, 1);
+            const pad = value => String(value).padStart(2, '0');
+            applySearchQuery(
+              `archived-after:${year}-${pad(number)}-01 archived-before:${end.getFullYear()}-${pad(end.getMonth() + 1)}-01`
+            );
+          });
+          bars.append(bar);
+        }
+        chart.append(bars);
+        fragment.append(chart);
+      }
+      const authors = Array.isArray(data.authors) ? data.authors : [];
+      if (authors.length) {
+        fragment.append(el('h2', 'section-title', 'Most archived people'));
+        const list = el('div', 'ov-authors');
+        const top = Math.max(1, authors[0].count);
+        for (const author of authors) {
+          const row = el('button', 'ov-author');
+          row.type = 'button';
+          row.style.setProperty('--w', (author.count / top).toFixed(3));
+          const copy = el('span', 'ov-author-copy');
+          copy.append(el('b', '', author.name || `@${author.handle}`), el('small', '', `@${author.handle}`));
+          row.append(
+            makeAvatar(author.name, author.handle, 'sm'),
+            copy,
+            el('em', '', compact(author.count)),
+            el('span', 'sr-only', ' posts · show in Library')
+          );
+          row.addEventListener('click', () => applySearchQuery(`from:${author.handle}`));
+          list.append(row);
+        }
+        fragment.append(list);
+      }
+      body.replaceChildren(fragment);
+    } catch (error) {
+      body.replaceChildren(el('p', 'empty-note', error.message || 'The overview is unavailable.'));
+    }
+  }
+  function applySearchQuery(query) {
+    $('#searchInput').value = query;
+    $('#clearQuery').hidden = !query;
+    state.savedViewName = '';
+    showView('libraryView');
+    search(true);
   }
 
   async function loadActivity() {
@@ -1369,6 +2025,7 @@
       stage = $('#viewerStage');
     releaseViewerMedia();
     stage.replaceChildren();
+    resetViewerZoom();
     const mediaIndex = state.currentMediaIndex;
     if (!media) {
       const message = document.createElement('p');
@@ -1393,8 +2050,10 @@
       image.src = media.url;
       image.alt = String(post.text || 'Archived post media').slice(0, 120);
       image.decoding = 'async';
+      image.draggable = false;
       stage.append(image);
     }
+    $('#viewerZoom').hidden = !stage.querySelector('img');
     const count = Number(page?.mediaCount || post.mediaCount || post.media?.length) || 0;
     $('#viewerPosition').textContent = mediaIndex + 1 + ' / ' + count;
     $('#viewerAuthor').textContent = post.name
@@ -1491,6 +2150,181 @@
     ]);
     $('#viewerThumbs [aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
   }
+  /*
+   * Viewer gestures (Phone Remote 3.0): swipe left/right between media, swipe down to close, pinch or
+   * double-tap to zoom an image and drag to pan while zoomed. Live finger-following is direct manipulation,
+   * so it stays on with reduced motion; only the settle animations are dropped then.
+   */
+  const viewerZoom = { scale: 1, x: 0, y: 0 };
+  const viewerImage = () => $('#viewerStage img');
+  function paintViewerZoom(animate = false, drag = null) {
+    const image = viewerImage(),
+      stage = $('#viewerStage');
+    stage.classList.toggle('zoomed', viewerZoom.scale > 1.01);
+    $('#viewerZoom').setAttribute('aria-pressed', String(viewerZoom.scale > 1.01));
+    $('#viewerZoom').setAttribute('aria-label', viewerZoom.scale > 1.01 ? 'Zoom out' : 'Zoom in');
+    const target = image || stage.querySelector('video');
+    if (!target) return;
+    target.style.transition =
+      animate && !calm() ? 'transform 240ms cubic-bezier(.2,.8,.2,1), opacity 240ms ease' : 'none';
+    if (drag) {
+      target.style.transform = `translate(${drag.x}px, ${drag.y}px) scale(${drag.scale})`;
+      $('#viewer').style.setProperty('--viewer-fade', String(drag.fade));
+      return;
+    }
+    $('#viewer').style.removeProperty('--viewer-fade');
+    target.style.transform =
+      viewerZoom.scale > 1.01 ? `translate(${viewerZoom.x}px, ${viewerZoom.y}px) scale(${viewerZoom.scale})` : '';
+  }
+  function resetViewerZoom() {
+    viewerZoom.scale = 1;
+    viewerZoom.x = 0;
+    viewerZoom.y = 0;
+    paintViewerZoom(false);
+  }
+  function clampViewerPan() {
+    const image = viewerImage();
+    if (!image) return;
+    const maxX = (image.offsetWidth * (viewerZoom.scale - 1)) / 2,
+      maxY = (image.offsetHeight * (viewerZoom.scale - 1)) / 2;
+    viewerZoom.x = Math.max(-maxX, Math.min(maxX, viewerZoom.x));
+    viewerZoom.y = Math.max(-maxY, Math.min(maxY, viewerZoom.y));
+  }
+  /* Zooms so the image point under (clientX, clientY) stays under the finger. */
+  function zoomViewerAt(scale, clientX, clientY, animate = false) {
+    const image = viewerImage();
+    if (!image) return;
+    const rect = image.getBoundingClientRect(),
+      centerX = rect.left + rect.width / 2 - viewerZoom.x,
+      centerY = rect.top + rect.height / 2 - viewerZoom.y,
+      pointX = (clientX - centerX - viewerZoom.x) / viewerZoom.scale,
+      pointY = (clientY - centerY - viewerZoom.y) / viewerZoom.scale;
+    viewerZoom.scale = Math.max(1, Math.min(4, scale));
+    if (viewerZoom.scale <= 1.01) {
+      viewerZoom.scale = 1;
+      viewerZoom.x = 0;
+      viewerZoom.y = 0;
+    } else {
+      viewerZoom.x = clientX - centerX - viewerZoom.scale * pointX;
+      viewerZoom.y = clientY - centerY - viewerZoom.scale * pointY;
+      clampViewerPan();
+    }
+    paintViewerZoom(animate);
+  }
+  function bindViewerGestures() {
+    const stage = $('#viewerStage'),
+      pointers = new Map();
+    let single = null,
+      pinch = null,
+      lastTap = null;
+    const distance = () => {
+      const [a, b] = [...pointers.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    };
+    const midpoint = () => {
+      const [a, b] = [...pointers.values()];
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    };
+    stage.addEventListener('pointerdown', event => {
+      if (event.target.closest('video, button, a')) return;
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      try {
+        stage.setPointerCapture(event.pointerId);
+      } catch {}
+      if (pointers.size === 2 && viewerImage()) {
+        single = null;
+        pinch = { distance: distance(), scale: viewerZoom.scale };
+      } else if (pointers.size === 1) {
+        single = {
+          id: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+          at: performance.now(),
+          panX: viewerZoom.x,
+          panY: viewerZoom.y,
+          post: state.currentPost,
+          index: state.currentMediaIndex,
+          moved: false,
+        };
+      }
+    });
+    stage.addEventListener('pointermove', event => {
+      if (!pointers.has(event.pointerId)) return;
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinch && pointers.size >= 2) {
+        const center = midpoint();
+        zoomViewerAt((pinch.scale * distance()) / pinch.distance, center.x, center.y);
+        return;
+      }
+      if (!single || single.id !== event.pointerId) return;
+      const dx = event.clientX - single.x,
+        dy = event.clientY - single.y;
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) single.moved = true;
+      if (!single.moved) return;
+      if (viewerZoom.scale > 1.01) {
+        viewerZoom.x = single.panX + dx;
+        viewerZoom.y = single.panY + dy;
+        clampViewerPan();
+        paintViewerZoom(false);
+      } else if (Math.abs(dx) > Math.abs(dy)) {
+        paintViewerZoom(false, { x: dx * 0.85, y: 0, scale: 1, fade: 1 });
+      } else if (dy > 0) {
+        paintViewerZoom(false, {
+          x: dx * 0.3,
+          y: dy,
+          scale: 1 - Math.min(dy / 1400, 0.18),
+          fade: 1 - Math.min(dy / 420, 0.6),
+        });
+      }
+    });
+    const finish = (event, cancelled) => {
+      if (!pointers.has(event.pointerId)) return;
+      pointers.delete(event.pointerId);
+      if (pinch) {
+        if (pointers.size < 2) {
+          pinch = null;
+          if (viewerZoom.scale < 1.05) resetViewerZoom();
+        }
+        single = null;
+        return;
+      }
+      const start = single;
+      single = null;
+      if (!start || start.id !== event.pointerId) return;
+      if (cancelled || start.post !== state.currentPost || start.index !== state.currentMediaIndex) {
+        paintViewerZoom(true);
+        return;
+      }
+      const dx = event.clientX - start.x,
+        dy = event.clientY - start.y,
+        now = performance.now();
+      if (!start.moved && now - start.at < 320) {
+        if (
+          lastTap &&
+          now - lastTap.at < 320 &&
+          Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) < 36
+        ) {
+          lastTap = null;
+          if (viewerImage()) zoomViewerAt(viewerZoom.scale > 1.01 ? 1 : 2.5, event.clientX, event.clientY, true);
+        } else lastTap = { at: now, x: event.clientX, y: event.clientY };
+        return;
+      }
+      if (viewerZoom.scale > 1.01) return;
+      if (Math.abs(dx) >= 70 && Math.abs(dx) > Math.abs(dy) * 1.3) {
+        paintViewerZoom(false);
+        switchMedia(start.index + (dx < 0 ? 1 : -1));
+        return;
+      }
+      if (dy >= 110 && dy > Math.abs(dx) * 1.3) {
+        $('#viewer').close();
+        return;
+      }
+      paintViewerZoom(true);
+    };
+    stage.addEventListener('pointerup', event => finish(event, false));
+    stage.addEventListener('pointercancel', event => finish(event, true));
+  }
+
   function closeViewer() {
     state.viewerController?.abort();
     state.viewerController = null;
@@ -1669,6 +2503,21 @@
     if (!post) return;
     state.sheetPost = post;
     $('#sheetTitle').textContent = post.handle ? `@${post.handle}` : 'Archived post';
+    const preview = $('#sheetPreview');
+    if (preview) {
+      const head = el('div', 'card-head');
+      head.append(makeAvatar(post.name, post.handle), makeIdentity(post));
+      const parts = [head, makeContext(post)].filter(Boolean);
+      preview.replaceChildren(...parts);
+    }
+    const extras = $('#sheetExtras');
+    if (extras) {
+      const parts = [makeQuote(post), makeLinkCard(post), makeChips(post), makeMetrics(post)].filter(
+        node => node && node.childElementCount
+      );
+      extras.replaceChildren(...parts);
+    }
+    $('#sheetShare').hidden = !(navigator.share && postLink(post));
     $('#sheetText').textContent = String(post.text || 'No post text was saved.');
     $('#sheetTags').textContent = (post.tags || []).join(' · ');
     $('#sheetFavorite').hidden = !state.permissions.has('favorite.write');
@@ -2031,9 +2880,19 @@
     });
     $('#remoteTheme').value = localStorage.getItem('xvault.remote.theme') || 'graphite';
     document.documentElement.dataset.theme = $('#remoteTheme').value;
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', { oled: '#000000', paper: '#f3f2ee' }[$('#remoteTheme').value] || '#0b0c0f');
     $('#remoteTheme').onchange = () => {
-      document.documentElement.dataset.theme = $('#remoteTheme').value;
+      // Swap the palette in one frame: per-control colour transitions would otherwise fade at different speeds.
+      const root = document.documentElement;
+      root.classList.add('theme-switching');
+      root.dataset.theme = $('#remoteTheme').value;
+      document
+        .querySelector('meta[name="theme-color"]')
+        ?.setAttribute('content', { oled: '#000000', paper: '#f3f2ee' }[root.dataset.theme] || '#0b0c0f');
       localStorage.setItem('xvault.remote.theme', $('#remoteTheme').value);
+      requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('theme-switching')));
     };
     $('#draftPairing').onchange = () => {
       draftPage = 0;
@@ -2167,6 +3026,33 @@
       toggleFavorite(state.sheetPost);
       $('#actionSheet').close();
     });
+    $('#sheetShare').addEventListener('click', () => {
+      const post = state.sheetPost;
+      $('#actionSheet').close();
+      void sharePost(post);
+    });
+    $('#layoutToggle').addEventListener('click', event => {
+      const button = event.target.closest('[data-layout]');
+      if (!button || button.dataset.layout === state.layout) return;
+      const region = $('#scrollRegion'),
+        anchor = [...document.querySelectorAll('#gallery .post-tile')].find(
+          node => node.getBoundingClientRect().bottom > region.getBoundingClientRect().top + 8
+        )?.dataset.postId,
+        scrolledIntoList = region.scrollTop > $('#gallery').offsetTop;
+      const swap = () => {
+        // set inside the transition callback so the "old" snapshot is the untouched previous layout
+        setLayout(button.dataset.layout);
+        renderWindow();
+        const target = anchor && document.querySelector(`#gallery .post-tile[data-post-id="${CSS.escape(anchor)}"]`);
+        if (target && scrolledIntoList) target.scrollIntoView({ block: 'start' });
+      };
+      if (document.startViewTransition && !calm()) document.startViewTransition(swap);
+      else swap();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stopDownloadsPolling();
+      else if (!$('#downloadsView').hidden) loadDownloads(true);
+    });
     document
       .querySelectorAll('[data-close-dialog]')
       .forEach(button => button.addEventListener('click', () => $('#actionSheet').close()));
@@ -2182,8 +3068,14 @@
       if (event.defaultPrevented || event.target.closest('video,input,textarea,select') || $('#actionSheet').open)
         return;
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        if (viewerZoom.scale > 1.01) return;
         event.preventDefault();
         switchMedia(state.currentMediaIndex + (event.key === 'ArrowRight' ? 1 : -1));
+      } else if (['+', '=', '-', '0'].includes(event.key) && viewerImage()) {
+        event.preventDefault();
+        const box = $('#viewerStage').getBoundingClientRect(),
+          next = event.key === '0' ? 1 : viewerZoom.scale * (event.key === '-' ? 1 / 1.5 : 1.5);
+        zoomViewerAt(next, box.left + box.width / 2, box.top + box.height / 2, true);
       }
     });
     $('#actionSheet').addEventListener('close', () => {
@@ -2204,43 +3096,11 @@
     $('#viewer').addEventListener('click', event => {
       if (event.target === $('#viewer')) closeViewer();
     });
-    let swipe = null;
-    $('#viewerStage').addEventListener(
-      'pointerdown',
-      event => {
-        swipe =
-          event.isPrimary && !event.target.closest('video')
-            ? {
-                id: event.pointerId,
-                x: event.clientX,
-                y: event.clientY,
-                post: state.currentPost,
-                index: state.currentMediaIndex,
-              }
-            : null;
-      },
-      { passive: true }
-    );
-    $('#viewerStage').addEventListener('pointercancel', () => (swipe = null), { passive: true });
-    $('#viewerStage').addEventListener(
-      'pointerup',
-      event => {
-        const start = swipe;
-        swipe = null;
-        if (
-          !start ||
-          start.id !== event.pointerId ||
-          start.post !== state.currentPost ||
-          start.index !== state.currentMediaIndex ||
-          event.target.closest('video')
-        )
-          return;
-        const dx = event.clientX - start.x,
-          dy = event.clientY - start.y;
-        if (Math.abs(dx) >= 70 && Math.abs(dx) > Math.abs(dy) * 1.3) switchMedia(start.index + (dx < 0 ? 1 : -1));
-      },
-      { passive: true }
-    );
+    bindViewerGestures();
+    $('#viewerZoom').addEventListener('click', () => {
+      const stage = $('#viewerStage').getBoundingClientRect();
+      zoomViewerAt(viewerZoom.scale > 1.01 ? 1 : 2.5, stage.left + stage.width / 2, stage.top + stage.height / 2, true);
+    });
     $('#viewer').addEventListener('close', () => {
       closeViewer();
       const target = state.viewerReturn;

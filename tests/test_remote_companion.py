@@ -135,6 +135,89 @@ class RemoteCompanionTests(unittest.TestCase):
             self.assertEqual(body, b'bounded-jpeg')
             self.assertEqual(preview.call_args.args[1], 160)
 
+    def test_rich_post_context_is_reshaped_and_never_carries_markup_or_urls(self):
+        device = self.paired_device()
+        self.app.rpc = lambda method, payload: {'rows': [{
+            'id': '123456789', 'text': 'Quote post', 'handle': 'ada', 'mediaCount': 0, 'verified': True,
+            'replyTo': 'Grace', 'thread': False, 'readLater': True, 'hasNote': True, 'noteText': 'private',
+            'quote': {'id': '42', 'handle': 'grace', 'name': 'Grace', 'text': 'x' * 900, 'mediaCount': 2,
+                      'url': 'https://evil.example/', 'html': '<img onerror=alert(1)>'},
+            'card': {'title': 'A link', 'domain': 'example.com', 'url': 'javascript:alert(1)'},
+        }, {'id': '987654321', 'replyTo': 'not a handle!', 'quote': {'id': 'nope'}, 'card': {'domain': 'bad domain/'}}],
+            'matched': 2}
+        status, _, body = self.request('/api/library', {'query': '', 'sort': 'new', 'limit': 40,
+                                       'sessionId': 'a21fc96b-0101-4afc-89a1-71f03859cd92'},
+                                       device['credential'], {'Origin': self.app.origin}, 'POST')
+        self.assertEqual(status, 200)
+        rows = json.loads(body)['rows']
+        first, second = rows
+        self.assertTrue(first['verified'])
+        self.assertEqual(first['replyTo'], 'grace')
+        self.assertTrue(first['readLater'])
+        self.assertTrue(first['hasNote'])
+        self.assertNotIn('noteText', first)
+        self.assertEqual(set(first['quote']), {'id', 'handle', 'name', 'text', 'createdAt', 'mediaCount'})
+        self.assertEqual(len(first['quote']['text']), 280)
+        self.assertEqual(first['card'], {'title': 'A link', 'domain': 'example.com'})
+        self.assertIsNone(second['replyTo'])
+        self.assertIsNone(second['quote'])
+        self.assertIsNone(second['card'])
+        self.assertNotIn(b'javascript', body)
+        self.assertNotIn(b'onerror', body)
+        self.assertNotIn(b'private', body)
+
+    def test_download_monitor_is_read_only_without_manage_permission(self):
+        device = self.paired_device()
+        calls = []
+
+        def rpc(method, payload):
+            calls.append((method, payload))
+            if method == 'downloads.status':
+                return {'countsReady': True, 'queued': 3, 'failed': 1, 'downloading': 1, 'active': 1,
+                        'transfers': [{'name': 'clip.mp4', 'state': 'downloading', 'bytesReceived': 10,
+                                       'totalBytes': 100, 'postId': '123', 'path': 'C:/Users/me/clip.mp4'}],
+                        'recent': [{'name': 'a.jpg', 'state': 'failed', 'error': 'HTTP 403', 'postId': 'bad'}],
+                        'folder': 'C:/Users/me/Downloads'}
+            if method == 'library.overview':
+                return {'totals': {'posts': 5, 'media': 7, 'secret': 1},
+                        'months': [{'key': '2025-01', 'count': 2}, {'key': '<b>', 'count': 9}],
+                        'authors': [{'handle': 'ada', 'name': 'Ada', 'count': 3}, {'handle': 'no way', 'count': 1}]}
+            return {'ok': True, 'paused': 2}
+        self.app.rpc = rpc
+        status, _, body = self.request('/api/downloads', credential=device['credential'])
+        self.assertEqual(status, 200)
+        result = json.loads(body)
+        self.assertEqual(result['queued'], 3)
+        self.assertEqual(result['transfers'][0]['totalBytes'], 100)
+        self.assertNotIn('path', result['transfers'][0])
+        self.assertIsNone(result['recent'][0]['postId'])
+        self.assertEqual(result['recent'][0]['error'], 'HTTP 403')
+        self.assertFalse(result['canManage'])
+        self.assertNotIn(b'C:/Users', body)
+        status, _, _ = self.request('/api/downloads/control', {'action': 'pause'}, device['credential'],
+                                    {'Origin': self.app.origin}, 'POST')
+        self.assertEqual(status, 403)
+        self.assertNotIn(('downloads.control', {'action': 'pause'}), calls)
+        self.app.control('device.permissions', {'deviceId': device['deviceId'],
+                                                'permissions': ['library.read', 'downloads.manage']})
+        status, _, body = self.request('/api/downloads/control', {'action': 'shutdown'}, device['credential'],
+                                       {'Origin': self.app.origin}, 'POST')
+        self.assertEqual(status, 400)
+        status, _, body = self.request('/api/downloads/control', {'action': 'pause'}, device['credential'],
+                                       {'Origin': self.app.origin}, 'POST')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {'ok': True, 'action': 'pause', 'count': 2})
+        status, _, body = self.request('/api/overview', credential=device['credential'])
+        self.assertEqual(status, 200)
+        overview = json.loads(body)
+        self.assertEqual(overview['totals']['posts'], 5)
+        self.assertNotIn('secret', overview['totals'])
+        self.assertEqual(overview['months'], [{'key': '2025-01', 'count': 2}])
+        self.assertEqual([row['handle'] for row in overview['authors']], ['ada'])
+        self.app.control('device.permissions', {'deviceId': device['deviceId'], 'permissions': ['media.read']})
+        self.assertEqual(self.request('/api/overview', credential=device['credential'])[0], 403)
+        self.assertEqual(self.request('/api/downloads', credential=device['credential'])[0], 403)
+
     def test_post_link_projection_requires_https_and_matching_stable_identity(self):
         validate = self.app._make_handler()._valid_post_link
         self.assertEqual(validate('https://fixvx.com/ada/status/123', '123'), 'https://fixvx.com/ada/status/123')

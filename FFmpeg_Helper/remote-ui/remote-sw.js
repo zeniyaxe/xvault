@@ -1,4 +1,4 @@
-const CACHE = 'xvault-remote-shell-v6';
+const CACHE = 'xvault-remote-shell-v7';
 const SHELL = [
   '/',
   '/index.html',

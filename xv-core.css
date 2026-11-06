@@ -1,0 +1,6 @@
+/* XVault 24 core stylesheet for small extension pages (side panel): tokens, primitives and overlays only.
+   The dashboard uses xv-app.css, which layers the same files plus every module. */
+@layer base, legacy, aurora;
+@import url('xv-aurora-base.css') layer(base);
+@import url('xv-base.css') layer(legacy);
+@import url('xv-aurora.css') layer(aurora);

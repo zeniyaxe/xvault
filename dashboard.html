@@ -4,19 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>XVault</title>
-    <link rel="stylesheet" href="xv-base.css" />
-    <link rel="stylesheet" href="xv-library.css" />
-    <link rel="stylesheet" href="xv-pages.css" />
-    <link rel="stylesheet" href="xv-settings.css" />
-    <link rel="stylesheet" href="xv-motion.css" />
-    <link rel="stylesheet" href="xv-atlas.css" />
-    <link rel="stylesheet" href="xv-reader.css" />
-    <link rel="stylesheet" href="xv-search-assist.css" />
-    <link rel="stylesheet" href="xv-library3.css" />
-    <link rel="stylesheet" href="xv-forge.css" />
-    <link rel="stylesheet" href="xv-keystone.css" />
-    <link rel="stylesheet" href="xv-motion-plus.css" />
-    <link rel="stylesheet" href="xv-downloads.css" />
+    <link rel="stylesheet" href="xv-app.css" />
     <script defer src="link-utils.js"></script>
     <script defer src="link-export.js"></script>
     <script defer src="media-asset.js"></script>
@@ -31,7 +19,9 @@
     <script defer src="xv-motion.js"></script>
     <script defer src="xv-motion-plus.js"></script>
     <script defer src="dashboard-island.js"></script>
+    <script defer src="xv-icon-set.js"></script>
     <script defer src="app-icons.js"></script>
+    <script defer src="xv-aurora.js"></script>
     <script defer src="app-focus.js"></script>
     <script defer src="xv-shell.js"></script>
     <script defer src="xv-appearance.js"></script>
@@ -55,6 +45,7 @@
     <script defer src="xv-forge-search.js"></script>
     <script defer src="xv-keystone.js"></script>
     <script defer src="xv-downloads.js"></script>
+    <script defer src="xv-library4.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-generator.js"></script>
     <script defer src="FFmpeg_Helper/remote-ui/qrcode-utf8.js"></script>
   </head>
@@ -839,8 +830,8 @@
                       <label class="field"
                         ><span>Post text font</span
                         ><select data-setting="readFont">
+                          <option value="sans">Same as interface (default)</option>
                           <option value="newsreader">Newsreader (serif)</option>
-                          <option value="sans">Same as interface</option>
                           <option value="georgia">Georgia</option>
                         </select></label
                       >

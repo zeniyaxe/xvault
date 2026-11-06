@@ -42,6 +42,16 @@ MEDIA_CACHE_LIMIT = 48 * 1024 * 1024
 TLS_CERT_DAYS = 825
 ALLOWED_SORTS = {'new', 'old', 'likes', 'views', 'bookmarks', 'reposts', 'replies', 'media', 'author'}
 POST_ID_RE = re.compile(r'^\d{1,32}$')
+HANDLE_RE = re.compile(r'^[A-Za-z0-9_]{1,15}$')
+DOMAIN_RE = re.compile(r'^[A-Za-z0-9.-]{1,253}$')
+
+
+def _bounded_int(value, limit=1_000_000_000):
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return max(0, min(limit, number))
 
 
 def find_lan_ipv4() -> str:
@@ -636,6 +646,24 @@ class RemoteCompanion:
                         return self._send(200, {'rows': rows})
                     except Exception:
                         return self._send(502, {'error': 'XVault could not read saved views'})
+                if path == '/api/downloads':
+                    device = self._device('library.read')
+                    if not device:
+                        return
+                    try:
+                        result = app.rpc('downloads.status', {})
+                    except Exception:
+                        return self._send(502, {'error': 'XVault could not read the download queue'})
+                    return self._send(200, self._clean_downloads(result, device))
+                if path == '/api/overview':
+                    device = self._device('library.read')
+                    if not device:
+                        return
+                    try:
+                        result = app.rpc('library.overview', {})
+                    except Exception:
+                        return self._send(502, {'error': 'XVault could not count the archive'})
+                    return self._send(200, self._clean_overview(result))
                 return self._send(404, {'error': 'Route not found'})
 
             def do_POST(self):
@@ -763,6 +791,20 @@ class RemoteCompanion:
                                                 'nextOffset': result.get('nextOffset')})
                     except Exception:
                         return self._send(502, {'error': 'XVault could not read this media page'})
+                if parsed.path == '/api/downloads/control':
+                    device = self._device('downloads.manage')
+                    if not device:
+                        return
+                    action = payload.get('action')
+                    if action not in ('pause', 'resume', 'retry'):
+                        return self._send(400, {'error': 'Download action is invalid'})
+                    try:
+                        result = app.rpc('downloads.control', {'action': action})
+                    except Exception:
+                        return self._send(502, {'error': 'XVault could not change the download queue'})
+                    result = result if isinstance(result, dict) else {}
+                    return self._send(200, {'ok': result.get('ok') is not False, 'action': action,
+                                            'count': _bounded_int(result.get('paused', result.get('resumed', result.get('retried', result.get('count', 0)))))})
                 if parsed.path == '/api/favorite':
                     device = self._device('favorite.write')
                     if not device:
@@ -828,6 +870,7 @@ class RemoteCompanion:
                            'createdAt', 'archivedAt', 'metrics', 'sensitive', 'favorite', 'tags',
                            'mediaCount', 'mediaTypes')}
                     row['link'] = self._valid_post_link(row.get('link'), str(row['id']))
+                    row.update(self._post_context(source))
                     row['media'] = []
                     if 'media.read' in device['permissions']:
                         local_media = source.get('localMedia')
@@ -856,6 +899,81 @@ class RemoteCompanion:
                                         'scanned': scanned,
                                         'sort': str(result.get('sort') or 'new'),
                                         'permissions': list(device.get('permissions') or [])})
+
+            @staticmethod
+            def _post_context(source):
+                # XVault 24: preview context (reply, thread, quote, link card, read-later, has-note). Shapes are
+                # re-checked here so a malformed bridge reply can never place markup or URLs on the phone.
+                def handle(value):
+                    value = str(value or '')
+                    return value.lower() if HANDLE_RE.fullmatch(value) else None
+                context = {'verified': source.get('verified') is True, 'replyTo': handle(source.get('replyTo')),
+                           'thread': source.get('thread') is True, 'readLater': source.get('readLater') is True,
+                           'hasNote': source.get('hasNote') is True, 'quote': None, 'card': None}
+                quote = source.get('quote')
+                if isinstance(quote, dict) and POST_ID_RE.fullmatch(str(quote.get('id') or '')):
+                    if quote.get('missing') is True:
+                        context['quote'] = {'id': str(quote['id']), 'missing': True}
+                    else:
+                        context['quote'] = {'id': str(quote['id']), 'handle': handle(quote.get('handle')),
+                                            'name': str(quote.get('name') or '')[:80], 'text': str(quote.get('text') or '')[:280],
+                                            'createdAt': str(quote.get('createdAt') or '')[:40] or None,
+                                            'mediaCount': _bounded_int(quote.get('mediaCount'), 64)}
+                card = source.get('card')
+                if isinstance(card, dict):
+                    domain = str(card.get('domain') or '')
+                    domain = domain.lower()[:80] if DOMAIN_RE.fullmatch(domain) else ''
+                    title = str(card.get('title') or '')[:160]
+                    if domain or title:
+                        context['card'] = {'title': title, 'domain': domain}
+                return context
+
+            @staticmethod
+            def _clean_downloads(result, device):
+                result = result if isinstance(result, dict) else {}
+                def count(key):
+                    value = result.get(key)
+                    return _bounded_int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+                def item(row, recent=False):
+                    post_id = str(row.get('postId') or '')
+                    out = {'name': str(row.get('name') or 'media')[:120], 'state': str(row.get('state') or '')[:24],
+                           'kind': str(row.get('kind') or '')[:24], 'postId': post_id if POST_ID_RE.fullmatch(post_id) else None}
+                    if recent:
+                        out['at'] = _bounded_int(row.get('at'), 9_007_199_254_740_991)
+                        out['error'] = str(row.get('error') or '')[:160]
+                    else:
+                        for key in ('bytesReceived', 'totalBytes', 'speedBps'):
+                            out[key] = _bounded_int(row.get(key), 1 << 50)
+                    return out
+                eta = result.get('etaSeconds')
+                return {'countsReady': result.get('countsReady') is True,
+                        **{key: count(key) for key in ('queued', 'retryWait', 'downloading', 'paused', 'complete', 'failed', 'active')},
+                        'pausedByUser': result.get('pausedByUser') is True,
+                        'hold': str(result['hold'])[:80] if isinstance(result.get('hold'), str) else None,
+                        'bytesReceived': _bounded_int(result.get('bytesReceived'), 1 << 50),
+                        'totalBytes': _bounded_int(result.get('totalBytes'), 1 << 50),
+                        'speedBps': _bounded_int(result.get('speedBps'), 1 << 40),
+                        'etaSeconds': _bounded_int(eta, 10_000_000) if isinstance(eta, (int, float)) and not isinstance(eta, bool) else None,
+                        'transfers': [item(row) for row in (result.get('transfers') or [])[:8] if isinstance(row, dict)],
+                        'recent': [item(row, True) for row in (result.get('recent') or [])[:24] if isinstance(row, dict)],
+                        'canManage': 'downloads.manage' in device['permissions']}
+
+            @staticmethod
+            def _clean_overview(result):
+                result = result if isinstance(result, dict) else {}
+                totals = result.get('totals') if isinstance(result.get('totals'), dict) else {}
+                months = []
+                for row in (result.get('months') or [])[:12]:
+                    if isinstance(row, dict) and re.fullmatch(r'\d{4}-\d{2}', str(row.get('key') or '')):
+                        months.append({'key': str(row['key']), 'count': _bounded_int(row.get('count'))})
+                authors = []
+                for row in (result.get('authors') or [])[:8]:
+                    if isinstance(row, dict) and HANDLE_RE.fullmatch(str(row.get('handle') or '')):
+                        authors.append({'handle': str(row['handle']).lower(), 'name': str(row.get('name') or '')[:80],
+                                        'count': _bounded_int(row.get('count'))})
+                return {'totals': {key: _bounded_int(totals.get(key)) for key in
+                                   ('posts', 'media', 'images', 'videos', 'favorites', 'notes', 'later', 'people')},
+                        'months': months, 'authors': authors}
 
             @staticmethod
             def _valid_post_link(value, post_id):
