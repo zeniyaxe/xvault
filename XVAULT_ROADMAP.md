@@ -2,6 +2,98 @@
 
 This file is the hand-off document: another session should be able to resume from here.
 
+## v25 "Vantage" pass
+
+Branch: `xvault-25-vantage`, stacked on `xvault-24-aurora` (PR #7, still open and unmerged — this PR targets that
+branch so the diff is only v25). Version 25.0.0. Goal: rebuild the Library at the layout level (one scroller, no
+covered posts, use the width), retire the Library legacy CSS and the v12 card renderer, Phone Remote 4.0 with real
+phone capture, per-host download control, Atlas thread/quote graphs, and measured performance.
+
+| Area | Change |
+| --- | --- |
+| Library frame | `dashboard.html` `#page-library` is a three-column grid: sidebar (`#libraryDestinations`, collapsible with `\`, sections collapsible and remembered in `librarySideCollapsed`) · `.lib-main#libraryScroll` (**the only vertical scroller of the page**) · Inspector (`#detailsDrawer`, resizable, `inspectorPixels`). The sidebar no longer scrolls on its own axis horizontally; long names truncate with tooltips. |
+| Header | `#libraryHead` (`lib5-head`) is sticky inside `.lib-main`: row 1 = sidebar toggle, title/count slot, search with syntax help, layout switch (Feed, Cards, Grid, Wall, List, Table), **View** menu (layout, card style, media fit, feed width, tile size), sort, actions menu; row 2 = filter chips. ~96 px on desktop. On phones the header is one wrapping flow and only its last row (search, or the selection bar while selecting) stays pinned via a negative sticky top (`--lib-pin-offset`). The Keystone strip is folded by default. |
+| Pagination | The fixed bottom pager is removed. `renderPaging` draws an in-flow footer (`#libraryPages`): "Showing a–b of n", **Load N more** (optionally automatic, `libraryAutoLoad`), Previous/Next page, Back to top. It is part of the scrolling content, so it cannot cover a post. Window: pages `windowStart..pageIndex` concatenated, at most `MAX_RETAINED` = 1,500 rows, then "continue on the next page". |
+| Renderer | `library-feed.js` (new) draws Feed/Cards/Grid/Wall: four card styles (`libraryCardStyle` compact/comfortable/media/detailed), media fit (`libraryMediaFit`), feed width (`libraryFeedWidth`), block mounting (6 rows per block, ≤ 7 blocks mounted, measured spacer above), keyed in-place refresh, one delegated listener set on `#list`, click-to-play video, visible-only GIF playback, sensitive-media veil (`libraryBlurSensitive`), FLIP layout switches. List and Table stay windowed fixed-height rows in `library-workspace.js`. The v12 string renderer and per-card bindings in `dashboard.js` are gone. |
+| CSS | `xv-library5.css` (frame, header, every layout, cards, rows; `aurora` layer) and `xv-library-panels.css` (Quick Look, viewer, Inspector content, dialogs, Trash…; `legacy` layer) replace `xv-library.css`, `xv-library3.css`, `xv-aurora-library.css` and `xv-keystone.css` (deleted). Results grid sized by container queries. |
+| Avatars | `sw/avatar-archive.mjs`: own IndexedDB `xvault-avatars` (store `avatars`, key = lowercase handle), `pbs.twimg.com/profile_images` only (normalised to `_x96`), magic-byte sniffing, 2 concurrent fetches, refresh after 30 days, retry misses after 12 h. Fed from `STORE_RECORDS`; `xv-avatars.js` (`XVaultAvatarUrl`) serves blob URLs to the Library/Reader and swaps monograms in place; Remote RPC `avatar.read` → `GET /api/avatar/<handle>`. Setting `archiveAvatars` (Settings › Library). |
+| Capture inbox | `sw/capture-inbox.mjs`: bounded inbox in `chrome.storage.local` (`xvCaptureInbox`, ≤ 400 items, finished kept 30 days), canonical link parsing (x.com, twitter.com and common mirrors), duplicate detection against the archive and the queue, one polite worker that opens each post in a single reused background tab next to the user's x.com tab and reads the result back; states queued → waiting → capturing → archived / duplicate / unavailable / failed (2 attempts). Desktop panel on the Capture page (`xv-capture-inbox.js`). |
+| Remote 4.0 | `remote-capture.js` (new): Capture tab with paste / clipboard / up to 20 links, per-link live state, preview, Show in Library, Retry, Open on X, Remove/Cancel, filters, nav badge, offline **outbox** (`xvault.remote.capture-outbox.v1`, ≤ 50), 429 handling. **Web Share Target** (`manifest.webmanifest` `share_target` → `/share`, served network-first by `remote-sw.js` v8) and a "Capture a post" shortcut. New device permission `capture.create`; `POST /api/capture` (`via` paste/share), `GET /api/capture`, rate-limited. Real avatars on cards. Downloads: **Up next** with Download next (`prioritize`) and Show post, per-transfer Pause/Resume/Cancel (`pause-item`/`resume-item`/`cancel-item`, only for transfers XVault is running), Images/Video host pause (`pause-host`/`resume-host`, limited to `pbs.twimg.com` and `video.twimg.com`). First paint builds 8 tiles, the rest after the first frame; Intl formatters cached. |
+| Downloads | Per-host pause: setting `pausedDownloadHosts` (≤ 16 hostnames). The pump skips rows from paused hosts (they stay `queued` in IndexedDB; running transfers finish); the buffer fill skips them and parks after one full pass with nothing runnable, so a large paused queue is not re-scanned in a loop. `SET_DOWNLOAD_HOST_PAUSED`, `RETRY_FAILED {host}`, `queueStats().pausedHosts`. Downloads › **Media hosts** panel with counts from the last 200 rows, the most common failure, Pause/Resume and Retry failed. |
+| Atlas | `vault-insights.mjs` counts conversation members/authors and quoted posts (`topConversations`, `topQuoted`); `xv-atlas.js` "Threads and quotes" draws a spine per conversation and a fan per quoted post, hydrated through `GET_LIBRARY_RECORDS`; a quoted post that is not archived links to X. |
+| Motion/perf fixes | `xv-motion-plus.js` notices no longer force synchronous layouts (`offsetWidth`) to restart the countdown/entrance; the old notice lifts away measured in the next frame; Library 4 title swap and the undo toast restart a frame later. Pill placement batched. |
+| Tooling | `scripts/ui-gallery.mjs` seeds longer threads and repeatedly quoted posts and screenshots Atlas threads; `tests/library-cards-profile.mjs` (600-row card profile), `tests/remote-perf.mjs` (phone first tile), `tests/remote-capture-browser.mjs` (Remote 4.0, run in CI). |
+
+### Decisions (v25)
+
+- **One scroller.** Sticky header, sidebar and Inspector are siblings of the results inside the page grid; only
+  `.lib-main` scrolls. That removes the nested scrollbars and makes keyboard, wheel and scroll restoration behave
+  the same in every layout.
+- **Footer, not overlay.** Paging is content at the end of the list. Large archives get Load more inside a
+  bounded window (1,500 rows) and page navigation beyond it, rather than an unbounded infinite scroll that would
+  keep thousands of posts alive.
+- **Capture goes through the normal capture path.** The phone never talks to X and the extension never fetches
+  X's API directly; the inbox opens the post next to the user's own signed-in tab, so what gets archived is
+  exactly what a manual visit would archive. Without an x.com tab, items wait.
+- **Per-host pause is a filter on the pump, not a second queue.** Rows keep their stored state, so a restart,
+  a retry or a resume needs no migration.
+- **Avatars live in their own database.** They are a cache, not archive data: separate DB, separate setting, can
+  be cleared without touching posts.
+
+### Verification log (v25)
+
+| Check | Result |
+| --- | --- |
+| `npm run verify` (structure, ESLint, unit tests, Prettier) | pass, 167 unit tests |
+| `npm run e2e` (extension + Library e2e) | pass |
+| `npm run e2e:a11y` (axe-core) | 0 serious/critical violations |
+| `tests/helper-files-browser.mjs`, `tests/auto-backup-browser.mjs` | pass |
+| `tests/downloads-page-browser.mjs` (real Chromium downloads) | pass, now including per-host pause/resume against a real local host |
+| `npm run e2e:remote` (aurora, product, shell, editor, connection, **capture**) | 6/6 pass |
+| `scripts/e2e-firefox.py` (real Firefox 159 + geckodriver 0.37.1, built package) | 22/22 pass; the filter checks now count the rows a query loaded, because the feed mounts only the cards near the viewport |
+| Python `tests/python`, `tests/test_*.py` | 22 + 56 pass (`test_remote_companion.py` 30, 6 new: capture parse/grant/projection, rate limit, share route + manifest, avatars, prioritize, item/host controls) |
+| `node --test` new units | `tests/capture-inbox.test.mjs`, `tests/avatar-archive.test.mjs`, `tests/vault-insights.test.mjs` (threads/quotes) |
+| Screenshots | `scripts/ui-gallery.mjs` at 1920×1080, 1440×900, 1366×768, 1280×720, 1024×768, 768×1024, 390×844, 320×700 for every Library layout and page; Remote 4.0 at 390, 320 and 768 px. Review found and fixed: the phone tab bar pushed System and Settings off-screen at 320 px (now always fits, icons only below 360 px), small Grid tiles clipped the video label against the "+N" badge |
+
+Performance (same sandbox, headless Chromium 1243, same session, medians of 3; `tests/library-profile.mjs` on
+50,000 posts, `tests/library-cards-profile.mjs` on a 600-post page, `tests/remote-perf.mjs` at 390×844):
+
+| Measure | v23 | v24 | v25 |
+| --- | --- | --- | --- |
+| Library first render (50k) | 24.7 ms | 24.3 ms | **9.5 ms** |
+| Library usable (50k) | 33.7 ms | 35.0 ms | **17.3 ms** |
+| Media elements mounted at start | 37 | 37 | **4** |
+| Select 1.5k (right after the page mounts) | 76 ms | 51 ms | 99 ms (slower; steady-state trace 51 vs 45 ms) |
+| Quick Look (right after mount) | 91 ms | 87 ms | 129 ms (slower; steady-state trace 99 vs 120 ms) |
+| Latest of rapid searches | 231 ms | 275 ms | 268 ms |
+| Favorite one post | 145 ms | 177 ms | 156 ms |
+| Cards page (600 posts): first render / re-render | 172 / 596 ms | 203 / 656 ms | **14 / 43 ms** |
+| Cards page list nodes | 49,660 | 53,113 | **1,505** |
+| Phone first tile (60 posts) | 201–219 ms | 254–282 ms | 210–241 ms |
+| Dashboard CSS | 267 KB / 46 KB gz | 345 KB / 61 KB gz | 345 KB / 62 KB gz |
+
+The v25 interaction phases measured immediately after the 1,500-row page mounts are slower than v23/v24: the
+compact rows now sit in one page scroller with a taller viewport (≈ 15 mounted rows instead of 9) and avatar /
+media work for those rows is still in flight. Steady-state traces show select at parity. CSS did not shrink:
+the four deleted Library sheets were replaced by `xv-library5.css` + `xv-library-panels.css`, and capture inbox,
+hosts and Atlas styles were added; a scan for rules whose classes or ids appear nowhere in the code found only
+116 bytes, so the next saving needs the `legacy` modules merged rather than more deletion.
+
+Not verified: live X (capture inbox against a real signed-in x.com tab), the Web Share Target from a real
+Android phone (needs the installed PWA over HTTPS with a trusted certificate; iPhone Safari has no share target),
+Windows/NTFS and the PowerShell scripts, Firefox Remote Native Messaging on Windows, screen readers (axe only).
+
+### Remaining after v25
+
+1. Merge the remaining `legacy` CSS modules (`xv-base`, `xv-pages`, `xv-settings`, `xv-library-panels`) into the
+   design system to cut the stylesheet below v23.
+2. Bring select/Quick Look right after a page load back under v24 (defer avatar/media work for rows that just
+   mounted; cheaper sticky-header invalidation).
+3. Capture inbox: retry with backoff across browser restarts, a per-item "archive media too" choice, and import of
+   many links from a text file.
+4. Local neural embeddings (the meaning index is still the on-device learned model), multilingual OCR models,
+   Firefox Remote, real X archive edge cases, Windows helper verification, screen-reader passes.
+
 ## v24 "Aurora" pass
 
 Branch: `xvault-24-aurora` (from `main` after PR #6 was merged). Version 24.0.0. Goal: a real visual and

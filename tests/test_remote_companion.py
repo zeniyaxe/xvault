@@ -218,6 +218,169 @@ class RemoteCompanionTests(unittest.TestCase):
         self.assertEqual(self.request('/api/overview', credential=device['credential'])[0], 403)
         self.assertEqual(self.request('/api/downloads', credential=device['credential'])[0], 403)
 
+    def test_capture_links_are_parsed_canonicalised_and_need_their_own_grant(self):
+        parse = companion_module.parse_capture_link
+        self.assertEqual(parse('see https://twitter.com/Ada/status/0123?s=20 now'),
+                         ('123', 'Ada', 'https://x.com/Ada/status/123'))
+        self.assertEqual(parse('x https://fxtwitter.com/i/web/status/77.'), ('77', '', 'https://x.com/i/status/77'))
+        for bad in ('https://x.com/home/status/1', 'https://evil.com/a/status/1', 'https://x.com/a/likes', 'no link'):
+            self.assertIsNone(parse(bad), bad)
+        device = self.paired_device()
+        origin = {'Origin': self.app.origin}
+        calls = []
+
+        def rpc(method, payload):
+            calls.append((method, payload))
+            row = {'id': '123', 'handle': 'Ada', 'state': 'queued', 'source': 'share', 'deviceId': device['deviceId'],
+                   'device': 'Test phone', 'createdAt': 5, 'updatedAt': 6, 'secret': 'x',
+                   'preview': {'name': 'Ada', 'handle': 'Ada', 'text': 'Hi', 'mediaCount': 2, 'video': True,
+                               'path': 'C:/private'}}
+            other = {**row, 'id': '124', 'deviceId': 'someone-else', 'state': 'weird', 'preview': None}
+            if method == 'capture.enqueue':
+                return {'ok': True, 'pending': 1, 'counts': {'queued': 1}, 'items': [row, other],
+                        'added': [{**row, 'duplicate': 'archived'}]}
+            return {'ok': True, 'pending': 0, 'items': [row, {'id': 'bad id'}]}
+        self.app.rpc = rpc
+        status, _, _ = self.request('/api/capture', {'url': 'https://x.com/Ada/status/123'}, device['credential'],
+                                    origin, 'POST')
+        self.assertEqual(status, 403, 'capture.create is not a default grant')
+        self.assertEqual(calls, [])
+        self.app.control('device.permissions', {'deviceId': device['deviceId'],
+                                                'permissions': ['library.read', 'capture.create']})
+        for bad in ({'url': 'https://x.com/Ada/status/123', 'extra': 1}, {'url': 'https://x.com/Ada/status/123', 'via': 'bot'},
+                    {'url': 'https://example.com/a'}, {'url': 7}):
+            status, _, _ = self.request('/api/capture', bad, device['credential'], origin, 'POST')
+            self.assertEqual(status, 400, bad)
+        status, _, body = self.request('/api/capture', {'text': 'look https://vxtwitter.com/Ada/status/123?t=1',
+                                                        'via': 'share'}, device['credential'], origin, 'POST')
+        self.assertEqual(status, 200)
+        self.assertEqual(calls[-1], ('capture.enqueue', {'url': 'https://x.com/Ada/status/123',
+                                                         'deviceId': device['deviceId'], 'deviceName': 'Test phone',
+                                                         'via': 'share'}))
+        result = json.loads(body)
+        self.assertEqual(result['id'], '123')
+        self.assertEqual(result['added'][0]['duplicate'], 'archived')
+        mine, theirs = result['items']
+        self.assertTrue(mine['mine'])
+        self.assertFalse(theirs['mine'])
+        self.assertEqual(theirs['state'], 'queued', 'unknown states are normalised')
+        self.assertEqual(mine['preview'], {'name': 'Ada', 'handle': 'Ada', 'text': 'Hi', 'createdAt': '',
+                                           'mediaCount': 2, 'video': True})
+        self.assertNotIn(b'secret', body)
+        self.assertNotIn(b'C:/private', body)
+        self.assertNotIn(device['deviceId'].encode(), body, 'device ids never reach the phone')
+        status, _, body = self.request('/api/capture', credential=device['credential'])
+        self.assertEqual(status, 200)
+        self.assertEqual([item['id'] for item in json.loads(body)['items']], ['123'])
+        for bad in ({'action': 'retry'}, {'action': 'pause'}, {'action': 'remove', 'id': '1', 'x': 1}):
+            status, _, _ = self.request('/api/capture/control', bad, device['credential'], origin, 'POST')
+            self.assertEqual(status, 400, bad)
+        status, _, _ = self.request('/api/capture/control', {'action': 'retry', 'id': '123'}, device['credential'],
+                                    origin, 'POST')
+        self.assertEqual(status, 200)
+        self.assertEqual(calls[-1], ('capture.control', {'action': 'retry', 'id': '123'}))
+
+    def test_capture_is_rate_limited_per_device(self):
+        device = self.paired_device()
+        self.app.control('device.permissions', {'deviceId': device['deviceId'],
+                                                'permissions': ['library.read', 'capture.create']})
+        self.app.rpc = lambda method, payload: {'ok': True, 'items': [], 'added': []}
+        origin = {'Origin': self.app.origin}
+        statuses = [self.request('/api/capture', {'url': f'https://x.com/a/status/{n}'}, device['credential'],
+                                 origin, 'POST')[0] for n in range(1, 33)]
+        self.assertEqual(statuses[:30], [200] * 30)
+        self.assertEqual(statuses[30:], [429, 429])
+
+    def test_share_target_route_serves_the_app_shell(self):
+        status, headers, body = self.request('/share?url=https%3A%2F%2Fx.com%2Fa%2Fstatus%2F1&title=t')
+        self.assertEqual(status, 200)
+        self.assertIn('text/html', headers.get('Content-Type', ''))
+        self.assertIn(b'captureView', body)
+        status, headers, body = self.request('/remote-capture.js')
+        self.assertEqual(status, 200)
+        self.assertIn(b'XVaultCapture', body)
+        status, _, body = self.request('/manifest.webmanifest')
+        manifest = json.loads(body)
+        self.assertEqual(manifest['share_target']['action'], '/share')
+        self.assertEqual(manifest['share_target']['method'], 'GET')
+
+    def test_archived_avatars_are_permission_checked_and_type_verified(self):
+        import base64
+        device = self.paired_device()
+        png = b'\x89PNG\r\n\x1a\n' + b'0' * 32
+        calls = []
+
+        def rpc(method, payload):
+            calls.append((method, payload))
+            if payload.get('handle') == 'Ada':
+                return {'ok': True, 'mime': 'image/png', 'data': base64.b64encode(png).decode()}
+            if payload.get('handle') == 'liar':
+                return {'ok': True, 'mime': 'image/png', 'data': base64.b64encode(b'<svg onload=1>').decode()}
+            return {'ok': False}
+        self.app.rpc = rpc
+        status, headers, body = self.request('/api/avatar/Ada', credential=device['credential'])
+        self.assertEqual(status, 200)
+        self.assertEqual(body, png)
+        self.assertEqual(headers.get('Content-Type'), 'image/png')
+        self.assertIn('private', headers.get('Cache-Control', ''))
+        self.assertEqual(calls[-1], ('avatar.read', {'handle': 'Ada'}))
+        self.assertEqual(self.request('/api/avatar/liar', credential=device['credential'])[0], 415)
+        self.assertEqual(self.request('/api/avatar/nobody', credential=device['credential'])[0], 404)
+        self.assertEqual(self.request('/api/avatar/bad%20handle', credential=device['credential'])[0], 400)
+        count = len(calls)
+        self.app.control('device.permissions', {'deviceId': device['deviceId'], 'permissions': ['media.read']})
+        self.assertEqual(self.request('/api/avatar/Ada', credential=device['credential'])[0], 403)
+        self.assertEqual(len(calls), count)
+
+    def test_download_prioritize_needs_manage_and_a_post_id(self):
+        device = self.paired_device()
+        calls = []
+        self.app.rpc = lambda method, payload: calls.append((method, payload)) or (
+            {'upNext': [{'name': 'a.jpg', 'kind': 'photo', 'postId': '55', 'path': 'C:/x'},
+                        {'name': 'b.jpg', 'postId': 'nope'}]} if method == 'downloads.status' else {'ok': True, 'count': 3})
+        status, _, body = self.request('/api/downloads', credential=device['credential'])
+        self.assertEqual(json.loads(body)['upNext'], [{'name': 'a.jpg', 'kind': 'photo', 'postId': '55'},
+                                                      {'name': 'b.jpg', 'kind': '', 'postId': None}])
+        self.app.control('device.permissions', {'deviceId': device['deviceId'],
+                                                'permissions': ['library.read', 'downloads.manage']})
+        origin = {'Origin': self.app.origin}
+        for bad in ({'action': 'prioritize'}, {'action': 'prioritize', 'postId': 'x'}, {'action': 'pause', 'other': 1}):
+            self.assertEqual(self.request('/api/downloads/control', bad, device['credential'], origin, 'POST')[0], 400)
+        status, _, body = self.request('/api/downloads/control', {'action': 'prioritize', 'postId': '55'},
+                                       device['credential'], origin, 'POST')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['count'], 3)
+        self.assertEqual(calls[-1], ('downloads.control', {'action': 'prioritize', 'postId': '55'}))
+
+    def test_download_item_and_host_controls_are_validated(self):
+        device = self.paired_device()
+        calls = []
+        self.app.rpc = lambda method, payload: calls.append((method, payload)) or (
+            {'transfers': [{'name': 'a.mp4', 'state': 'downloading', 'downloadId': 41, 'path': 'C:/x'}],
+             'pausedHosts': ['video.twimg.com', 'evil.example']} if method == 'downloads.status' else {'ok': True, 'count': 1})
+        status, _, body = self.request('/api/downloads', credential=device['credential'])
+        result = json.loads(body)
+        self.assertEqual(result['transfers'][0]['downloadId'], 41)
+        self.assertNotIn('path', result['transfers'][0])
+        self.assertEqual(result['pausedHosts'], ['video.twimg.com'])
+        origin = {'Origin': self.app.origin}
+        self.assertEqual(self.request('/api/downloads/control', {'action': 'pause-item', 'downloadId': 41},
+                                      device['credential'], origin, 'POST')[0], 403)
+        self.app.control('device.permissions', {'deviceId': device['deviceId'],
+                                                'permissions': ['library.read', 'downloads.manage']})
+        for bad in ({'action': 'pause-item'}, {'action': 'pause-item', 'downloadId': '41'},
+                    {'action': 'pause-item', 'downloadId': True}, {'action': 'cancel-item', 'downloadId': -1},
+                    {'action': 'pause-item', 'downloadId': 41, 'host': 'pbs.twimg.com'},
+                    {'action': 'pause-host', 'host': 'example.com'}, {'action': 'pause-host'},
+                    {'action': 'resume-host', 'host': 'pbs.twimg.com', 'postId': '1'}):
+            self.assertEqual(self.request('/api/downloads/control', bad, device['credential'], origin, 'POST')[0], 400, bad)
+        for good, expected in (({'action': 'cancel-item', 'downloadId': 41}, {'action': 'cancel-item', 'downloadId': 41}),
+                               ({'action': 'pause-host', 'host': 'video.twimg.com'},
+                                {'action': 'pause-host', 'host': 'video.twimg.com'})):
+            status, _, body = self.request('/api/downloads/control', good, device['credential'], origin, 'POST')
+            self.assertEqual(status, 200)
+            self.assertEqual(calls[-1], ('downloads.control', expected))
+
     def test_post_link_projection_requires_https_and_matching_stable_identity(self):
         validate = self.app._make_handler()._valid_post_link
         self.assertEqual(validate('https://fixvx.com/ada/status/123', '123'), 'https://fixvx.com/ada/status/123')

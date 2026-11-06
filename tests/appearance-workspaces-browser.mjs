@@ -18,7 +18,7 @@ try {
   const frame = page.frames().find(candidate => candidate !== page.mainFrame());
   await frame.locator('.nav[data-page="settings"]').click();
   await frame.locator('#themeGallery .theme-card').first().waitFor();
-  assert.equal(await frame.locator('.theme-card').count(), 12);
+  assert.equal(await frame.locator('.theme-card').count(), 13);
   const contrast = await frame.evaluate(() => {
     const lum = hex => {
       if (hex.length === 4)
@@ -50,6 +50,8 @@ try {
   await page.keyboard.press('Escape');
   await frame.waitForFunction(() => document.body.dataset.theme === 'graphite', null, { timeout: 2000 });
   await frame.locator('[data-theme-id="graphite"]').focus();
+  // graphite → brass → oled → midnight
+  await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowRight');
   try {
@@ -215,15 +217,16 @@ try {
   await frame.locator('#settingsContent').evaluate(node => (node.scrollTop = 0));
   await page.screenshot({ path: path.join(artifacts, 'appearance-oled-desktop.png'), animations: 'disabled' });
   await page.setViewportSize({ width: 390, height: 844 });
+  // Since XVault 24 the rail becomes a bottom tab bar on phones.
   await frame.waitForFunction(
-    () => innerWidth === 390 && Math.round(document.querySelector('.rail').getBoundingClientRect().width) === 56
+    () => innerWidth === 390 && Math.round(document.querySelector('.rail').getBoundingClientRect().width) === 390
   );
   const narrow = await frame.evaluate(() => ({
-    rail: document.querySelector('.rail').getBoundingClientRect().width,
+    rail: document.querySelector('.rail').getBoundingClientRect(),
     width: document.documentElement.scrollWidth,
     viewport: innerWidth,
   }));
-  assert.equal(narrow.rail, 56);
+  assert.ok(narrow.rail.bottom >= 844 - 1, 'the phone tab bar sits at the bottom edge');
   assert.ok(narrow.width <= narrow.viewport, 'custom widths must not overflow a narrow screen');
   await page.screenshot({ path: path.join(artifacts, 'appearance-oled-390.png'), animations: 'disabled' });
   await page.keyboard.press('Control+Alt+w');
@@ -284,19 +287,23 @@ try {
     (await frame.locator('#settingsContent').evaluate(node => node.getAnimations().length)) <= 1,
     'rapid actions replace their previous animation'
   );
-  await frame.evaluate(async () => {
-    await save({ motionLevel: 'normal', motionSpeed: 2 }, false);
-  });
-  assert.ok(
-    await frame
+  const cardDurations = () =>
+    frame
       .locator('.theme-card')
       .first()
       .evaluate(node =>
         getComputedStyle(node)
           .transitionDuration.split(',')
-          .some(value => Math.abs(parseFloat(value) - 0.055) < 0.005)
-      ),
-    'the speed control must scale CSS interaction motion as well as pane animations'
+          .map(value => parseFloat(value))
+      );
+  const normalSpeed = await cardDurations();
+  await frame.evaluate(async () => {
+    await save({ motionLevel: 'normal', motionSpeed: 2 }, false);
+  });
+  const doubleSpeed = await cardDurations();
+  assert.ok(
+    normalSpeed.some((value, index) => value > 0 && Math.abs(doubleSpeed[index] - value / 2) < 0.006),
+    `the speed control must scale CSS interaction motion as well as pane animations: ${JSON.stringify({ normalSpeed, doubleSpeed })}`
   );
   for (const level of ['off', 'reduced']) {
     await frame.evaluate(async level => {

@@ -29,6 +29,7 @@ REMOTE_PERMISSIONS = frozenset({
     'tags.write',
     'notes.write',
     'downloads.manage',
+    'capture.create',
 })
 DEFAULT_PERMISSIONS = frozenset({'library.read', 'media.read'})
 

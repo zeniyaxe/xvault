@@ -610,6 +610,8 @@
     updateInstallUI();
     observeArchiveRevision(session, true);
     setLayout(localChoice(LAYOUT_KEY) || 'feed', false);
+    // A post shared to XVault (Web Share Target) or links kept while offline go out as soon as the session is live.
+    void window.XVaultCapture?.started();
     await search(true);
   }
 
@@ -664,6 +666,7 @@
       ['favorite.write', 'Change favorites'],
       ['tags.write', 'Edit tags'],
       ['downloads.manage', 'Save media to PC'],
+      ['capture.create', 'Send posts to capture'],
     ]) {
       const row = document.createElement('li'),
         name = document.createElement('span'),
@@ -676,6 +679,8 @@
   }
   function clearProtectedViews() {
     viewScrollPositions.clear();
+    forgetAvatars();
+    window.XVaultCapture?.reset();
     cancelPCRequests();
     pcReceipts.clear();
     resetRemoteBrowse();
@@ -724,6 +729,8 @@
           $('#noteSaved').value = '';
         }
         if (!permissions.has('media.read') && $('#viewer').open) closeViewer();
+        if (!permissions.has('library.read')) forgetAvatars();
+        window.XVaultCapture?.permissionsChanged();
       }
       renderPermissions();
       updateDownloadControls();
@@ -734,11 +741,13 @@
     }
   }
 
+  const NUMBER_FORMATS = {};
+  let plainNumbers = null;
+  const plainNumber = value => (plainNumbers ||= new Intl.NumberFormat()).format(value);
   function formatNumber(value) {
-    return new Intl.NumberFormat(undefined, {
-      notation: Number(value) > 9999 ? 'compact' : 'standard',
-      maximumFractionDigits: 1,
-    }).format(Number(value) || 0);
+    const notation = Number(value) > 9999 ? 'compact' : 'standard';
+    NUMBER_FORMATS[notation] ||= new Intl.NumberFormat(undefined, { notation, maximumFractionDigits: 1 });
+    return NUMBER_FORMATS[notation].format(Number(value) || 0);
   }
   function formatTime(value) {
     const date = new Date(value || 0);
@@ -858,8 +867,9 @@
   }
 
   // ── Phone Remote 3.0: rich post cards ──
-  // Everything drawn here comes from the archived record the computer sent; nothing is guessed. Avatars are
-  // monograms (the phone never contacts X), and missing media says why instead of showing a stand-in image.
+  // Everything drawn here comes from the archived record the computer sent; nothing is guessed. The phone never
+  // contacts X: avatars are the copies archived on the computer (Remote 4.0), with a monogram until one loads or
+  // when none exists, and missing media says why instead of showing a stand-in image.
   function el(tag, className = '', text = null) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -878,6 +888,13 @@
       if (number >= size) return `${(number / size).toFixed(number >= size * 10 ? 0 : 1).replace(/\.0$/, '')}${unit}`;
     return String(number);
   }
+  // Intl formatters are expensive to create; Date#toLocale*String builds one per call (≈0.3 ms × every card).
+  const DATE_FORMATS = new Map();
+  function formatDate(date, options) {
+    const key = JSON.stringify(options);
+    if (!DATE_FORMATS.has(key)) DATE_FORMATS.set(key, new Intl.DateTimeFormat(undefined, options));
+    return DATE_FORMATS.get(key).format(date);
+  }
   function relativeTime(value) {
     const time = new Date(value || 0).getTime();
     if (!Number.isFinite(time) || time <= 0) return '';
@@ -887,11 +904,51 @@
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
     if (seconds < 86400 * 7) return `${Math.floor(seconds / 86400)}d`;
     const date = new Date(time);
-    return date.toLocaleDateString(undefined, {
+    return formatDate(date, {
       month: 'short',
       day: 'numeric',
       ...(date.getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }),
     });
+  }
+  // Remote 4.0: one request per author per session (blob URLs shared by every card), at most four at a time,
+  // remembered misses, nothing in Data Saver and nothing without Library access.
+  const avatarUrls = new Map();
+  const avatarWaiting = [];
+  let avatarActive = 0;
+  function avatarImage(handle) {
+    const key = String(handle || '').toLowerCase();
+    if (!/^[a-z0-9_]{1,15}$/.test(key) || state.dataSaver || !state.permissions.has('library.read')) return null;
+    if (avatarUrls.has(key)) return avatarUrls.get(key);
+    const task = new Promise(resolve => avatarWaiting.push({ handle, resolve })).then(url => {
+      if (!url) avatarUrls.set(key, Promise.resolve(null));
+      return url;
+    });
+    avatarUrls.set(key, task);
+    pumpAvatars();
+    return task;
+  }
+  function pumpAvatars() {
+    while (avatarActive < 4 && avatarWaiting.length) {
+      const { handle, resolve } = avatarWaiting.shift();
+      avatarActive++;
+      fetch(`/api/avatar/${encodeURIComponent(handle)}`, { credentials: 'same-origin', redirect: 'error' })
+        .then(async response => {
+          if (!response.ok || !/^image\/(jpeg|png|gif|webp)$/.test(response.headers.get('Content-Type') || ''))
+            return null;
+          return URL.createObjectURL(await response.blob());
+        })
+        .catch(() => null)
+        .then(url => {
+          avatarActive--;
+          resolve(url);
+          pumpAvatars();
+        });
+    }
+  }
+  function forgetAvatars() {
+    for (const task of avatarUrls.values()) task.then(url => url && URL.revokeObjectURL(url));
+    avatarUrls.clear();
+    avatarWaiting.splice(0).forEach(item => item.resolve(null));
   }
   function makeAvatar(name, handle, size = '') {
     const avatar = el('span', `avatar ${size}`.trim());
@@ -901,6 +958,18 @@
     avatar.style.setProperty('--hue', String(hash % 360));
     avatar.textContent = (String(name || handle || '?').trim()[0] || '?').toUpperCase();
     avatar.setAttribute('aria-hidden', 'true');
+    const image = avatarImage(handle);
+    if (image)
+      image.then(url => {
+        if (!url || !avatar.isConnected) return;
+        const picture = document.createElement('img');
+        picture.alt = '';
+        picture.decoding = 'async';
+        picture.src = url;
+        picture.onload = () => avatar.classList.add('has-image');
+        picture.onerror = () => picture.remove();
+        avatar.append(picture);
+      });
     return avatar;
   }
   function makeIdentity(post, withTime = true) {
@@ -923,7 +992,6 @@
         const time = el('time', '', ` · ${when}`);
         try {
           time.dateTime = new Date(post.createdAt || post.archivedAt).toISOString();
-          time.title = new Date(post.createdAt || post.archivedAt).toLocaleString();
         } catch {}
         sub.append(time);
       }
@@ -999,7 +1067,7 @@
       const item = el('span', `metric is-${key}`);
       const shown = el('b', '', compact(value));
       shown.setAttribute('aria-hidden', 'true');
-      item.append(makeIcon(icon), shown, el('span', 'sr-only', `${value.toLocaleString()} ${label}`));
+      item.append(makeIcon(icon), shown, el('span', 'sr-only', `${plainNumber(value)} ${label}`));
       metrics.append(item);
     }
     return metrics;
@@ -1363,9 +1431,17 @@
     return placeholder;
   }
 
+  // Remote 4.0 first paint: a fresh result list paints its first screenful at once and builds the rest of the
+  // window right after that frame, so the first images start loading ~100 ms sooner on a phone.
+  const FIRST_PAINT_TILES = 8;
+  let deferredRender = 0;
   function renderWindow() {
     const gallery = $('#gallery');
     const fragment = document.createDocumentFragment();
+    const generation = ++deferredRender;
+    const fresh = !state.beforeCount && !gallery.querySelector('.post-card, .post-tile');
+    let built = 0;
+    const later = [];
     if (state.beforeCount) {
       const spacer = document.createElement('div');
       spacer.className = 'gallery-spacer';
@@ -1376,7 +1452,19 @@
     for (let pageIndex = state.firstPage; pageIndex <= state.lastPage; pageIndex++) {
       const page = state.rows.get(pageIndex);
       if (!page) continue;
-      for (const post of page.rows) fragment.append(createTile(post));
+      for (const post of page.rows) {
+        if (fresh && built >= FIRST_PAINT_TILES) later.push(post);
+        else fragment.append(createTile(post));
+        built++;
+      }
+    }
+    let tail = null;
+    if (later.length) {
+      tail = document.createElement('div');
+      tail.className = 'gallery-spacer';
+      tail.style.height = `${estimatedPageHeight(later.length)}px`;
+      tail.setAttribute('aria-hidden', 'true');
+      fragment.append(tail);
     }
     if (state.afterCount) {
       const spacer = document.createElement('div');
@@ -1386,6 +1474,16 @@
       fragment.append(spacer);
     }
     gallery.replaceChildren(fragment);
+    if (tail)
+      requestAnimationFrame(() =>
+        setTimeout(() => {
+          if (generation !== deferredRender || !tail.isConnected) return;
+          const rest = document.createDocumentFragment();
+          for (const post of later) rest.append(createTile(post));
+          tail.replaceWith(rest);
+          updateDownloadControls();
+        }, 0)
+      );
     updateDownloadControls();
     gallery.setAttribute('aria-busy', String(state.loadingNext || state.loadingPrevious));
     updateCount();
@@ -1597,7 +1695,7 @@
   }
 
   function showView(viewId) {
-    const order = ['libraryView', 'downloadsView', 'overviewView', 'settingsView'],
+    const order = ['libraryView', 'captureView', 'downloadsView', 'overviewView', 'settingsView'],
       before = document.querySelector('.view.active')?.id;
     const region = $('#scrollRegion');
     if (before && before !== viewId) viewScrollPositions.set(before, region.scrollTop);
@@ -1625,6 +1723,8 @@
     }
     if (viewId === 'downloadsView') loadDownloads();
     else stopDownloadsPolling();
+    if (viewId === 'captureView') window.XVaultCapture?.show();
+    else if (before === 'captureView') window.XVaultCapture?.hide();
   }
 
   // ── Downloads monitor: honest numbers from the computer; controls only when this phone may manage downloads ──
@@ -1764,6 +1864,35 @@
       );
       if (failed) controls.append(control('retry', 'retry', 'Retry failed'));
       fragment.append(controls);
+      // Remote 4.0 per-host pause: hold images or video on the computer while the other keeps downloading.
+      const hosts = el('div', 'dl-hosts');
+      hosts.setAttribute('role', 'group');
+      hosts.setAttribute('aria-label', 'Pause by media type');
+      const pausedHosts = new Set(data.pausedHosts || []);
+      for (const [host, label, icon] of [
+        ['pbs.twimg.com', 'Images', 'photo'],
+        ['video.twimg.com', 'Video', 'video'],
+      ]) {
+        const on = pausedHosts.has(host);
+        const button = el('button', `dl-host${on ? ' is-paused' : ''}`);
+        button.type = 'button';
+        button.setAttribute('aria-pressed', String(on));
+        button.title = `${on ? 'Resume' : 'Pause'} downloads from ${host}`;
+        button.append(makeIcon(on ? 'pause' : icon), el('span', '', on ? `${label} paused` : label));
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            await request('/api/downloads/control', { action: on ? 'resume-host' : 'pause-host', host });
+            toast(on ? `${label} downloads resumed` : `${label} downloads paused · the rest continue`);
+          } catch (error) {
+            toast(error.message || 'The queue could not be changed');
+          } finally {
+            loadDownloads(true);
+          }
+        });
+        hosts.append(button);
+      }
+      fragment.append(hosts);
     } else {
       fragment.append(
         el(
@@ -1794,7 +1923,8 @@
         const copy = el('div', 'dl-copy');
         copy.append(el('b', '', row.name || 'media'));
         const meta = el('small');
-        if (recent)
+        if (recent === 'next') meta.textContent = /video|gif/.test(row.kind) ? 'Video · queued' : 'Queued';
+        else if (recent)
           meta.textContent = [row.state, row.at ? relativeTime(row.at) : '', row.error].filter(Boolean).join(' · ');
         else
           meta.textContent = row.totalBytes
@@ -1808,11 +1938,76 @@
           copy.append(bar);
         }
         item.append(icon, copy);
+        // Remote 4.0 per-item controls: jump to the post, or move a queued post to the front of the queue.
+        if (row.postId && state.permissions.has('library.read')) {
+          const show = el('button', 'icon-button dl-item-action');
+          show.type = 'button';
+          show.setAttribute('aria-label', `Show the post for ${row.name || 'this file'}`);
+          show.append(makeIcon('library'));
+          show.addEventListener('click', () => applySearchQuery(`id:${row.postId}`));
+          item.append(show);
+        }
+        // A running transfer: pause or resume it, or cancel it, on the computer.
+        if (recent === false && row.downloadId && data.canManage && state.permissions.has('downloads.manage')) {
+          const itemAction = (action, icon, label) => {
+            const button = el('button', 'icon-button dl-item-action');
+            button.type = 'button';
+            button.setAttribute('aria-label', `${label} ${row.name || 'this file'}`);
+            button.append(makeIcon(icon));
+            button.addEventListener('click', async () => {
+              button.disabled = true;
+              try {
+                await request('/api/downloads/control', { action, downloadId: row.downloadId });
+                toast(
+                  action === 'cancel-item'
+                    ? 'Transfer cancelled'
+                    : action === 'pause-item'
+                      ? 'Transfer paused'
+                      : 'Transfer resumed'
+                );
+              } catch (error) {
+                toast(error.message || 'The transfer could not be changed');
+              } finally {
+                loadDownloads(true);
+              }
+            });
+            return button;
+          };
+          item.append(
+            row.state === 'paused'
+              ? itemAction('resume-item', 'play', 'Resume')
+              : itemAction('pause-item', 'pause', 'Pause'),
+            itemAction('cancel-item', 'stop', 'Cancel')
+          );
+        }
+        if (recent === 'next' && row.postId && data.canManage && state.permissions.has('downloads.manage')) {
+          const first = el('button', 'icon-button dl-item-action');
+          first.type = 'button';
+          first.setAttribute('aria-label', `Download ${row.name || 'this post'} next`);
+          first.append(makeIcon('up'));
+          first.addEventListener('click', async () => {
+            first.disabled = true;
+            try {
+              const result = await request('/api/downloads/control', { action: 'prioritize', postId: row.postId });
+              toast(
+                result.count
+                  ? `${formatNumber(result.count)} file${result.count === 1 ? '' : 's'} moved to the front`
+                  : 'Already downloading'
+              );
+            } catch (error) {
+              toast(error.message || 'The queue could not be changed');
+            } finally {
+              loadDownloads(true);
+            }
+          });
+          item.append(first);
+        }
         box.append(item);
       }
       fragment.append(box);
     };
     list('Transferring now', data.transfers, false);
+    list('Up next', data.upNext, 'next');
     list('Recent', data.recent, true);
     if (!data.transfers?.length && !data.recent?.length)
       fragment.append(
@@ -3120,6 +3315,18 @@
   }
 
   async function boot() {
+    window.XVaultCapture?.takeShare();
+    window.XVaultCapture?.attach({
+      request,
+      toast,
+      showView,
+      applySearchQuery,
+      el,
+      makeIcon,
+      makeAvatar,
+      relativeTime,
+      hasPermission: key => state.permissions.has(key),
+    });
     wireEvents();
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/remote-sw.js', { scope: '/' }).catch(() => {});
     const token = location.hash.length > 1 ? location.hash.slice(1) : '';

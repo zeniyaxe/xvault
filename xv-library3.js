@@ -66,8 +66,7 @@
     node.innerHTML = `<span>${html(entry.label)}</span><button type="button" data-undo>Undo</button><kbd>Ctrl Z</kbd>`;
     node.querySelector('[data-undo]').onclick = () => undo();
     node.classList.remove('show');
-    void node.offsetWidth;
-    node.classList.add('show');
+    requestAnimationFrame(() => node.classList.add('show'));
     clearTimeout(node._timer);
     node._timer = setTimeout(() => node.classList.remove('show'), 7000);
   }
@@ -324,7 +323,7 @@
       section = document.createElement('section');
       section.className = 'facet xv-boards';
       section.setAttribute('aria-labelledby', 'facetBoardsTitle');
-      section.innerHTML = `<header class="facet-heading"><h3 id="facetBoardsTitle">Boards</h3><div><button type="button" class="quiet" data-board-new title="Create a board">New</button><button type="button" class="quiet" data-board-manage title="Rename, reorder, pin or delete boards">Manage</button></div></header><div id="facetBoards" role="list"></div>`;
+      section.innerHTML = `<header class="facet-heading"><h3 id="facetBoardsTitle">Boards</h3><div class="facet-tools"><button type="button" class="facet-iconbtn" data-board-new title="Create a board" aria-label="Create a board" data-xv-icon="plus"></button><button type="button" class="facet-iconbtn" data-board-manage title="Rename, reorder, pin or delete boards" aria-label="Manage boards" data-xv-icon="sliders"></button></div></header><div id="facetBoards" role="list"></div>`;
       const anchor = root.querySelector('[aria-labelledby="facetAuthorsTitle"]');
       if (anchor) anchor.before(section);
       else root.append(section);
@@ -1085,7 +1084,7 @@
     if (!body || body.querySelector('[data-l3-tools]')) return;
     const group = document.createElement('div');
     group.dataset.l3Tools = '';
-    group.innerHTML = `<hr><button type="button" data-l3-open="boards">Boards…</button><button type="button" data-l3-open="rules">Auto-tag rules…</button><button type="button" data-l3-open="image">Search by image…</button><button type="button" data-l3-open="meaning">Rebuild meaning index</button>`;
+    group.innerHTML = `<hr><button type="button" data-l3-open="boards" data-xv-icon="board">Boards…</button><button type="button" data-l3-open="rules" data-xv-icon="sparkle">Auto-tag rules…</button><button type="button" data-l3-open="image" data-xv-icon="imageSearch">Search by image…</button><button type="button" data-l3-open="meaning" data-xv-icon="brain">Rebuild meaning index</button>`;
     body.querySelector('#surpriseMe')?.after(group);
     group.addEventListener('click', async event => {
       const act = event.target.closest('[data-l3-open]')?.dataset.l3Open;

@@ -74,6 +74,14 @@ try:
         if b.is_displayed(): b.click(); time.sleep(0.5)
     def count(q):
         box = d.find_element(By.ID, 'search'); box.clear(); box.send_keys(q); box.send_keys(Keys.ENTER); time.sleep(1.5)
+        # Library 5.0 mounts only the cards near the viewport, so the DOM no longer holds every match: count the
+        # rows the query loaded (falls back to the DOM for older builds).
+        state = None
+        for _ in range(20):
+            state = d.execute_script("const s = window.XVaultLibraryQueryState && window.XVaultLibraryQueryState(); return s ? { rows: s.rows, loaded: s.loaded, busy: s.busy } : null")
+            if not state or (state.get('loaded') and not state.get('busy')): break
+            time.sleep(0.25)
+        if state: return state.get('rows')
         return d.execute_script("return document.querySelectorAll('#list [data-id], #list article, #list .card').length")
     allc = count('')
     check('library renders seeded posts', allc > 0, allc)

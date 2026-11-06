@@ -17,6 +17,21 @@ The listener binds to one detected private IPv4 address, uses HTTPS, exact Host/
 Use **Stop Remote** when a phone should no longer connect. Run `uninstall_remote.ps1` to remove the Chrome and Edge Native Messaging registrations. Uninstall leaves the local config, TLS private key, and paired-device registry in `%LOCALAPPDATA%\XVault\RemoteCompanion` so existing archive settings are preserved; delete that folder manually only when you want to remove those Remote credentials too.
 
 
+## Sending posts from the phone (Remote 4.0, XVault 25)
+
+The **Capture** tab sends single X posts to the computer's capture inbox. Allow **Send posts to capture** for the phone (pairing panel, or the phone's row under paired devices); it is never granted by default.
+
+- **Paste:** copy a post link in the X app (Share → Copy link), open XVault Remote, tap **Paste** and **Save to XVault**. Several links at once are fine (up to 20 per paste; at most 30 links per phone every five minutes).
+- **Share sheet (Android):** add XVault Remote to the home screen. Chrome then lists it in the share sheet, so X → Share → XVault sends the post at once. Chrome only installs web apps whose certificate it trusts; with the self-signed Companion certificate this needs the certificate to be trusted on the phone. Without that, use Paste.
+- **iPhone / iPad:** Safari does not let web apps receive shares; use Paste.
+- **Offline:** links that cannot reach the computer stay in a small outbox on the phone (link text only, at most 50) and are sent when XVault is reachable again.
+
+The computer opens each post in one reused background tab inside an existing X window (never a new window), waits for the archive to record it and moves on; items wait with a reason when no x.com tab is open or **Capture while browsing** is off. The phone sees the state (queued, waiting, capturing, saved, already saved, unavailable, failed), a short preview of saved posts, and can retry or remove its items. The Capture page on the computer shows the same inbox with pause/resume.
+
+**Avatars.** With Library access the phone shows authors' pictures from the copies XVault keeps on the computer (**Settings → Library → Keep local copies of avatars**, on by default; 96 px, fetched from pbs.twimg.com without cookies, at most 256 KB, type-checked). The phone itself never contacts X; Data Saver keeps monograms.
+
+**Downloads.** The Downloads tab lists the next files in the queue; with **Save archived media to PC** a phone can move one post's queued files to the front (best effort — the order resets if the browser restarts the service worker).
+
 ## Troubleshooting
 
 Double-click `check_remote.bat` at any time. It is read-only and lists what is missing: a working Python, the installed Companion, the Chrome registration, the network address phones use, whether Windows treats the Wi-Fi as Private, the firewall rule, and whether Remote is running. Windows blocks incoming phone connections on networks marked Public, so mark your own home Wi-Fi Private. If you only need GIF/WebP conversion, `run_helper.bat` starts the Animation Helper on its own.

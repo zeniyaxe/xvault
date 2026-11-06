@@ -53,24 +53,38 @@
     timer = setTimeout(() => hide(node), ms);
     const bar = node.querySelector('.xt-bar');
     if (bar) {
-      bar.style.animation = 'none';
-      void bar.offsetWidth;
-      bar.style.animation = '';
-      bar.style.animationDuration = `${ms}ms`;
+      // XVault 25: restart the countdown on a fresh element instead of forcing a synchronous layout
+      // (`offsetWidth`), which cost ~20 ms with a full Library on screen.
+      const fresh = bar.cloneNode(false);
+      fresh.style.animation = '';
+      fresh.style.animationDuration = `${ms}ms`;
+      bar.replaceWith(fresh);
     }
   }
   // The previous notice lifts away instead of being overwritten in place.
   function ghost(node) {
     if (calm() || !node.classList.contains('show')) return;
-    const box = node.getBoundingClientRect(),
-      copy = node.cloneNode(true);
+    // Copy now (the old text), measure in the next frame so the caller's DOM writes are not forced into a layout.
+    const copy = node.cloneNode(true);
     copy.removeAttribute('id');
     copy.removeAttribute('role');
     copy.removeAttribute('aria-live');
     copy.setAttribute('aria-hidden', 'true');
     copy.classList.add('xt-ghost');
-    Object.assign(copy.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, bottom: 'auto' });
+    // Appending is cheap (no layout); the copy stays invisible until it is placed in the next frame.
+    copy.style.visibility = 'hidden';
     document.body.append(copy);
+    requestAnimationFrame(() => lift(node, copy));
+  }
+  function lift(node, copy) {
+    const box = node.getBoundingClientRect();
+    Object.assign(copy.style, {
+      left: `${box.left}px`,
+      top: `${box.top}px`,
+      width: `${box.width}px`,
+      bottom: 'auto',
+      visibility: '',
+    });
     const animation = copy.animate(
       [
         { opacity: 0.9, transform: 'translateY(0) scale(1)' },
@@ -138,8 +152,7 @@
     bar.className = 'xt-bar';
     bar.setAttribute('aria-hidden', 'true');
     node.append(bar);
-    node.classList.remove('show');
-    void node.offsetWidth;
+    // The entrance is the WAAPI animation below; no forced reflow to restart a CSS transition.
     node.classList.add('show');
     play(
       node,
@@ -220,59 +233,73 @@
     queued = true;
     requestAnimationFrame(placePills);
   }
+  // Reads every box first, then writes: interleaving offsetLeft reads with style writes forced one
+  // layout per segmented control (≈16 ms on a busy Library open). One flush covers the instant/glide
+  // starting positions for all pills at once.
   function placePills() {
     queued = false;
+    const jobs = [];
     for (const seg of document.querySelectorAll('.seg')) {
       if (!seg.offsetParent) continue;
       const active = seg.querySelector(ACTIVE);
-      let pill = seg.querySelector(':scope > .xv-seg-pill');
+      const pill = seg.querySelector(':scope > .xv-seg-pill');
       if (!active) {
         if (pill) pill.style.opacity = '0';
         continue;
       }
-      const box = {
-        x: active.offsetLeft,
-        y: active.offsetTop,
-        w: active.offsetWidth,
-        h: active.offsetHeight,
-      };
+      const box = { x: active.offsetLeft, y: active.offsetTop, w: active.offsetWidth, h: active.offsetHeight };
       const key = `${box.x},${box.y},${box.w},${box.h}`;
       if (pill?.dataset.key === key && pill.style.opacity === '1') continue;
-      const id = identity(seg);
-      let instant = !pill || calm();
-      if (!pill) {
-        pill = document.createElement('span');
+      jobs.push({ seg, pill, box, key });
+    }
+    if (!jobs.length) return;
+    const quiet = calm();
+    let flush = false;
+    for (const job of jobs) {
+      const id = identity(job.seg);
+      job.id = id;
+      job.instant = !job.pill || quiet;
+      if (!job.pill) {
+        const pill = document.createElement('span');
         pill.className = 'xv-seg-pill';
         pill.setAttribute('aria-hidden', 'true');
-        seg.append(pill);
-        seg.classList.add('xv-pilled');
-        if (resize && !watched.has(seg)) {
-          resize.observe(seg);
-          watched.add(seg);
+        job.seg.append(pill);
+        job.seg.classList.add('xv-pilled');
+        job.pill = pill;
+        if (resize && !watched.has(job.seg)) {
+          resize.observe(job.seg);
+          watched.add(job.seg);
         }
         // A control that was re-rendered starts from where its pill was, then glides.
         const before = remembered.get(id);
-        if (before && !calm()) {
-          setBox(pill, before, true);
-          void pill.offsetWidth;
-          instant = false;
+        if (before && !quiet) {
+          job.pill.classList.add('is-instant');
+          writeBox(job.pill, before);
+          job.instant = false;
+          job.glide = true;
+          flush = true;
         }
       }
-      setBox(pill, box, instant);
-      pill.dataset.key = key;
-      remembered.set(id, box);
+      if (job.instant) {
+        job.pill.classList.add('is-instant');
+        writeBox(job.pill, job.box);
+        flush = true;
+      }
+    }
+    if (flush) void document.body.offsetWidth;
+    for (const job of jobs) {
+      if (job.glide) job.pill.classList.remove('is-instant');
+      if (!job.instant) writeBox(job.pill, job.box);
+      else job.pill.classList.remove('is-instant');
+      job.pill.dataset.key = job.key;
+      remembered.set(job.id, job.box);
     }
   }
-  function setBox(pill, box, instant) {
-    if (instant) pill.classList.add('is-instant');
+  function writeBox(pill, box) {
     pill.style.opacity = '1';
     pill.style.width = `${box.w}px`;
     pill.style.height = `${box.h}px`;
     pill.style.transform = `translate(${box.x}px, ${box.y}px)`;
-    if (instant) {
-      void pill.offsetWidth;
-      pill.classList.remove('is-instant');
-    }
   }
   function watchPills() {
     new MutationObserver(records => {

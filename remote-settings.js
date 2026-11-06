@@ -17,6 +17,7 @@
     ['tags.write', 'Edit tags'],
     ['notes.write', 'Edit notes'],
     ['downloads.manage', 'Save archived media to PC'],
+    ['capture.create', 'Send posts to capture'],
   ];
 
   async function command(name, payload = {}) {

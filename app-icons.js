@@ -147,7 +147,13 @@
       scheduled = false;
     new MutationObserver(records => {
       for (const record of records)
-        for (const node of record.addedNodes) if (node.nodeType === Node.ELEMENT_NODE) queued.add(node);
+        for (const node of record.addedNodes)
+          // Library 5.0 cards and windowed rows carry their icons inline; scanning every mounted block is waste.
+          if (
+            node.nodeType === Node.ELEMENT_NODE &&
+            !(node.classList.contains('tweet') && node.parentElement?.id === 'list')
+          )
+            queued.add(node);
       if (scheduled || !queued.size) return;
       scheduled = true;
       queueMicrotask(() => {

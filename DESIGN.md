@@ -1,4 +1,4 @@
-# XVault design — "Aurora" (24.0)
+# XVault design — "Aurora" system, "Vantage" Library (25.0)
 
 Aurora is the design system for every XVault surface: the dashboard, the side panel, the Command Center, the X
 integration and the Remote phone app. Media carries colour; the interface carries hierarchy and state. It should
@@ -41,9 +41,11 @@ Other themes only override palette tokens in `[data-theme]` rules, so they inher
 
 The dashboard loads one stylesheet with three layers: `base` (element defaults and primitives,
 `xv-aurora-base.css`) → `legacy` (pre-24 module styles, being retired file by file) → `aurora` (tokens, shell and
-every redesigned surface: `xv-aurora.css`, `xv-aurora-library.css`, `xv-aurora-pages.css`). A later layer wins
+every redesigned surface: `xv-aurora.css`, `xv-library5.css`, `xv-aurora-pages.css`). A later layer wins
 whatever the selector specificity, so redesigned surfaces need no `!important`. Inline styles from scripts stay
-unlayered. The side panel uses `xv-core.css` (the same layers without the dashboard modules).
+unlayered. The side panel uses `xv-core.css` (the same layers without the dashboard modules). In 25.0 the Library
+left the legacy layer: `xv-library.css`, `xv-library3.css`, `xv-aurora-library.css` and `xv-keystone.css` were
+deleted; what the Library opens on top (Quick Look, viewer, dialogs, Trash) lives in `xv-library-panels.css`.
 
 ## Buttons
 
@@ -73,37 +75,49 @@ A 76 px **icon rail** (expandable to labels, remembered as `xv-nav`) with a tool
 glass top bar (search, Command Center, view controls) and page headers with a title, a one-line description and
 the page's primary action. Pages enter along the navigation direction.
 
-## Library 4.0 (`xv-library4.js`, `xv-aurora-library.css`)
+## Library 5.0 (`library-feed.js`, `library-workspace.js`, `xv-library5.css`)
 
-- **Heading:** names the destination, author, tag, board or saved view; a sub-line describes the active filters
-  in words. It swaps with a short fade when the query changes.
-- **Filter builder:** a popover (`<details>`) with Media (image / video / GIF), Posted (any, 7 / 30 / 365 days or
-  From–Through dates), Author and Tag with suggestions, minimum likes, Status (favourite, note, inbox, later…)
-  and Kind (original, reply, quote…). It only writes ordinary search syntax, so everything it does can be typed.
-- **Chips:** each filter in the query is a removable chip; **Clear** and **Save view** sit at the end of the row.
-- **Cards:** avatar, name, handle, verified badge, date; reply/thread context; text; a 1–4 media grid with
-  `+N`; quoted post (hydrated from the archive, or "not archived"); link card; poll; Community Note; your note;
-  tags; metrics; actions revealed on hover/focus and always visible on touch. Author, thread and note are
-  shortcuts that narrow the search.
-- **Layouts:** Cards, Gallery, Masonry, Compact (rows), Table and Timeline (avatar column with day separators)
-  share the same card anatomy at different densities. Facets and the inspector use the same section headers.
-- **Selection:** a floating bulk bar with count, primary actions and More; selection is visible on the card
-  (accent ring + check).
+- **Frame:** sidebar · results · Inspector side by side in one page grid; `.lib-main` is the only scroller. The
+  sidebar collapses (`\`), its sections fold and remember, long names truncate with a tooltip; the Inspector is
+  optional and resizable and never replaces the results.
+- **Header (two rows, ~96 px):** sidebar toggle, title and count, search, layout switch, View menu, sort and
+  actions; then the filter chips. Nothing else is permanent: the timeline strip is folded, the filter builder and
+  View options are popovers. On phones only the search (or the selection bar) stays pinned.
+- **Layouts with a purpose:** Feed (one reading column; Reading 620 px / Wide 760 px / Full), Cards (fluid columns from
+  container width), Grid (even tiles), Wall (natural proportions), List (76 px rows) and Table (44 px rows,
+  sortable). The View menu sets card style (Compact, Comfortable, Media first, Detailed), media Fill or Whole
+  image, feed width and tile size; every choice is remembered.
+- **Cards:** flat surfaces with a hairline, not boxes in boxes. Avatar (archived copy or monogram), name,
+  handle, verified badge and date on one line; reply/thread context; text; media in an aspect-ratio box (1–4
+  grid, `+N`, video poster with a play badge, GIF badge, missing-media and sensitive states); quoted post; link
+  card; poll; Community Note; note and tags. Actions appear on hover/focus and are always visible on touch.
+- **Selection:** a check on every card, Shift-click ranges, Select loaded / every match; the bulk bar is part of
+  the sticky header (on phones it is the pinned row) instead of floating over posts.
+- **Paging:** an in-flow footer — status, Load more, Previous/Next page, Back to top. No bar ever overlaps a post.
 
-## Phone Remote 3.0 (`FFmpeg_Helper/remote-ui`)
+## Downloads and Atlas additions (25.0)
 
-- **Navigation:** bottom bar with Library, Downloads (badge while transfers run), Overview and Settings; a
-  compact connection header stays on top.
-- **Feed / grid:** feed cards mirror the Library card (monogram avatar — the phone never contacts X); the grid is a
-  media contact sheet. The choice persists (`xvault.remote.layout.v1`) and switches inside a view transition.
-- **Sheets:** preview, extras and actions open as bottom sheets with a grab handle; Share uses the Web Share API
-  and falls back to copying the link.
-- **Downloads:** hero status, progress bar, stat tiles, transfers and recent files. Pause / Resume / Retry appear
-  only when the device has `downloads.manage`; polling (3 s) runs only while the view is visible.
-- **Overview:** stat tiles, 12 month bars and top people that open as searches, recent activity.
-- **Viewer:** swipe left/right, swipe down (≥ 110 px) to close, double-tap to 2.5×, pinch 1–4×, clamped pan, a
-  zoom button with `aria-pressed`, keys `+`/`-`/`0`.
-- **Themes:** Aurora, True black and Paper with a matching `theme-color`; switching themes suppresses transitions.
+- **Media hosts:** one row per source with a label (Images, Video and GIFs, or the host name), facts in one line
+  ("Paused · queued files wait · 3 waiting · 120 done"), the most common problem in small text, and Pause/Resume as
+  a toggle button (`aria-pressed`). A paused row gets a faint warning tint.
+- **Threads and quotes:** a thread is drawn as a spine (one dot per archived post, root larger and in the accent),
+  a quoted post as a fan (one spoke per quoting post). Text beside each shape names the post; a post outside the
+  archive reads "Not in your archive · open on X".
+
+## Phone Remote 4.0 (`FFmpeg_Helper/remote-ui`)
+
+- **Navigation:** five tabs — Library, Capture, Downloads (badge while transfers run), Overview, Phone — with
+  labels that shrink rather than overflow down to 300 px; a compact connection header stays on top.
+- **Feed / grid:** feed cards mirror the Library card with the **archived avatar** (fetched once per author per
+  session from the computer, monogram until then, none in Data Saver); the grid is a media contact sheet.
+- **Capture:** a paste field with a Paste button, one row per link with a state chip (Waiting, Opening, Saved,
+  Already archived, Problem), a preview once saved, and 44 px icon actions (Show in Library, Retry, Open on X,
+  Remove/Cancel). Filters with counts, Retry problems, Clear finished. Offline links wait in an outbox card with
+  Send now. Without the permission the view explains how to allow it.
+- **Downloads:** hero status, stat tiles, queue controls, Images / Video host toggles, transfers with Pause/Resume
+  and Cancel, Up next with Download next, Recent. Controls only for devices with `downloads.manage`.
+- **Sheets, viewer and themes:** as in 3.0 (bottom sheets with Share; swipe, swipe-down, double-tap, pinch; Aurora,
+  True black and Paper).
 
 ## Motion
 

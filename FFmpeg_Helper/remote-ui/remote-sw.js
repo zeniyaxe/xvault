@@ -1,4 +1,4 @@
-const CACHE = 'xvault-remote-shell-v7';
+const CACHE = 'xvault-remote-shell-v8';
 const SHELL = [
   '/',
   '/index.html',
@@ -6,6 +6,7 @@ const SHELL = [
   '/remote-font.woff2',
   '/remote.js',
   '/remote-drafts.js',
+  '/remote-capture.js',
   '/remote-sw.js',
   '/manifest.webmanifest',
   '/app-icon.svg',
@@ -40,12 +41,14 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   // Never cache searches, device sessions, grants, or media bytes.
   if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
-  if (!SHELL.includes(url.pathname)) return;
+  // The share target (/share?url=…) is the app shell too; offline it still opens so the link waits in the outbox.
+  const shared = request.mode === 'navigate' && /^\/share\/?$/.test(url.pathname);
+  if (!SHELL.includes(url.pathname) && !shared) return;
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
         .then(response => {
-          if (response.ok) caches.open(CACHE).then(cache => cache.put('/', response.clone()));
+          if (response.ok && !shared) caches.open(CACHE).then(cache => cache.put('/', response.clone()));
           return response;
         })
         .catch(async () => (await caches.match('/')) || Response.error())

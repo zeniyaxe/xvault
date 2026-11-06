@@ -9,7 +9,8 @@ const remoteControls = fs.readFileSync(new URL('../remote-query-controls.mjs', i
 const storage = collapseSource(readSource('library-storage.mjs'));
 const dashboard = compactSource(readSource('dashboard.js'));
 const bulkUi = fs.readFileSync(new URL('../bulk-download-ui.js', import.meta.url), 'utf8');
-const css = compactSource(readSource('xv-library.css'));
+const css = compactSource(readSource('xv-library5.css'));
+const feed = collapseSource(readSource('library-feed.js'));
 const exporter = fs.readFileSync(new URL('../library-export-worker.js', import.meta.url), 'utf8');
 const dashboardMock = fs.readFileSync(new URL('./chrome-mock.js', import.meta.url), 'utf8');
 
@@ -372,18 +373,27 @@ assert.match(
 );
 assert.match(workspace, /librarySearchDebounce/);
 assert.match(workspace, /IntersectionObserver/);
-assert.match(workspace, /contentVisibility/);
+assert.match(
+  workspace,
+  /list\.dataset\.cv = settings\.libraryContentVisibility !== false/,
+  'the containment preference should switch the card grid between content-visibility and plain layout'
+);
+assert.match(css, /\[data-cv='auto'\][^{]*>\.tweet\{content-visibility:auto;contain-intrinsic-size:auto 420px/);
+// XVault 25: one scroller; the feed renderer mounts cards in blocks and recycles far-away blocks into spacers.
+assert.match(feed, /const BLOCK_ROWS = \d+;/, 'cards should mount in row-aligned blocks');
+assert.match(feed, /const MAX_MOUNTED_BLOCKS = \d+;/, 'the mounted card window should be bounded');
+assert.match(feed, /releaseNode/, 'recycled cards should release their media and observers');
+assert.doesNotMatch(feed, /library\.map|GET_ALL/, 'the feed renderer must not materialize the archive');
 const selectionRenderer = workspaceText.match(/function renderSelection\(\) \{([\s\S]*?)\n  \}/)?.[1] || '';
-assert.match(selectionRenderer, /resultRows\(\)/, 'selection decoration should resolve only the current result page');
 assert.match(
   selectionRenderer,
-  /matching\.slice\(0, exportPageSize\(\)\)/,
-  'selection decoration should stay bounded by the configured page size'
+  /XVaultLibraryFeed\?\.syncSelection\(selected\)/,
+  'selection decoration should patch only mounted cards'
 );
 assert.doesNotMatch(
   selectionRenderer,
-  /new Map\(library\.map/,
-  'selection changes should not rematerialize an ID map for the whole archive'
+  /new Map\(library\.map|resultRows\(\)\.map/,
+  'selection changes should not rematerialize an ID map for the whole archive or result set'
 );
 assert.match(
   workspace,
@@ -402,7 +412,6 @@ assert.match(background, /settingsVersion:18/);
 assert.match(background, /libraryPageSize:120/);
 assert.match(bulkUi, /Performance on large archives/);
 assert.match(bulkUi, /xvLibraryPerfReset/);
-assert.match(workspace, /containIntrinsicSize/);
 assert.match(css, /grid-auto-rows:max-content/, 'grid rows must size to their tiles, not share the scroller height');
 assert.match(css, /overflow:clip/, 'posts must not be scroll containers inside the grid');
 assert.match(workspace, /libraryExportOpen/);
@@ -412,5 +421,5 @@ assert.match(exporter, /importScripts\('link-utils\.js', 'link-export\.js'\)/);
 assert.match(exporter, /type: 'progress'/);
 
 console.log(
-  'library performance: cursor-backed startup, page-only memory, selection bounds, settings, and containment checks passed'
+  'library performance: cursor-backed startup, page-only memory, windowed feed, selection bounds, settings, and containment checks passed'
 );

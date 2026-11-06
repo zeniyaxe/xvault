@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import http.server
@@ -42,8 +43,47 @@ MEDIA_CACHE_LIMIT = 48 * 1024 * 1024
 TLS_CERT_DAYS = 825
 ALLOWED_SORTS = {'new', 'old', 'likes', 'views', 'bookmarks', 'reposts', 'replies', 'media', 'author'}
 POST_ID_RE = re.compile(r'^\d{1,32}$')
+# Per-host download pause from the phone is limited to X's two media hosts.
+REMOTE_MEDIA_HOSTS = ('pbs.twimg.com', 'video.twimg.com')
 HANDLE_RE = re.compile(r'^[A-Za-z0-9_]{1,15}$')
 DOMAIN_RE = re.compile(r'^[A-Za-z0-9.-]{1,253}$')
+CAPTURE_HOST_RE = re.compile(r'^(?:www\.|mobile\.|m\.)?(?:x|twitter|fxtwitter|vxtwitter|fixupx|fixvx|twittpr)\.com$', re.I)
+CAPTURE_URL_RE = re.compile(r'https?://[^\s<>"\'()]+', re.I)
+CAPTURE_STATES = {'queued', 'waiting', 'capturing', 'archived', 'duplicate', 'unavailable', 'failed'}
+CAPTURE_RESERVED = {'i', 'home', 'search', 'explore', 'settings', 'notifications', 'messages'}
+CAPTURE_RATE = (30, 300)  # at most 30 links per device in five minutes
+AVATAR_TYPES = {'image/jpeg': b'\xff\xd8', 'image/png': b'\x89PNG', 'image/webp': b'RIFF', 'image/gif': b'GIF8'}
+MAX_AVATAR_BYTES = 512 * 1024
+
+
+def parse_capture_link(text):
+    """First X post link in shared text → (post id, handle, canonical x.com URL), or None.
+
+    Mirrors sw/capture-inbox.mjs parseCaptureUrl: x.com, twitter.com and common mirrors; /name/status/id,
+    /i/status/id and /i/web/status/id. Anything else (other hosts, credentials, odd ports) is refused."""
+    for match in CAPTURE_URL_RE.finditer(str(text or '')[:4096]):
+        candidate = match.group(0).rstrip('.,;:!?')
+        try:
+            parsed = urllib.parse.urlsplit(candidate)
+            port = parsed.port
+        except ValueError:
+            continue
+        if (parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or
+                port not in (None, 80, 443) or not CAPTURE_HOST_RE.fullmatch(parsed.hostname)):
+            continue
+        parts = [part for part in parsed.path.split('/') if part]
+        at = next((index for index, part in enumerate(parts) if part in ('status', 'statuses')), -1)
+        if at < 0 or at + 1 >= len(parts) or not re.fullmatch(r'\d{1,25}', parts[at + 1]):
+            continue
+        before = parts[:at]
+        handle = ''
+        if len(before) == 1 and HANDLE_RE.fullmatch(before[0]) and before[0].lower() not in CAPTURE_RESERVED:
+            handle = before[0]
+        elif not (len(before) == 0 or (before[0] == 'i' and (len(before) == 1 or before[1] == 'web'))):
+            continue
+        post_id = str(int(parts[at + 1]))
+        return post_id, handle, f'https://x.com/{handle or "i"}/status/{post_id}'
+    return None
 
 
 def _bounded_int(value, limit=1_000_000_000):
@@ -354,6 +394,20 @@ class RemoteCompanion:
         self._origins = set()
         self._hosts = set()
         self._tls_fingerprint = ''
+        self._capture_times = {}
+
+    def allow_capture(self, device_id: str) -> bool:
+        """Sliding-window limit on links per device, so a stuck share loop cannot flood the inbox."""
+        limit, window = CAPTURE_RATE
+        now = time.monotonic()
+        with self._lock:
+            times = [at for at in self._capture_times.get(device_id, []) if now - at < window]
+            if len(times) >= limit:
+                self._capture_times[device_id] = times
+                return False
+            times.append(now)
+            self._capture_times[device_id] = times
+            return True
 
     @property
     def base_url(self):
@@ -465,7 +519,8 @@ class RemoteCompanion:
 
             def _headers(self, content_type='application/json; charset=utf-8', length=None, extra=None):
                 self.send_header('Content-Type', content_type)
-                self.send_header('Cache-Control', 'no-store')
+                if 'Cache-Control' not in (extra or {}):
+                    self.send_header('Cache-Control', 'no-store')
                 self.send_header('X-Content-Type-Options', 'nosniff')
                 self.send_header('Referrer-Policy', 'no-referrer')
                 self.send_header('X-Frame-Options', 'DENY')
@@ -580,12 +635,13 @@ class RemoteCompanion:
                     return
                 parsed = urllib.parse.urlsplit(self.path)
                 path = parsed.path
-                if path in ('/', '/index.html', '/pair'):
+                if path in ('/', '/index.html', '/pair', '/share', '/share/'):
                     return self._static('index.html', 'text/html; charset=utf-8')
-                if path in ('/remote.css', '/remote.js', '/remote-drafts.js', '/remote-sw.js', '/manifest.webmanifest', '/app-icon.svg', '/app-icon-192.png', '/app-icon-512.png', '/remote-font.woff2'):
+                if path in ('/remote.css', '/remote.js', '/remote-drafts.js', '/remote-capture.js', '/remote-sw.js', '/manifest.webmanifest', '/app-icon.svg', '/app-icon-192.png', '/app-icon-512.png', '/remote-font.woff2'):
                     names = {'/remote.css': ('remote.css', 'text/css; charset=utf-8'),
                              '/remote.js': ('remote.js', 'text/javascript; charset=utf-8'),
                              '/remote-drafts.js': ('remote-drafts.js', 'text/javascript; charset=utf-8'),
+                             '/remote-capture.js': ('remote-capture.js', 'text/javascript; charset=utf-8'),
                              '/remote-sw.js': ('remote-sw.js', 'text/javascript; charset=utf-8'),
                              '/manifest.webmanifest': ('manifest.webmanifest', 'application/manifest+json'),
                              '/app-icon.svg': ('app-icon.svg', 'image/svg+xml'),
@@ -655,6 +711,17 @@ class RemoteCompanion:
                     except Exception:
                         return self._send(502, {'error': 'XVault could not read the download queue'})
                     return self._send(200, self._clean_downloads(result, device))
+                if path == '/api/capture':
+                    device = self._device('capture.create')
+                    if not device:
+                        return
+                    try:
+                        result = app.rpc('capture.list', {})
+                    except Exception:
+                        return self._send(502, {'error': 'XVault could not read the capture inbox'})
+                    return self._send(200, self._clean_capture(result, device))
+                if path.startswith('/api/avatar/'):
+                    return self._serve_avatar(path.rsplit('/', 1)[-1])
                 if path == '/api/overview':
                     device = self._device('library.read')
                     if not device:
@@ -796,15 +863,73 @@ class RemoteCompanion:
                     if not device:
                         return
                     action = payload.get('action')
-                    if action not in ('pause', 'resume', 'retry'):
+                    post_id = str(payload.get('postId') or '')
+                    download_id = payload.get('downloadId')
+                    host = payload.get('host')
+                    item_action = action in ('pause-item', 'resume-item', 'cancel-item')
+                    host_action = action in ('pause-host', 'resume-host')
+                    allowed = {'action'} | ({'postId'} if action == 'prioritize' else set()) | (
+                        {'downloadId'} if item_action else set()) | ({'host'} if host_action else set())
+                    if (set(payload) - allowed or
+                            action not in ('pause', 'resume', 'retry', 'prioritize', 'pause-item', 'resume-item', 'cancel-item',
+                                           'pause-host', 'resume-host') or
+                            (action == 'prioritize' and not POST_ID_RE.fullmatch(post_id)) or
+                            (item_action and (isinstance(download_id, bool) or not isinstance(download_id, int) or
+                                              not 0 < download_id < 1 << 31)) or
+                            (host_action and host not in REMOTE_MEDIA_HOSTS)):
                         return self._send(400, {'error': 'Download action is invalid'})
+                    extra = {'postId': post_id} if action == 'prioritize' else {'downloadId': download_id} if item_action else {
+                        'host': host} if host_action else {}
                     try:
-                        result = app.rpc('downloads.control', {'action': action})
+                        result = app.rpc('downloads.control', {'action': action, **extra})
                     except Exception:
                         return self._send(502, {'error': 'XVault could not change the download queue'})
                     result = result if isinstance(result, dict) else {}
                     return self._send(200, {'ok': result.get('ok') is not False, 'action': action,
                                             'count': _bounded_int(result.get('paused', result.get('resumed', result.get('retried', result.get('count', 0)))))})
+                if parsed.path == '/api/capture':
+                    device = self._device('capture.create')
+                    if not device:
+                        return
+                    if set(payload) - {'url', 'text', 'title', 'via'} or payload.get('via', 'paste') not in ('paste', 'share') or not all(
+                            isinstance(payload.get(key, ''), str) and len(payload.get(key, '')) <= 2048 for key in ('url', 'text', 'title')):
+                        return self._send(400, {'error': 'Capture request is invalid'})
+                    link = parse_capture_link(' '.join(str(payload.get(key) or '') for key in ('url', 'text', 'title')))
+                    if not link:
+                        return self._send(400, {'error': 'No X post link found. Share or paste a link like x.com/name/status/123.'})
+                    if not app.allow_capture(device['id']):
+                        return self._send(429, {'error': 'Too many links at once. Wait a few minutes, then send the rest.'})
+                    post_id, _handle, url = link
+                    try:
+                        result = app.rpc('capture.enqueue', {'url': url, 'deviceId': device['id'], 'deviceName': device['name'],
+                                                             'via': payload.get('via') or 'paste'})
+                    except Exception:
+                        return self._send(502, {'error': 'XVault could not add this link to the capture inbox'})
+                    if not isinstance(result, dict) or result.get('ok') is False:
+                        return self._send(400, {'error': str((result or {}).get('error') or 'This link could not be captured')[:180]})
+                    clean = self._clean_capture(result, device)
+                    added = [self._clean_capture_item(row, device) for row in (result.get('added') or [])[:1] if isinstance(row, dict)]
+                    added = [row for row in added if row]
+                    if added:
+                        duplicate = (result.get('added') or [{}])[0].get('duplicate')
+                        added[0]['duplicate'] = duplicate if duplicate in ('archived', 'pending') else None
+                    clean['added'] = added
+                    clean['id'] = post_id
+                    return self._send(200, clean)
+                if parsed.path == '/api/capture/control':
+                    device = self._device('capture.create')
+                    if not device:
+                        return
+                    action = payload.get('action')
+                    post_id = str(payload.get('id') or '')
+                    if (set(payload) - {'action', 'id'} or action not in ('retry', 'remove', 'clear', 'retry-all') or
+                            (action in ('retry', 'remove') and not POST_ID_RE.fullmatch(post_id))):
+                        return self._send(400, {'error': 'Capture action is invalid'})
+                    try:
+                        result = app.rpc('capture.control', {'action': action, 'id': post_id if action in ('retry', 'remove') else ''})
+                    except Exception:
+                        return self._send(502, {'error': 'XVault could not update the capture inbox'})
+                    return self._send(200, self._clean_capture(result, device))
                 if parsed.path == '/api/favorite':
                     device = self._device('favorite.write')
                     if not device:
@@ -944,6 +1069,7 @@ class RemoteCompanion:
                     else:
                         for key in ('bytesReceived', 'totalBytes', 'speedBps'):
                             out[key] = _bounded_int(row.get(key), 1 << 50)
+                        out['downloadId'] = _bounded_int(row.get('downloadId'), (1 << 31) - 1)
                     return out
                 eta = result.get('etaSeconds')
                 return {'countsReady': result.get('countsReady') is True,
@@ -956,6 +1082,10 @@ class RemoteCompanion:
                         'etaSeconds': _bounded_int(eta, 10_000_000) if isinstance(eta, (int, float)) and not isinstance(eta, bool) else None,
                         'transfers': [item(row) for row in (result.get('transfers') or [])[:8] if isinstance(row, dict)],
                         'recent': [item(row, True) for row in (result.get('recent') or [])[:24] if isinstance(row, dict)],
+                        'upNext': [{'name': str(row.get('name') or 'media')[:120], 'kind': str(row.get('kind') or '')[:24],
+                                    'postId': str(row.get('postId')) if POST_ID_RE.fullmatch(str(row.get('postId') or '')) else None}
+                                   for row in (result.get('upNext') or [])[:6] if isinstance(row, dict)],
+                        'pausedHosts': [host for host in (result.get('pausedHosts') or []) if host in REMOTE_MEDIA_HOSTS],
                         'canManage': 'downloads.manage' in device['permissions']}
 
             @staticmethod
@@ -974,6 +1104,68 @@ class RemoteCompanion:
                 return {'totals': {key: _bounded_int(totals.get(key)) for key in
                                    ('posts', 'media', 'images', 'videos', 'favorites', 'notes', 'later', 'people')},
                         'months': months, 'authors': authors}
+
+            @staticmethod
+            def _clean_capture_item(row, device):
+                post_id = str(row.get('id') or '')
+                if not POST_ID_RE.fullmatch(post_id):
+                    return None
+                handle = str(row.get('handle') or '')
+                handle = handle if HANDLE_RE.fullmatch(handle) else ''
+                state = str(row.get('state') or '')
+                preview = row.get('preview') if isinstance(row.get('preview'), dict) else None
+                clean_preview = None
+                if preview:
+                    preview_handle = str(preview.get('handle') or '')
+                    clean_preview = {'name': str(preview.get('name') or '')[:80],
+                                     'handle': preview_handle if HANDLE_RE.fullmatch(preview_handle) else '',
+                                     'text': str(preview.get('text') or '')[:280],
+                                     'createdAt': str(preview.get('createdAt') or '')[:40],
+                                     'mediaCount': _bounded_int(preview.get('mediaCount'), 1000),
+                                     'video': preview.get('video') is True}
+                source = str(row.get('source') or '')
+                return {'id': post_id, 'handle': handle, 'url': f'https://x.com/{handle or "i"}/status/{post_id}',
+                        'state': state if state in CAPTURE_STATES else 'queued',
+                        'error': str(row.get('error') or '')[:160],
+                        'source': source if source in ('remote', 'desktop', 'share') else 'desktop',
+                        'device': str(row.get('device') or '')[:48],
+                        'mine': hmac.compare_digest(str(row.get('deviceId') or ''), str(device['id'])),
+                        'attempts': _bounded_int(row.get('attempts'), 100),
+                        'createdAt': _bounded_int(row.get('createdAt'), 9_007_199_254_740_991),
+                        'updatedAt': _bounded_int(row.get('updatedAt'), 9_007_199_254_740_991),
+                        'preview': clean_preview}
+
+            @classmethod
+            def _clean_capture(cls, result, device):
+                result = result if isinstance(result, dict) else {}
+                items = [cls._clean_capture_item(row, device) for row in (result.get('items') or [])[:60] if isinstance(row, dict)]
+                counts = result.get('counts') if isinstance(result.get('counts'), dict) else {}
+                return {'ok': True, 'paused': result.get('paused') is True,
+                        'pending': _bounded_int(result.get('pending'), 10_000),
+                        'counts': {key: _bounded_int(counts.get(key), 10_000) for key in sorted(CAPTURE_STATES)},
+                        'items': [item for item in items if item]}
+
+            def _serve_avatar(self, handle):
+                device = self._device('library.read')
+                if not device:
+                    return
+                if not HANDLE_RE.fullmatch(str(handle or '')):
+                    return self._send(400, {'error': 'Avatar handle is invalid'})
+                try:
+                    result = app.rpc('avatar.read', {'handle': handle})
+                except Exception:
+                    return self._send(502, {'error': 'XVault could not read this avatar'})
+                if not isinstance(result, dict) or not result.get('ok') or not isinstance(result.get('data'), str):
+                    return self._send(404, {'error': 'No archived avatar for this author'})
+                mime = str(result.get('mime') or '')
+                try:
+                    data = base64.b64decode(result['data'][: MAX_AVATAR_BYTES * 2], validate=True)
+                except (ValueError, TypeError):
+                    return self._send(502, {'error': 'The archived avatar is damaged'})
+                magic = AVATAR_TYPES.get(mime)
+                if not magic or not data.startswith(magic) or len(data) > MAX_AVATAR_BYTES:
+                    return self._send(415, {'error': 'The archived avatar is not a supported image'})
+                return self._send_bytes(200, data, mime, {'Cache-Control': 'private, max-age=86400'})
 
             @staticmethod
             def _valid_post_link(value, post_id):

@@ -167,6 +167,30 @@ export const DASHBOARD_ICONS = {
   type: 'type',
   textQuote: 'text-quote',
   menu: 'menu',
+  // XVault 25 "Vantage"
+  verified: 'badge-check',
+  sidebar: 'panel-left',
+  sidebarClose: 'panel-left-close',
+  sidebarOpen: 'panel-left-open',
+  panelRight: 'panel-right',
+  columns: 'columns-3',
+  arrowUp: 'arrow-up',
+  toTop: 'chevrons-up',
+  imageOff: 'image-off',
+  ratio: 'ratio',
+  phone: 'smartphone',
+  paste: 'clipboard-paste',
+  playCircle: 'circle-play',
+  pauseCircle: 'circle-pause',
+  priority: 'list-ordered',
+  graph: 'waypoints',
+  diagnose: 'stethoscope',
+  gauge: 'gauge',
+  fold: 'fold-vertical',
+  unfold: 'unfold-vertical',
+  importFile: 'import',
+  checkAll: 'check-check',
+  rows: 'rows-3',
 };
 
 // The phone remote keeps its own sprite (served by the helper, no extension files). Same family, fewer icons.
@@ -231,6 +255,18 @@ export const REMOTE_ICONS = {
   users: 'users-round',
   hourglass: 'hourglass',
   'reply-to': 'message-circle-reply',
+  // Phone Remote 4.0
+  inbox: 'inbox',
+  paste: 'clipboard-paste',
+  'share-in': 'share-2',
+  up: 'arrow-up',
+  stop: 'square',
+  history: 'history',
+  volume: 'volume-2',
+  mute: 'volume-x',
+  map: 'map',
+  graph: 'waypoints',
+  reader: 'book-open-text',
 };
 
 async function inner(name) {

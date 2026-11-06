@@ -197,10 +197,37 @@ try {
   });
   const final = await send({ type: 'DOWNLOAD_QUEUE_STATS' });
   assert.equal(final.failed, 0, JSON.stringify({ failed: final.failed }));
+
+  // XVault 25 per-host pause: files from a paused host wait while the queue itself stays running.
+  const host = new URL(origin).hostname;
+  await page.waitForSelector(`#xdHosts:not([hidden]) .xd-host[data-host="${host}"]`);
+  await page.locator(`#xdHosts .xd-host[data-host="${host}"] [data-xd-host="toggle"]`).click();
+  await page.waitForSelector(`#xdHosts .xd-host.is-paused[data-host="${host}"] [aria-pressed="true"]`);
+  assert.deepEqual((await page.evaluate(() => chrome.storage.local.get('settings'))).settings.pausedDownloadHosts, [
+    host,
+  ]);
+  await send({ type: 'QUEUE_DOWNLOADS', items: [item('/fast-4.png', 5)] });
+  await page.waitForTimeout(2500);
+  const hostHeld = await send({ type: 'DOWNLOAD_QUEUE_STATS' });
+  assert.equal(hostHeld.pausedByUser, false, 'a host pause is not a queue pause');
+  assert.deepEqual(hostHeld.pausedHosts, [host]);
+  assert.ok(
+    hostHeld.queued >= 1,
+    `the file from the paused host waits: ${JSON.stringify({ queued: hostHeld.queued })}`
+  );
+  assert.match(await page.textContent(`#xdHosts .xd-host[data-host="${host}"]`), /Paused · queued files wait/);
+  await page.locator('#xdHosts').screenshot({ path: path.join(root, 'output', 'e2e', 'downloads-hosts.png') });
+  await page.locator(`#xdHosts .xd-host[data-host="${host}"] [data-xd-host="toggle"]`).click();
+  await page.waitForFunction(() => document.querySelectorAll('#downloadHistory .xd-row.complete').length >= 6, null, {
+    timeout: 20000,
+  });
+  assert.deepEqual((await send({ type: 'DOWNLOAD_QUEUE_STATS' })).pausedHosts, []);
   await page.waitForFunction(() => document.querySelector('#qPercent').textContent !== '…');
   assert.notEqual(await page.textContent('#qPercent'), '35%');
   assert.deepEqual(errors, []);
-  console.log('downloads page: honest progress, live transfer card, filters/search, persistent pause, resume, retry');
+  console.log(
+    'downloads page: honest progress, live transfer card, filters/search, persistent pause, resume, retry, per-host pause'
+  );
 } finally {
   await context.close();
   server.close();

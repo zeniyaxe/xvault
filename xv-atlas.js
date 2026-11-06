@@ -308,6 +308,7 @@
       hydrateShared();
       paintLab();
     }
+    if (target.querySelector('#xaThreads')) void hydrateThreads();
     if (state.view === 'topics') window.XVaultForge?.topics(target.querySelector('#xfTopics'));
   }
 
@@ -653,6 +654,92 @@ ${year.tags?.length ? `<section class="xa-section"><header class="xa-section-hea
   const kpi = (label, value, note) =>
     `<div class="xa-kpi"><span>${html(label)}</span><strong data-count="${Number(value) || 0}">${count(value)}</strong><small>${html(note)}</small></div>`;
 
+  // XVault 25: "Threads and quotes" — the largest conversations and most-quoted posts in the archive, each with a
+  // small shape (a thread spine with one dot per archived post; a fan with one spoke per quoting post). Text is
+  // filled in from the records after render; quoted posts that are not archived open on X instead.
+  function threadSpine(posts) {
+    const dots = Math.min(16, posts),
+      width = 132,
+      gap = dots > 1 ? (width - 12) / (dots - 1) : 0;
+    const circles = Array.from({ length: dots }, (_, index) => {
+      const x = 6 + index * gap,
+        y = 14 + (index % 2 ? -5 : 5) * (index ? 1 : 0);
+      return `<circle cx="${x.toFixed(1)}" cy="${y}" r="${index ? 3.2 : 5}"${index ? '' : ' class="is-root"'}/>`;
+    });
+    const path = Array.from({ length: dots }, (_, index) => {
+      const x = 6 + index * gap,
+        y = 14 + (index % 2 ? -5 : 5) * (index ? 1 : 0);
+      return `${index ? 'L' : 'M'}${x.toFixed(1)},${y}`;
+    }).join(' ');
+    return `<svg class="xa-shape" viewBox="0 0 ${width} 28" aria-hidden="true"><path d="${path}"/>${circles.join('')}${
+      posts > dots ? `<text x="${width}" y="26" text-anchor="end">+${posts - dots}</text>` : ''
+    }</svg>`;
+  }
+  function quoteFan(quotes) {
+    const spokes = Math.min(10, quotes);
+    const lines = Array.from({ length: spokes }, (_, index) => {
+      const angle = -Math.PI / 2 + ((index + 0.5) / spokes) * Math.PI * 2,
+        x = 22 + Math.cos(angle) * 11,
+        y = 14 + Math.sin(angle) * 11;
+      return `<line x1="22" y1="14" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6"/>`;
+    });
+    return `<svg class="xa-shape is-fan" viewBox="0 0 44 28" aria-hidden="true">${lines.join('')}<circle class="is-root" cx="22" cy="14" r="5"/></svg>`;
+  }
+  function threadsSection(relation) {
+    const threads = relation.topConversations || [],
+      quoted = relation.topQuoted || [];
+    if (!threads.length && !quoted.length) return '';
+    const threadRows = threads
+      .map(
+        row =>
+          `<li><button type="button" class="xa-thread" data-read="${html(row.member)}" data-thread-id="${html(row.member)}">${threadSpine(row.posts)}<span class="xa-thread-copy"><b>Conversation</b><small>${count(row.posts)} archived posts · ${plural(row.people, 'person', 'people')}</small></span></button></li>`
+      )
+      .join('');
+    const quoteRows = quoted
+      .map(
+        row =>
+          `<li><button type="button" class="xa-thread" data-read="${html(row.id)}" data-thread-id="${html(row.id)}">${quoteFan(row.quotes)}<span class="xa-thread-copy"><b>Quoted post</b><small>Quoted by ${plural(row.quotes, 'archived post')}</small></span></button></li>`
+      )
+      .join('');
+    return `<section class="xa-section xa-threads" id="xaThreads"><header class="xa-section-head"><h2>Threads and quotes</h2></header>
+<div class="xa-threadgrid">
+  <div><h3 class="xa-subhead">Largest conversations</h3>${threadRows ? `<ol class="xa-threadlist">${threadRows}</ol>` : '<p class="xa-quiet">No conversation has more than one archived post yet.</p>'}</div>
+  <div><h3 class="xa-subhead">Most-quoted posts</h3>${quoteRows ? `<ol class="xa-threadlist">${quoteRows}</ol>` : '<p class="xa-quiet">No post is quoted by more than one archived post yet.</p>'}</div>
+</div>
+<p class="xa-note">Counted from the posts in your archive. Open one to read the whole thread, its quotes and related posts.</p></section>`;
+  }
+  async function hydrateThreads() {
+    const host = root?.querySelector('#xaThreads');
+    if (!host) return;
+    const buttons = [...host.querySelectorAll('[data-thread-id]')];
+    const ids = [...new Set(buttons.map(button => button.dataset.threadId))].slice(0, 40);
+    let rows = [];
+    try {
+      rows = (await call({ type: 'GET_LIBRARY_RECORDS', ids }))?.rows || [];
+    } catch {}
+    if (!host.isConnected) return;
+    const byId = new Map(rows.filter(Boolean).map(row => [String(row.id), row]));
+    for (const button of buttons) {
+      const post = byId.get(button.dataset.threadId),
+        title = button.querySelector('b');
+      if (post) {
+        title.textContent = `@${post.author?.handle || 'unknown'} · ${String(post.text || 'Media post')
+          .replace(/\s+/g, ' ')
+          .slice(0, 120)}`;
+        continue;
+      }
+      // Not archived (a quoted post outside the vault): open it on X rather than an empty reader.
+      title.textContent = 'Not in your archive · open on X';
+      const link = document.createElement('a');
+      link.className = `${button.className} is-external`;
+      link.href = `https://x.com/i/status/${encodeURIComponent(button.dataset.threadId)}`;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.append(...button.childNodes);
+      button.replaceWith(link);
+    }
+  }
+
   function bars(items, { query, label = item => item.key, empty = 'Nothing yet.' } = {}) {
     if (!items?.length) return `<p class="xa-quiet">${html(empty)}</p>`;
     const max = Math.max(1, ...items.map(item => item.count));
@@ -796,6 +883,7 @@ ${kpi('Active days', streak.activeDays, streak.current > 1 ? `${count(streak.cur
   <section class="xa-section"><header class="xa-section-head"><h2>People you keep</h2><button type="button" class="quiet" data-view="people">All ${count(data.authorsTotal)} →</button></header>${peopleRows(data.authors.slice(0, 8))}</section>
   <section class="xa-section"><header class="xa-section-head"><h2>Conversations</h2></header>${bars(relationRows, { query: row => row.q, empty: 'No replies, quotes or reposts recorded yet.' })}<p class="xa-note">${plural(relation.conversations, 'conversation')} · ${plural(data.total - (relation.replies || 0) - (relation.reposts || 0), 'standalone post')}</p></section>
 </div>
+${threadsSection(relation)}
 <div class="xa-split is-three">
   <section class="xa-section"><header class="xa-section-head"><h2>Where posts came from</h2></header>${bars(data.sources?.slice(0, 8), { query: item => `source:${item.key}`, label: item => item.key.replace(/-/g, ' ') })}</section>
   <section class="xa-section"><header class="xa-section-head"><h2>Languages</h2></header>${bars(data.languages?.slice(0, 8), { query: item => `lang:${item.key}`, label: item => languageNames(item.key) })}</section>

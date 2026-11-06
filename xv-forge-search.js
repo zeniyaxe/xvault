@@ -240,7 +240,8 @@
       banner.id = 'xfAsOfBanner';
       banner.className = 'xf-asof-banner';
       banner.setAttribute('role', 'status');
-      filters.before(banner);
+      // XVault 25: under the sticky Library header, in the scrolling flow (like the board banner).
+      ($('#list') || filters).before(banner);
       banner.addEventListener('click', event => {
         if (event.target.closest('[data-asof-clear]')) run(withAsOf($('#search')?.value || '', ''));
       });

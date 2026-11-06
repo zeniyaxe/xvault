@@ -256,7 +256,7 @@
     style.setProperty('--facet-w', `${pick(WIDTHS.facet, 'facetWidth')}px`);
     style.setProperty(
       '--insp-w',
-      `${Number(settings.inspectorPixels) > 0 ? Math.min(600, Math.max(320, Number(settings.inspectorPixels))) : pick(WIDTHS.inspector, 'inspectorWidth')}px`
+      `${Number(settings.inspectorPixels) > 0 ? Math.min(880, Math.max(300, Number(settings.inspectorPixels))) : pick(WIDTHS.inspector, 'inspectorWidth')}px`
     );
     if (settings.uiFont === 'system')
       style.setProperty('--font-ui', '"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif');

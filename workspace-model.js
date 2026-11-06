@@ -46,7 +46,7 @@
       values.libraryTileSize = Math.max(150, Math.min(440, settings.libraryTileSize));
     if (Number.isFinite(settings.inspectorPixels))
       values.inspectorPixels =
-        settings.inspectorPixels === 0 ? 0 : Math.max(320, Math.min(600, settings.inspectorPixels));
+        settings.inspectorPixels === 0 ? 0 : Math.max(300, Math.min(880, settings.inspectorPixels));
     if (settings.accentCustom === '' || /^#[0-9a-f]{6}$/i.test(settings.accentCustom || ''))
       values.accentCustom = settings.accentCustom;
     values.toolbarActions = toolbar(settings.toolbarActions);

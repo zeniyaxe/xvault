@@ -95,6 +95,13 @@ export const AUTHORS = [
   { handle: 'photo_lee', name: 'Lee Okafor', avatar: true },
   { handle: 'mara_writes', name: 'Mara Ellison' },
   { handle: 'studio_fern', name: 'Studio Fern', avatar: true },
+  {
+    handle: 'averyveryLongHan',
+    name: 'Bartholomew Featherstonehaugh-Montgomery of the Northern Archive Society',
+    avatar: true,
+    brokenAvatar: true,
+  },
+  { handle: 'q', name: 'Q' },
 ];
 const TEXTS = [
   'Sunset over the bay tonight. The fog rolled in just as the light went gold.',
@@ -109,6 +116,8 @@ const TEXTS = [
   'Quick tip: hold Shift while dragging to keep the aspect ratio. Saves me every single day.',
   'A long one. We spent six months interviewing people who archive things obsessively — bookmarks, screenshots, entire timelines. The pattern that kept coming up was not hoarding; it was trust. People keep copies because platforms forget, links rot and accounts disappear. The tools that earned trust were boring in the best way: predictable, local, and honest about what they did not have.',
   'Golden hour, again.',
+  'https://example.com/a/really/long/link/that/should/wrap/instead/of/forcing/horizontal/scrolling/on/small/screens?utm_source=xvault&utm_medium=archive',
+  'Reply-guy energy: honestly the second photo is the better one, and I will not be taking questions at this time.',
 ];
 const RATIOS = [
   [640, 360],
@@ -180,6 +189,14 @@ export function seedPosts(count = 72) {
       post.replyToHandle = author.handle;
     }
     if (i % 7 === 3 && i > 2) post.quotedPostId = String(base + BigInt(i - 2));
+    // A few longer threads and repeatedly quoted posts, so Atlas "Threads and quotes" has something to draw.
+    if (i > 23 && i % 23 >= 1 && i % 23 <= 4 + (i % 3)) {
+      post.conversationId = String(base + BigInt(i - (i % 23)));
+      post.replyToId = String(base + BigInt(i - 1));
+      post.replyToHandle = AUTHORS[(i - 1) % AUTHORS.length].handle;
+    }
+    if (i % 13 === 6 && i > 12) post.quotedPostId = String(base + BigInt(12 + (((i / 13) | 0) % 3)));
+    if (i % 31 === 9) post.quotedPostId = '1790000000000000001';
     if (i % 10 === 8) {
       post.links = ['https://example.com/essays/slow-software'];
       post.card = {
@@ -201,13 +218,19 @@ export function seedPosts(count = 72) {
         totalVotes: 1165,
         final: true,
       };
+    // Realistic edge cases for layout review: sensitive media, a missing (404) file, multi-image, and a broken avatar.
+    if (i % 13 === 6) post.sensitive = true;
+    if (i % 17 === 9 && media.length)
+      media[media.length - 1].url = media[media.length - 1].url.replace('/media/', '/media/MISSING');
+    if (author.brokenAvatar)
+      post.author.avatar = `https://pbs.twimg.com/profile_images/MISSING_${author.handle}_96x96.jpg`;
     posts.push(post);
   }
   return posts;
 }
 
 async function seed(page) {
-  const posts = seedPosts();
+  const posts = seedPosts(Number(arg('count', '96')));
   const stored = await page.evaluate(
     tweets => chrome.runtime.sendMessage({ type: 'STORE_RECORDS', tweets, users: [] }),
     posts
@@ -242,12 +265,16 @@ async function seed(page) {
   return posts;
 }
 
+// The eight review sizes: large desktop, MacBook, common laptop, small laptop, iPad landscape and portrait, phone, narrow phone.
 const VIEWPORTS = {
+  wide: { width: 1920, height: 1080 },
   desktop: { width: 1440, height: 900 },
-  laptop: { width: 1280, height: 800 },
+  laptop: { width: 1366, height: 768 },
+  small: { width: 1280, height: 720 },
   tablet: { width: 1024, height: 768 },
   portrait: { width: 768, height: 1024 },
   phone: { width: 390, height: 844 },
+  narrow: { width: 320, height: 700 },
 };
 
 async function main() {
@@ -261,7 +288,9 @@ async function main() {
     deviceScaleFactor: Number(arg('scale', '1')),
   });
   await context.route('https://pbs.twimg.com/**', route =>
-    route.fulfill({ status: 200, contentType: 'image/png', body: imageFor(route.request().url()) })
+    /MISSING/.test(route.request().url())
+      ? route.fulfill({ status: 404, body: '' })
+      : route.fulfill({ status: 200, contentType: 'image/png', body: imageFor(route.request().url()) })
   );
   await context.route('https://video.twimg.com/**', route => route.abort());
   let [worker] = context.serviceWorkers();
@@ -303,15 +332,27 @@ async function main() {
       await ready();
       const tag = `${theme}-${label}`;
       if (want('library')) {
-        await layout('timeline');
-        await shot(`library-timeline-${tag}`);
-        if (label === 'desktop' || label === 'phone') {
-          for (const name of ['cards', 'gallery', 'masonry', 'compact', 'table']) {
-            await layout(name);
-            await shot(`library-${name}-${tag}`);
-          }
-          await layout('timeline');
+        const everywhere = ['cards', 'timeline', 'gallery'],
+          extra = ['wide', 'desktop', 'phone'].includes(label) ? ['masonry', 'compact', 'table'] : [];
+        for (const name of [...everywhere, ...extra]) {
+          await layout(name);
+          await shot(`library-${name}-${tag}`);
         }
+        // Scroll the library to its end: shows how paging / load-more sits relative to the last posts.
+        await layout('cards');
+        await page.evaluate(() => {
+          const scrollers = [...document.querySelectorAll('*')].filter(
+            el => el.scrollHeight > el.clientHeight + 40 && /auto|scroll/.test(getComputedStyle(el).overflowY)
+          );
+          for (const el of scrollers) el.scrollTop = el.scrollHeight;
+          window.scrollTo(0, document.documentElement.scrollHeight);
+        });
+        await page.waitForTimeout(900);
+        await shot(`library-end-${tag}`);
+        await page.evaluate(() => {
+          for (const el of document.querySelectorAll('*')) if (el.scrollTop) el.scrollTop = 0;
+          window.scrollTo(0, 0);
+        });
       }
       if (want('inspector') && label !== 'phone') {
         await page.locator('#list [data-details]').first().click();
@@ -344,6 +385,15 @@ async function main() {
         for (const name of ['atlas', 'explorer', 'home', 'media', 'studio', 'health', 'settings']) {
           await go(name);
           await shot(`page-${name}-${tag}`);
+          if (name === 'atlas') {
+            const threads = page.locator('#xaThreads');
+            if (await threads.count()) {
+              await threads.scrollIntoViewIfNeeded();
+              await page.waitForTimeout(400);
+              await threads.screenshot({ path: join(out, `atlas-threads-${tag}.png`) });
+              shots.push(`atlas-threads-${tag}`);
+            }
+          }
         }
         await go('library');
       }

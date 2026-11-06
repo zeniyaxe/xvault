@@ -62,6 +62,13 @@
   --t-med: calc(200ms * var(--motion-k, 1));
   --t-slow: calc(340ms * var(--motion-k, 1));
 }
+/* Motion level (--motion-k) and Settings → Animation speed (--motion-scale) are set on <body>, so the timing
+   tokens are resolved there for every theme, not only where a palette rule re-declares them. */
+body {
+  --t-fast: calc(120ms * var(--motion-k, 1) / var(--motion-scale, 1));
+  --t-med: calc(200ms * var(--motion-k, 1) / var(--motion-scale, 1));
+  --t-slow: calc(340ms * var(--motion-k, 1) / var(--motion-scale, 1));
+}
 :root,
 [data-theme] {
   /* derived tokens: recomputed per theme from its base palette */
@@ -831,6 +838,10 @@ body[data-motion='reduced'] .xv-skeleton::after {
   animation: none !important;
   transition-duration: 0s !important;
 }
+/* Calm modes drop hover lifts entirely instead of making them jump. */
+body:is([data-motion='off'], [data-motion='reduced']) :is(.theme-card, .recent-tile, #list > .tweet):hover {
+  transform: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .xv-enter,
   .xv-skeleton::after,
@@ -914,19 +925,28 @@ body[data-motion='reduced'] .xv-skeleton::after {
     display: none;
   }
   .rail nav {
-    flex: 1;
+    flex: 8 1 0;
     display: flex;
+    min-width: 0;
     margin: 0;
     gap: 0;
   }
+  /* all eight destinations share the bar equally and always fit: nothing scrolls off the right edge */
   .rail nav .nav,
   .rail > .nav {
-    flex: 1;
+    flex: 1 1 0;
     min-width: 0;
     min-height: 54px;
   }
-  .nav > svg {
-    padding: 4px 12px;
+  .nav > svg,
+  .nav > svg.xv-icon {
+    padding: 4px clamp(6px, 2.4vw, 12px);
+  }
+  .rail .nav > span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   main {
     height: auto;
@@ -939,6 +959,21 @@ body[data-motion='reduced'] .xv-skeleton::after {
     overflow-x: auto;
     max-width: 52vw;
     scrollbar-width: none;
+  }
+  @media (max-width: 360px) {
+    /* below ~45px per tab the labels would be clipped to a few letters: show icons, keep the names for
+       assistive tech (the span stays in the accessibility tree, just visually hidden) */
+    .rail .nav > span {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+    .rail nav .nav,
+    .rail > .nav {
+      min-height: 50px;
+    }
   }
   /* the status pill sits above the bottom tab bar, not on it */
   .xv-queue-island,
