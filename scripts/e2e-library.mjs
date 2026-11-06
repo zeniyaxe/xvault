@@ -1,5 +1,6 @@
 // Seeds a synthetic archive into the real extension, exercises Library search syntax, and runs the HTML/CSV
 // exporters with an in-memory save picker. Screenshots land in output/e2e/.
+/* global lightboxIndex, lightboxItems, lightboxZoom, setLightboxZoom -- dashboard page globals read in page.evaluate */
 import { chromium } from 'playwright';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -295,6 +296,78 @@ try {
   await page.waitForTimeout(600);
   await page.screenshot({ path: join(out, 'lightbox-zoom.png') });
   check('lightbox zooms out of the clicked thumbnail', zoomStart.zoomed === true, JSON.stringify(zoomStart));
+  // XVault 26 Media Viewer: position line, filmstrip, media facts, keys, details toggle, cursor zoom, shortcut sheet.
+  const viewerBasics = await page.evaluate(() => ({
+    where: document.querySelector('#xvViewerBar .xv-viewer-where')?.textContent || '',
+    film: document.querySelectorAll('#xvFilmstrip .xv-film').length,
+    current: document.querySelector('#xvFilmstrip .xv-film.current')?.dataset.film,
+    facts: document.querySelector('#lbMeta .xv-media-facts')?.textContent || '',
+    index: lightboxIndex,
+    total: lightboxItems.length,
+  }));
+  check(
+    'viewer: position line, filmstrip and media facts',
+    /Post \d+ of \d+/.test(viewerBasics.where) &&
+      (viewerBasics.total < 2 || (viewerBasics.film >= 2 && viewerBasics.current === String(viewerBasics.index))) &&
+      /On disk/.test(viewerBasics.facts) &&
+      /Resolution/.test(viewerBasics.facts),
+    JSON.stringify(viewerBasics)
+  );
+  if (viewerBasics.total >= 3) {
+    await page.keyboard.press('End');
+    const atEnd = await page.evaluate(() => lightboxIndex === lightboxItems.length - 1);
+    await page.keyboard.press('Home');
+    const atStart = await page.evaluate(() => lightboxIndex === 0);
+    await page.locator('#xvFilmstrip .xv-film[data-film="2"]').click();
+    const clicked = await page.evaluate(() => ({
+      index: lightboxIndex,
+      current: document.querySelector('#xvFilmstrip .xv-film.current')?.dataset.film,
+    }));
+    await page.keyboard.press('PageDown');
+    const nextPost = await page.evaluate(() => lightboxItems[lightboxIndex]?.t !== lightboxItems[2]?.t);
+    check(
+      'viewer: Home/End, filmstrip jump and next post',
+      atEnd && atStart && clicked.index === 2 && clicked.current === '2' && nextPost,
+      JSON.stringify({ atEnd, atStart, clicked, nextPost })
+    );
+  }
+  await page.keyboard.press('i');
+  const infoOff = await page.evaluate(() => document.querySelector('#lightbox').classList.contains('xv-info-off'));
+  await page.keyboard.press('i');
+  const infoOn = await page.evaluate(() => !document.querySelector('#lightbox').classList.contains('xv-info-off'));
+  const wheelZoom = await page.evaluate(async () => {
+    const box = document.querySelector('#lbContent'),
+      img = box?.querySelector('img');
+    if (!img) return { skipped: true };
+    if (!img.complete) await new Promise(resolve => img.addEventListener('load', resolve, { once: true }));
+    const rect = img.getBoundingClientRect();
+    box.dispatchEvent(
+      new WheelEvent('wheel', {
+        deltaY: -100,
+        ctrlKey: true,
+        clientX: rect.left + rect.width * 0.25,
+        clientY: rect.top + rect.height * 0.25,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const zoom = lightboxZoom;
+    setLightboxZoom(100, false);
+    return { zoom };
+  });
+  await page.keyboard.press('?');
+  const help = await page.evaluate(() => !!document.querySelector('#xvViewerHelp:not([hidden])'));
+  await page.keyboard.press('Escape');
+  const helpClosedViewerOpen = await page.evaluate(
+    () => !document.querySelector('#xvViewerHelp:not([hidden])') && !document.querySelector('#lightbox.hidden')
+  );
+  check(
+    'viewer: details toggle, Ctrl+wheel zoom at the pointer, shortcut sheet',
+    infoOff && infoOn && (wheelZoom.skipped || wheelZoom.zoom > 100) && help && helpClosedViewerOpen,
+    JSON.stringify({ infoOff, infoOn, wheelZoom, help, helpClosedViewerOpen })
+  );
+  await page.screenshot({ path: join(out, 'media-viewer.png') });
   await page.keyboard.press('Escape');
   await page.waitForTimeout(400);
   const sparks = await page.evaluate(() => {

@@ -188,7 +188,7 @@ async function init() {
   await Promise.allSettled([refresh(), queueStats()]);
   if (settings.healthCheckOnStartup) health().catch(error => console.error('XVault health check unavailable', error));
   setInterval(() => stats().catch(() => {}), 4000);
-  setInterval(() => queueStats().catch(() => {}), 1000);
+  setInterval(() => document.hidden || queueStats().catch(() => {}), 1000);
   setInterval(sampleGraphs, 1000);
 }
 let statsSnapshot = null,
@@ -2492,7 +2492,7 @@ function builtinRenderLightbox() {
     ? `<div class="lbImageCanvas"><img src="${esc(u)}" alt="Media from @${esc(t.author?.handle || 'unknown')}"></div>`
     : `<div class="lbVideoShell"><video src="${esc(u)}" controls autoplay ${kind === 'gif' ? 'loop data-xv-animation="1"' : ''}></video><div class="playerGlow"></div></div>`;
   $('#lbMeta').innerHTML =
-    `<small>${lightboxIndex + 1}/${lightboxItems.length}</small><h3>${esc(t.author?.name || '')}</h3><p>@${esc(t.author?.handle || '')}</p><p class="tweetText">${linkifyText(t.text || '')}</p><div class="lbQuickActions"><button id="lbCopyLink">Copy link</button><button id="lbCopyImage" ${isImage ? '' : 'disabled'}>Copy image</button><button id="lbDownload">Download media</button><button id="lbDownloadPost">Download post</button><button id="lbOpenX">Open X</button></div><div class="drawerKv"><b>Type</b><span>${esc(kind === 'gif' ? (pick.native ? 'GIF / Animated WebP' : 'X animation · MP4') : m.type || 'unknown')}</span></div><div class="drawerKv"><b>Dimensions</b><span>${m.width || '?'}×${m.height || '?'}</span></div><div class="drawerKv"><b>Likes</b><span>${fmt(t.metrics?.likes)}</span></div><div class="drawerKv"><b>Views</b><span>${fmt(t.metrics?.views)}</span></div><div class="drawerKv"><b>Bookmarks</b><span>${fmt(t.metrics?.bookmarks)}</span></div><button id="lbDetails">Post details</button>`;
+    `<small>${lightboxIndex + 1}/${lightboxItems.length}</small><h3>${esc(t.author?.name || '')}</h3><p>@${esc(t.author?.handle || '')}</p><p class="tweetText">${linkifyText(t.text || '')}</p><div class="lbQuickActions"><button id="lbCopyLink">Copy link</button><button id="lbCopyImage" ${isImage ? '' : 'disabled'}>Copy image</button><button id="lbDownload">Download media</button><button id="lbDownloadPost">Download post</button><button id="lbOpenX">Open X</button></div><div class="drawerKv"><b>Type</b><span>${esc(kind === 'gif' ? (pick.native ? 'GIF / Animated WebP' : 'X animation · MP4') : m.type || 'unknown')}</span></div><div class="drawerKv"><b>Likes</b><span>${fmt(t.metrics?.likes)}</span></div><div class="drawerKv"><b>Views</b><span>${fmt(t.metrics?.views)}</span></div><div class="drawerKv"><b>Bookmarks</b><span>${fmt(t.metrics?.bookmarks)}</span></div><button id="lbDetails">Post details</button>`;
   $('#lbDetails').onclick = () => window.openDetails(t.id);
   $('#lbCopyLink').onclick = async () => {
     await navigator.clipboard.writeText(t.url || '');
@@ -2507,7 +2507,8 @@ function builtinRenderLightbox() {
     const im = box.querySelector('img');
     const init = () => {
       computeFit(im);
-      setLightboxZoom(100, false);
+      // Keep a zoom the viewer chose while the image was still loading.
+      setLightboxZoom(lightboxZoom || 100, false);
     };
     if (im.complete) init();
     else im.addEventListener('load', init, { once: true });

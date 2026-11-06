@@ -1,5 +1,44 @@
 # Changelog
 
+## XVault 26.0.0 "Lumen" - 2026-11-05
+
+- **A real Media Viewer.** Opening any photo, GIF or video now shows a viewer built for looking: a top bar with
+  where you are (post n of N · media k of K) and tools for download, details, full screen and shortcuts; a
+  **filmstrip** of everything in the current set (gaps between posts, click to jump); **Media facts** — real
+  resolution, aspect, length, video variants and best bitrate, whether the file is on disk (and which file), alt
+  text, **Download this** / **All from post**; and **Similar in your vault**, six visually or semantically close
+  posts from your archive (click to jump to it, or open its media). Ctrl/⌘ + wheel zooms at the pointer, drag
+  pans, swipe moves on, and the keyboard covers everything (← →, Page Up/Down by post, Home/End, + − 0 1,
+  Space/K, J/L, [ ], M, F, I, D / Shift D, Esc; `?` shows the list). Neighbours are preloaded and items slide in
+  (not under Calm or reduced motion). The background is opaque, so the Library no longer shows through.
+- **A lighter Library.** Quick Look opens as a light dialog instead of a document-wide modal: 254 → 131 ms on a
+  50,000-post archive right after the page mounts (trace 381 → 88 ms). Favoriting a post 161 → 133 ms. Facet
+  counts are computed when the browser is idle, selection repaints only the rows that changed, List/Table cache
+  row geometry, toasts measure off the critical path, and the Downloads page stops painting (and polling) while
+  hidden. Switching layout keeps the post you were reading in place, and each search remembers where you were.
+- **A capture inbox that waits instead of failing.** Links sent from the phone or pasted on the Capture page now
+  get three attempts with backoff (20 s, then 90 s). If the opened page is X's **sign-in wall**, the whole inbox
+  holds — no attempts used — until you sign in and press **Resume**; on a **rate-limit** page it cools down for
+  5 minutes (doubling up to 30); deleted, protected or suspended posts are marked unavailable at once. Retries are
+  scheduled with browser alarms, so they survive the service worker stopping and a browser restart. The Capture
+  page shows a banner for the hold or cool-down, a progress bar, "next try in 1 m 10 s", "attempt 2 of 3" and each
+  item's **attempt history**; the phone shows the same.
+- **Phone Remote 5.0 — made for flaky Wi-Fi.** When the computer drops off, the phone says so with a countdown
+  and reconnects by itself (2 s, backing off to 30 s, and immediately when the network or the tab comes back),
+  shows "Reconnected" and reloads what was missing. The capture **outbox** retries on its own with backoff, records
+  each try and its error, shows links the computer refused, and is safe with the app open in two tabs. **Recent
+  searches** appear as chips under the Library search (Clear; forgotten on unpair).
+- **Downloads that back off.** If one media host keeps refusing (network errors, 429, 5xx, timeouts), XVault stops
+  sending it requests for 30 s, doubling up to 5 minutes, while other hosts keep downloading; Downloads › Media
+  hosts shows "Refusing downloads · waiting 25 s…" with **Try now**. Failed files now explain themselves in one
+  sentence ("X says this media no longer exists — the post or file was probably deleted.", "The disk is full. Free some
+  space, then retry.") with the raw error kept
+  in the tooltip and in Copy details.
+- **Less legacy CSS.** 213 declarations that a newer layer always overrode, and the unused `.bgfx` / `.notif`
+  rules, were removed (legacy sheets 209.6 → 202.9 KB). Screenshots of every page in every theme are unchanged.
+- **Fixes.** A zoom chosen while an image was still loading is kept; the viewer's details panel no longer repeats
+  Dimensions; the phone search box no longer draws two focus rings.
+
 ## XVault 25.0.0 "Vantage" - 2026-11-05
 
 - **Library 5.0 — rebuilt, not restyled.** The Library is now one page with a single scroller (`.lib-main`): a

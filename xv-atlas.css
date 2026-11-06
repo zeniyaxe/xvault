@@ -250,9 +250,6 @@
   }
 }
 @keyframes xa-grow {
-  from {
-    transform: scaleY(0);
-  }
 }
 @keyframes xa-fade {
   from {
@@ -260,9 +257,6 @@
   }
 }
 @keyframes xa-bar-in {
-  from {
-    transform: scaleX(0);
-  }
 }
 
 /* Media mix */

@@ -844,9 +844,6 @@ dialog.xv-reader::backdrop {
   }
 }
 @keyframes tm-fade {
-  from {
-    opacity: 0;
-  }
 }
 @keyframes xr-map-in {
   from {

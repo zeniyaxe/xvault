@@ -625,12 +625,111 @@
       animations.clear();
     }
   }
+  // XVault 26: connection recovery. Losing the computer starts a quiet reconnect loop (2 s doubling to 30 s while
+  // the page is visible, immediately on `online` and when the phone wakes the page); coming back says so once and
+  // lets every view catch up (the capture outbox flushes, an empty or failed Library reloads).
+  const reconnect = { timer: 0, tick: 0, delay: 0, at: 0, attempts: 0, since: 0 };
+  // XVault 26: the last 8 searches typed on this phone (stored only on this phone, cleared when it is unpaired).
+  const RECENT_KEY = 'xvault.remote.recent-searches.v1';
+  function recentSearches() {
+    try {
+      const rows = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+      return Array.isArray(rows) ? rows.filter(row => typeof row === 'string' && row.trim()).slice(0, 8) : [];
+    } catch {
+      return [];
+    }
+  }
+  function rememberSearch(value) {
+    const query = String(value || '')
+      .trim()
+      .slice(0, 200);
+    if (query.length < 2) return;
+    const rows = [query, ...recentSearches().filter(row => row.toLowerCase() !== query.toLowerCase())].slice(0, 8);
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(rows));
+    } catch {}
+  }
+  function forgetSearches() {
+    try {
+      localStorage.removeItem(RECENT_KEY);
+    } catch {}
+    renderRecentSearches();
+  }
+  function renderRecentSearches() {
+    const box = $('#recentSearches');
+    if (!box) return;
+    const input = $('#searchInput'),
+      rows = recentSearches(),
+      show = document.activeElement === input && !input.value.trim() && rows.length > 0;
+    box.hidden = !show;
+    if (!show) return;
+    const chips = rows.map(query => {
+      const chip = el('button', 'recent-chip', query);
+      chip.type = 'button';
+      chip.dataset.recent = query;
+      return chip;
+    });
+    const clear = el('button', 'recent-clear', 'Clear');
+    clear.type = 'button';
+    clear.id = 'recentClear';
+    clear.setAttribute('aria-label', 'Clear recent searches');
+    box.replaceChildren(el('span', 'recent-label', 'Recent'), ...chips, clear);
+  }
   function setConnection(online) {
+    const was = document.documentElement.dataset.connection;
     document.documentElement.dataset.connection = online ? 'online' : 'offline';
     $('#connectionLabel').textContent = online ? `Paired · ${state.device?.name || 'phone'}` : 'Computer unreachable';
     const banner = $('#offlineBanner');
     if (banner) banner.hidden = online;
+    if (online) {
+      const away = reconnect.since ? Date.now() - reconnect.since : 0;
+      clearTimeout(reconnect.timer);
+      clearInterval(reconnect.tick);
+      Object.assign(reconnect, { timer: 0, tick: 0, delay: 0, at: 0, attempts: 0, since: 0 });
+      if (was === 'offline') {
+        if (away > 3000) toast('Reconnected to your computer');
+        dispatchEvent(new CustomEvent('xvault-remote-reconnected', { detail: { away } }));
+      }
+      return;
+    }
+    if (!reconnect.since) reconnect.since = Date.now();
+    if (!reconnect.timer) scheduleReconnect();
   }
+  function renderReconnect() {
+    const label = $('#offlineBannerText');
+    if (!label) return;
+    const seconds = Math.max(0, Math.ceil((reconnect.at - Date.now()) / 1000));
+    label.textContent =
+      reconnect.at && !document.hidden && navigator.onLine !== false
+        ? `Your computer is unreachable. Trying again in ${seconds} s — loaded posts and drafts stay here.`
+        : navigator.onLine === false
+          ? 'This phone is offline. XVault reconnects when the network is back — loaded posts and drafts stay here.'
+          : 'Your computer is unreachable. Loaded references and local drafts remain here.';
+  }
+  function scheduleReconnect(now = false) {
+    clearTimeout(reconnect.timer);
+    clearInterval(reconnect.tick);
+    reconnect.timer = 0;
+    reconnect.tick = 0;
+    if (document.documentElement.dataset.connection !== 'offline' || $('#app')?.hidden) return;
+    if (document.hidden || navigator.onLine === false) return renderReconnect();
+    reconnect.delay = now ? 0 : Math.min(30000, reconnect.delay ? reconnect.delay * 2 : 2000);
+    reconnect.at = Date.now() + reconnect.delay;
+    renderReconnect();
+    reconnect.tick = setInterval(renderReconnect, 1000);
+    reconnect.timer = setTimeout(async () => {
+      reconnect.timer = 0;
+      clearInterval(reconnect.tick);
+      reconnect.attempts++;
+      await refreshSession();
+      if (document.documentElement.dataset.connection === 'offline') scheduleReconnect();
+    }, reconnect.delay);
+  }
+  addEventListener('online', () => scheduleReconnect(true));
+  addEventListener('offline', () => renderReconnect());
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && document.documentElement.dataset.connection === 'offline') scheduleReconnect(true);
+  });
   function resetRemoteBrowse() {
     state.libraryRevision = null;
     state.observedRevision = null;
@@ -679,6 +778,7 @@
   }
   function clearProtectedViews() {
     viewScrollPositions.clear();
+    forgetSearches();
     forgetAvatars();
     window.XVaultCapture?.reset();
     cancelPCRequests();
@@ -3185,8 +3285,33 @@
       if (event.key === 'Enter') {
         clearTimeout($('#searchInput')._timer);
         search(true);
+        rememberSearch($('#searchInput').value);
         $('#searchInput').blur();
       }
+    });
+    // XVault 26: recent searches — shown under the search box while it is focused and empty.
+    $('#searchInput').addEventListener('focus', renderRecentSearches);
+    $('#searchInput').addEventListener('input', renderRecentSearches);
+    $('#searchInput').addEventListener('blur', () => {
+      // A searched query is remembered once the phone stops typing in it (blur after a debounce-run search).
+      rememberSearch($('#searchInput').value);
+      setTimeout(renderRecentSearches, 180);
+    });
+    $('#recentSearches').addEventListener('pointerdown', event => event.preventDefault());
+    $('#recentSearches').addEventListener('click', event => {
+      const chip = event.target.closest('[data-recent]');
+      if (event.target.closest('#recentClear')) {
+        forgetSearches();
+        return;
+      }
+      if (!chip) return;
+      clearTimeout($('#searchInput')._timer);
+      state.savedViewName = '';
+      $('#searchInput').value = chip.dataset.recent;
+      $('#clearQuery').hidden = false;
+      rememberSearch(chip.dataset.recent);
+      search(true);
+      $('#searchInput').blur();
     });
     $('#clearQuery').addEventListener('click', () => {
       clearTimeout($('#searchInput')._timer);
@@ -3281,7 +3406,16 @@
     $('#reconnect').onclick = async () => {
       await refreshSession();
       if (document.documentElement.dataset.connection === 'online') search(true);
+      else {
+        toast('Still cannot reach your computer');
+        scheduleReconnect();
+      }
     };
+    // Back online: a Library that never loaded (or failed while away) loads again; a loaded one keeps its place and
+    // the archive-revision banner tells the phone if anything changed meanwhile.
+    addEventListener('xvault-remote-reconnected', () => {
+      if (!state.rows.size && state.permissions.has('library.read')) search(true);
+    });
     matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', applyMotion);
     $('#viewerMore').addEventListener('click', () => openSheet(state.currentPost));
     $('#pairRetry').addEventListener('click', retryPair);

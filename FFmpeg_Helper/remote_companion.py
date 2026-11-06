@@ -1131,6 +1131,8 @@ class RemoteCompanion:
                         'device': str(row.get('device') or '')[:48],
                         'mine': hmac.compare_digest(str(row.get('deviceId') or ''), str(device['id'])),
                         'attempts': _bounded_int(row.get('attempts'), 100),
+                        'maxAttempts': _bounded_int(row.get('maxAttempts'), 100),
+                        'nextAttemptAt': _bounded_int(row.get('nextAttemptAt'), 9_007_199_254_740_991),
                         'createdAt': _bounded_int(row.get('createdAt'), 9_007_199_254_740_991),
                         'updatedAt': _bounded_int(row.get('updatedAt'), 9_007_199_254_740_991),
                         'preview': clean_preview}
@@ -1142,6 +1144,8 @@ class RemoteCompanion:
                 counts = result.get('counts') if isinstance(result.get('counts'), dict) else {}
                 return {'ok': True, 'paused': result.get('paused') is True,
                         'pending': _bounded_int(result.get('pending'), 10_000),
+                        'cooldownUntil': _bounded_int(result.get('cooldownUntil'), 9_007_199_254_740_991),
+                        'authBlocked': result.get('authBlocked') is True,
                         'counts': {key: _bounded_int(counts.get(key), 10_000) for key in sorted(CAPTURE_STATES)},
                         'items': [item for item in items if item]}
 

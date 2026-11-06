@@ -11,6 +11,18 @@
       .join(' ');
     return tags.length > 8 ? `${visible} · +${tags.length - 8} more` : visible;
   }
+  /* Idle tasks coalesced by key: background UI work (facets, counters) runs in idle periods instead of competing
+     with the user's next interaction. */
+  const idleJobs = new Map();
+  function idleTask(key, fn, timeout = 1000) {
+    if (idleJobs.has(key)) return;
+    const run = () => {
+      idleJobs.delete(key);
+      fn();
+    };
+    idleJobs.set(key, window.requestIdleCallback ? requestIdleCallback(run, { timeout }) : setTimeout(run, 32));
+  }
+  window.XVaultIdleTask = idleTask;
   let pageIndex = 0;
   let lastQuery = '';
   let lastSort = '';
@@ -146,6 +158,7 @@
   const libraryScroller = () => $('#libraryScroll');
   let compactScrollTarget = null;
   function onCompactScroll() {
+    if (compactGeom) compactGeom.scrollDirty = true;
     if (compactFrame) return;
     compactFrame = requestAnimationFrame(() => {
       compactFrame = 0;
@@ -157,6 +170,7 @@
     compactScrollTarget = null;
     compactResizeObserver?.disconnect();
     compactResizeObserver = null;
+    compactGeom = null;
     compactKey = '';
     compactStart = compactEnd = -1;
   }
@@ -166,15 +180,32 @@
     if (!head) return 0;
     return Math.max(0, head.offsetHeight + Math.min(0, parseFloat(getComputedStyle(head).top) || 0));
   }
+  /* XVault 26: the scroller geometry is cached. Re-reading it on every forced repaint (a favorite, a tag, a
+     selection) forced a synchronous layout of the old rows right before they were replaced — ≈20 ms with a
+     1,500-row page. The cache is dropped by the ResizeObserver (scroller, sticky header, everything above the list)
+     and the scroll offset is re-read only after a scroll event. */
+  let compactGeom = null;
   function compactViewport(list) {
     const box = libraryScroller();
     if (!box || !box.contains(list)) return { top: list.scrollTop, height: list.clientHeight || 600 };
-    const head = pinnedHeadHeight(),
-      tableHead = compactMode === 'table' ? 36 : 0,
-      listTop = list.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+    const tableHead = compactMode === 'table' ? 36 : 0;
+    let geom = compactGeom;
+    if (!geom || geom.list !== list || geom.box !== box) {
+      geom = compactGeom = {
+        box,
+        list,
+        head: pinnedHeadHeight(),
+        listTop: list.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop,
+        clientHeight: box.clientHeight,
+        scrollTop: box.scrollTop,
+      };
+    } else if (geom.scrollDirty) {
+      geom.scrollTop = box.scrollTop;
+      geom.scrollDirty = false;
+    }
     return {
-      top: Math.max(0, box.scrollTop + head - listTop - tableHead),
-      height: Math.max(160, box.clientHeight - head - tableHead),
+      top: Math.max(0, geom.scrollTop + geom.head - geom.listTop - tableHead),
+      height: Math.max(160, geom.clientHeight - geom.head - tableHead),
     };
   }
   function compactRowHtml(post, index) {
@@ -242,6 +273,7 @@
       rowBottom = rowTop + rowHeight();
     if (rowTop < box.scrollTop + head) box.scrollTop = rowTop - head;
     else if (rowBottom > box.scrollTop + box.clientHeight) box.scrollTop = rowBottom - box.clientHeight + 8;
+    if (compactGeom) compactGeom.scrollDirty = true;
   }
 
   function renderCompact(rows, mode = 'compact') {
@@ -255,6 +287,7 @@
     list.dataset.view = mode;
     list.classList.add('xv-virtual-list');
     list.classList.remove('masonry');
+    if (reset) compactGeom = null;
     if (reset && list.offsetTop < (libraryScroller()?.scrollTop || 0)) scrollToListTop(true);
     const box = libraryScroller() || list;
     if (compactScrollTarget !== box) {
@@ -263,11 +296,115 @@
       compactScrollTarget = box;
     }
     if (!compactResizeObserver) {
-      compactResizeObserver = new ResizeObserver(() => paintCompact(true));
+      // A height change (the bulk bar appearing, the window growing) only repaints when the visible window of
+      // rows actually changes, measured in the next frame when layout is clean; a width change re-renders at once
+      // because row text wraps differently.
+      let lastWidth = -1;
+      compactResizeObserver = new ResizeObserver(entries => {
+        compactGeom = null;
+        const width = entries.find(entry => entry.target === box)?.contentRect.width ?? lastWidth;
+        const widthChanged = width !== lastWidth;
+        lastWidth = width;
+        if (widthChanged) return void paintCompact(true);
+        if (!compactFrame)
+          compactFrame = requestAnimationFrame(() => {
+            compactFrame = 0;
+            paintCompact();
+          });
+      });
       compactResizeObserver.observe(box);
+      const head = $('#libraryHead');
+      if (head) compactResizeObserver.observe(head);
+      // Anything above the list inside the scroller moves the list's offset when it changes size.
+      for (let node = list; node && node !== box; node = node.parentElement)
+        for (let sibling = node.previousElementSibling; sibling; sibling = sibling.previousElementSibling)
+          compactResizeObserver.observe(sibling);
     }
     paintCompact(true);
   }
+
+  /* Light modal: a dialog opened with show() instead of showModal(). showModal() makes the whole document inert,
+     which costs a full-document style recalculation on open and again on close (≈25 ms + 15 ms with 4,000 nodes in
+     the Library). The light modal keeps the dialog's semantics (aria-modal, focus containment, Escape, a click-away
+     scrim, focus return) while only touching the dialog and one scrim element. */
+  const lightModal = (() => {
+    const focusable =
+      'button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),video[controls],[tabindex]:not([tabindex="-1"])';
+    let active = null,
+      scrim = null;
+    function onKey(event) {
+      if (!active?.open) return;
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        event.preventDefault();
+        event.stopPropagation();
+        const cancel = new Event('cancel', { cancelable: true });
+        if (active.dispatchEvent(cancel)) active.close();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const nodes = [...active.querySelectorAll(focusable)].filter(node => node.getClientRects().length);
+      if (!nodes.length) return void event.preventDefault();
+      const first = nodes[0],
+        last = nodes.at(-1),
+        inside = active.contains(document.activeElement);
+      if (event.shiftKey && (!inside || document.activeElement === first || document.activeElement === active)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (!inside || document.activeElement === last)) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    function onFocusIn(event) {
+      if (!active?.open || active.contains(event.target)) return;
+      // A real modal dialog (palette, confirm) stacked on top owns focus; only pull focus back from the page.
+      if (event.target.closest?.('dialog[open]')) return;
+      (active.querySelector('[tabindex="-1"]') || active.querySelector(focusable) || active).focus({
+        preventScroll: true,
+      });
+    }
+    function detach() {
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('focusin', onFocusIn, true);
+      scrim?.classList.remove('show');
+      document.documentElement.classList.remove('xv-light-modal-open');
+      active = null;
+    }
+    return {
+      open(dialog) {
+        if (dialog.open) return;
+        if (active && active !== dialog) active.close();
+        if (!scrim) {
+          scrim = document.createElement('div');
+          scrim.className = 'xv-light-scrim';
+          scrim.setAttribute('aria-hidden', 'true');
+          scrim.addEventListener('pointerdown', event => {
+            event.preventDefault();
+            active?.close();
+          });
+          document.body.append(scrim);
+        }
+        dialog.classList.add('xv-light-modal');
+        dialog.setAttribute('aria-modal', 'true');
+        if (!dialog.dataset.lightModal) {
+          dialog.dataset.lightModal = '1';
+          dialog.addEventListener('close', () => {
+            if (active === dialog) detach();
+          });
+        }
+        active = dialog;
+        if (dialog.parentNode !== document.body || dialog.nextSibling) document.body.append(dialog);
+        document.body.insertBefore(scrim, dialog);
+        dialog.show();
+        scrim.classList.add('show');
+        document.documentElement.classList.add('xv-light-modal-open');
+        document.addEventListener('keydown', onKey, true);
+        document.addEventListener('focusin', onFocusIn, true);
+      },
+      active: () => (active?.open ? active : null),
+    };
+  })();
+  window.XVaultLightModal = lightModal;
 
   let quickLookRows = [];
   let quickLookIndex = 0;
@@ -317,9 +454,6 @@
         if ($('#lightbox').classList.contains('hidden') && $('#detailsDrawer').classList.contains('hidden'))
           (target || $('#search'))?.focus({ preventScroll: true });
       });
-      dialog.addEventListener('click', event => {
-        if (event.target === dialog) closeQuickLook();
-      });
       dialog.addEventListener('keydown', event => {
         if (event.target.closest('input,textarea,select,[contenteditable],video')) return;
         if (
@@ -355,7 +489,7 @@
     quickLookRows = rows;
     quickLookIndex = index;
     paintQuickLook();
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) lightModal.open(dialog);
     hydrateHelperMedia(dialog);
     $('#xvQuickLookTitle')?.focus({ preventScroll: true });
   }
@@ -750,10 +884,23 @@
   // ── Facets: collections, sources, authors and tags drawn from the archive itself ──
   let facetTimer = 0;
   const facetOpen = { authors: false, tags: false };
+  let facetsStale = false;
   function scheduleFacets() {
     clearTimeout(facetTimer);
-    facetTimer = setTimeout(renderFacets, 300);
+    // XVault 26: facets walk the whole archive. They wait for the page to settle (300 ms) and then for an idle
+    // period, so a select / Quick Look straight after a big page mounts never queues behind them. While another
+    // page is open they are only marked stale.
+    facetTimer = setTimeout(() => {
+      if (!$('#page-library')?.classList.contains('show')) return void (facetsStale = true);
+      idleTask('facets', renderFacets, 1500);
+    }, 300);
   }
+  window.XVaultDashboard?.after?.('page', (result, name) => {
+    if (name === 'library' && facetsStale) {
+      facetsStale = false;
+      scheduleFacets();
+    }
+  });
   function renderFacets() {
     const root = $('#libraryDestinations');
     if (!root) return;
@@ -894,6 +1041,7 @@
     const scroller = $('#libraryScroll'),
       list = $('#list');
     if (!scroller || !list) return;
+    if (compactGeom) compactGeom.scrollDirty = true;
     scroller.scrollTo({
       top: 0,
       behavior:
@@ -1044,10 +1192,24 @@
     const original = library;
     const remember = settings.rememberLibraryQuery;
     settings.rememberLibraryQuery = false;
+    // A layout switch keeps the reader's place across both renderers (feed layouts and List/Table), and a query
+    // the reader returns to restores where they were in it.
+    const renderBase = `${currentBase()}|${windowStart}`,
+      viewNow = settings.libraryView || 'cards',
+      switching = renderedBase === renderBase && renderedView && renderedView !== viewNow;
+    const crossAnchor = switching
+      ? visibleAnchor()
+      : renderedBase !== renderBase
+        ? queryAnchors.get(renderBase) || null
+        : null;
+    renderedBase = renderBase;
+    renderedView = viewNow;
+    watchAnchorScroll();
     try {
       if (['compact', 'table'].includes(settings.libraryView) && rows.length) {
         releaseHelperMedia($('#list'));
         renderCompact(rows, settings.libraryView);
+        if (crossAnchor) scrollCompactToAnchor(rows, crossAnchor);
         $('#libMediaCount').textContent = fmt(rows.reduce((count, post) => count + (post.media?.length || 0), 0));
         $('#libLocalCount').textContent = fmt(
           rows.reduce(
@@ -1060,7 +1222,7 @@
         compactResizeObserver?.disconnect();
         detachCompactScroll();
         $('#list').classList.remove('xv-virtual-list');
-        renderFeed(rows);
+        renderFeed(rows, crossAnchor);
       }
     } finally {
       library = original;
@@ -1117,8 +1279,61 @@
     renderSelection();
     return rows;
   };
+  let renderedBase = '',
+    renderedView = '';
+  // Each query remembers where the reader was (recorded when scrolling settles, because a new search may collapse
+  // the list before it renders): clearing a search returns to the same post in All posts.
+  const queryAnchors = new Map();
+  let anchorTimer = 0;
+  function rememberQueryAnchor() {
+    clearTimeout(anchorTimer);
+    anchorTimer = setTimeout(() => {
+      if (!renderedBase || $('#list')?.hasAttribute('aria-busy') || !$('#page-library')?.classList.contains('show'))
+        return;
+      const anchor = visibleAnchor();
+      queryAnchors.delete(renderedBase);
+      if (anchor) queryAnchors.set(renderedBase, anchor);
+      while (queryAnchors.size > 24) queryAnchors.delete(queryAnchors.keys().next().value);
+    }, 180);
+  }
+  function watchAnchorScroll() {
+    const box = libraryScroller();
+    if (!box || box.dataset.xvAnchorWatch) return;
+    box.dataset.xvAnchorWatch = '1';
+    box.addEventListener('scroll', rememberQueryAnchor, { passive: true });
+  }
+  // The first post under the sticky header and how far below the header it sits (null at the very top).
+  function visibleAnchor() {
+    const box = libraryScroller(),
+      list = $('#list');
+    if (!box || !list || box.scrollTop < 4) return null;
+    const view = box.getBoundingClientRect(),
+      head = $('#libraryHead')?.getBoundingClientRect(),
+      top =
+        view.top +
+        Math.min(head ? Math.max(0, head.bottom - view.top) : 0, view.height / 2) +
+        (list.dataset.view === 'table' && list.classList.contains('xv-virtual-list') ? 36 : 0);
+    const card = [...list.querySelectorAll('.tweet[data-id]')].find(
+      node => node.getBoundingClientRect().bottom > top + 24
+    );
+    return card ? { id: card.dataset.id, offset: card.getBoundingClientRect().top - top } : null;
+  }
+  function scrollCompactToAnchor(rows, anchor) {
+    const index = rows.findIndex(row => String(row.id) === String(anchor.id)),
+      box = libraryScroller(),
+      list = $('#list');
+    if (index < 0 || !box || !list) return;
+    const tableHead = compactMode === 'table' ? 36 : 0,
+      listTop = list.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+    box.scrollTop = Math.max(
+      0,
+      listTop + tableHead + index * rowHeight() - pinnedHeadHeight() - tableHead - Math.max(0, anchor.offset)
+    );
+    compactGeom = null;
+    paintCompact(true);
+  }
   // Card layouts: library-feed.js mounts the window incrementally and patches in place for the same query.
-  function renderFeed(rows) {
+  function renderFeed(rows, anchor = null) {
     const list = $('#list');
     const feed = window.XVaultLibraryFeed;
     if (!feed) return baseRender?.({ externallyFiltered: true });
@@ -1131,6 +1346,7 @@
       view,
       selected: () => selected,
       nearEnd: () => loadMore(true),
+      anchor,
     });
     let media = 0,
       local = 0;
@@ -1542,15 +1758,20 @@
   }
 
   // Selection state is drawn by the renderers (library-feed.js cards, windowed List/Table rows); this only syncs it.
-  function renderSelection() {
-    window.XVaultLibraryFeed?.syncSelection(selected);
-    for (const row of $$('#list.xv-virtual-list .tweet')) {
-      const on = selected.has(row.dataset.id);
-      row.classList.toggle('xv-selected', on);
-      const box = row.querySelector('.xv-card-select input');
+  // One pass over the mounted cards (the feed owns virtualized lists; blocks mounted later read the same Set).
+  function paintSelectedCards() {
+    const feed = window.XVaultLibraryFeed;
+    if (feed?.syncSelection && $('#list.xv-virtual-list')) return void feed.syncSelection(selected);
+    for (const card of $$('#list .tweet')) {
+      const on = selected.has(card.dataset.id);
+      card.classList.toggle('xv-selected', on);
+      const box = card.querySelector('.xv-card-select input');
       if (box && box.checked !== on) box.checked = on;
     }
-    updateSelectionBar();
+  }
+  function renderSelection() {
+    paintSelectedCards();
+    updateSelectionBar(false);
   }
   // One entry point for checkbox, Shift-click range and Ctrl/Cmd-click toggles from every layout.
   window.XVaultLibrarySelect = (rawId, { range = false, checked = true, toggle = false } = {}) => {
@@ -1842,8 +2063,8 @@
     });
   }
 
-  function updateSelectionBar() {
-    for (const card of $$('#list .tweet')) card.classList.toggle('xv-selected', selected.has(card.dataset.id));
+  function updateSelectionBar(paint = true) {
+    if (paint) paintSelectedCards();
     const listEl = $('#list');
     if (listEl) listEl.dataset.selecting = selected.size ? 'true' : 'false';
     const bar = $('#libraryBulk');

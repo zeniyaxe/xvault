@@ -3,6 +3,7 @@ import {
   canTransition,
   canTransitionArchive,
   classifyRetryReason,
+  explainDownloadError,
   classifyVerification,
   expectedKind,
   matchRecoveryDownload,
@@ -148,3 +149,13 @@ assert.deepEqual(classifyVerification({ received: 3000, expected: 'image', exist
 assert.deepEqual(verificationStates.length, 6);
 
 console.log('reliability: state, retry, verification, and settling tests passed');
+
+// XVault 26: plain-language download errors.
+assert.match(explainDownloadError('FILE_NO_SPACE'), /disk is full/);
+assert.match(explainDownloadError('NETWORK_FAILED'), /connection to X’s media server failed/);
+assert.match(explainDownloadError('HTTP 429 Too Many Requests'), /limiting downloads/);
+assert.match(explainDownloadError('SERVER_FORBIDDEN'), /no longer accepts this media link/);
+assert.match(explainDownloadError('HTTP 404'), /no longer exists/);
+assert.match(explainDownloadError('FILE_NAME_TOO_LONG'), /too long/);
+assert.equal(explainDownloadError(''), '');
+assert.equal(explainDownloadError('something odd'), '');

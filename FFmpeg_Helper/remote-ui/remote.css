@@ -595,6 +595,42 @@ svg {
 .eyebrow {
   display: none;
 }
+/* XVault 26: recent searches under the search box. */
+.recent-searches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+.recent-searches[hidden] {
+  display: none;
+}
+.recent-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+.recent-chip {
+  max-width: 220px;
+  min-height: 32px;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-clear {
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+}
 .search-box {
   display: flex;
   align-items: center;
@@ -1948,6 +1984,10 @@ textarea:focus-visible {
 }
 .search-box input {
   height: 48px;
+}
+/* The rounded box shows focus (border + soft ring); a second square outline on the inner field overflowed it. */
+.search-box input:focus-visible {
+  outline: none;
 }
 .search-clear {
   width: 40px;

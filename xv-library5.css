@@ -3455,3 +3455,22 @@ body[data-motion='off'] #page-library *::after {
     display: none;
   }
 }
+
+/* ── Light modal (show() + scrim; see lightModal in library-workspace.js) ── */
+.xv-light-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482000;
+  display: none;
+  background: var(--scrim);
+}
+.xv-light-scrim.show {
+  display: block;
+  animation: xvFade var(--t-med) var(--ease);
+}
+dialog.xv-light-modal[open] {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482001;
+  margin: auto;
+}

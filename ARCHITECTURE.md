@@ -72,6 +72,14 @@ spinning). `SET_DOWNLOAD_HOST_PAUSED` toggles a host, `RETRY_FAILED {host}` retr
 `queueStats` reports `pausedHosts`/`hostHeld`. Single transfers can be paused, resumed or cancelled by
 `downloadId` (only rows XVault started). The Downloads page (`xv-downloads.js`) and Phone Remote use the same calls.
 
+v26 adds a **per-host circuit breaker** (`sw/host-breaker.mjs`). The adaptive governor halves parallelism for the
+whole queue on push-back; the breaker parks **one** host that keeps refusing: four throttle/server/network failures
+in a row (within a minute) open it for 30 s, doubling per trip to at most 5 min. While open, `hostPaused()` treats
+the host like a user-paused one (same buffer filter, same parking), a timer re-scans when it closes, the next file
+is a probe (success closes it and forgets the level, failure re-opens it at once), and **Resume / Try now** clears
+it. `queueStats().coolingHosts` reports `{host, until, level, trips, reason}`. Failures also get a plain-language
+`row.errorHelp` from `explainDownloadError()` (`reliability.mjs`) — the raw Chrome code stays in `row.error`.
+
 ### Capture inbox
 
 ```
@@ -85,6 +93,16 @@ spinning). `SET_DOWNLOAD_HOST_PAUSED` toggles a host, `RETRY_FAILED {host}` retr
 The worker only runs while the user has a signed-in x.com tab open, visits one post at a time with a 1.5–3 s gap,
 times out a visit after 20 s, and classifies the result (`archived`, `duplicate`, `unavailable`, `failed`). State
 is bounded and survives restarts; an interrupted visit goes back to the queue. Nothing is fetched from X directly.
+
+v26: when a post does not arrive, the worker reads what the capture tab shows (`probePage`, the tab's URL and visible
+text through `chrome.scripting`) and `classifyCapturePage()` decides: **sign-in wall** → every pending item waits
+(`authBlockedAt`, no attempt spent, page loads do not restart it for 2 min, Resume/Retry lifts it); **X limiting
+requests** → the whole inbox cools down (`cooldownUntil`, 5 min doubling to 30 min per strike, no attempt spent);
+**X error page / did not load** → retry after 20 s, then 90 s (`nextAttemptAt`), failed after 3 attempts with a
+specific message. Waits longer than ~25 s are not slept in the worker: `wake(when)` creates the
+`xv-capture-inbox` alarm so a sleeping service worker resumes. Each item keeps its last 6 attempts (`log`: time,
+outcome, duration, detail), shown on the Capture page; `capture.list` carries `cooldownUntil`/`authBlocked`, and
+the Companion forwards `maxAttempts`/`nextAttemptAt` to the phone.
 
 ## Dashboard (`dashboard.html`)
 
@@ -104,6 +122,12 @@ order is not load-bearing and one failing observer cannot break a page.
 | `xv-avatars.js`        | Synchronous avatar lookup (`blob:` URL, pending, or remote) with in-place swap                         |
 | `library-search-core.js`, `search-ranking.js` | Query parsing and ranking shared with the service worker                       |
 
+v26 also adds **`xv-viewer.js`** (the Media Viewer: filmstrip, position, Media facts, Similar in your vault,
+cursor-anchored zoom, pan, swipe, keys, preloading; it decorates the lightbox through the `renderLightbox` hook)
+and two shared helpers in `library-workspace.js`: `XVaultLightModal(dialog)` (a non-top-layer modal — `show()` +
+scrim + focus trap — used by Quick Look because `showModal()` re-styles the whole page) and
+`XVaultIdleTask(key, fn, timeout)` (keyed `requestIdleCallback` for facets and other non-urgent work).
+
 Rules that keep it fast at 50,000 posts:
 
 - **One scroller.** `#page-library` is a three-column frame (sidebar · `.lib-main` · Inspector). `.lib-main` is the
@@ -115,7 +139,12 @@ Rules that keep it fast at 50,000 posts:
 - **Media is lazy.** Aspect-ratio boxes reserve space; images decode lazily; video elements are created only when
   the reader presses play; GIFs autoplay only while visible.
 - **No forced reflow in hot paths.** Measurements happen in `requestAnimationFrame`; animations restart by cloning,
-  not by reading `offsetWidth`.
+  not by reading `offsetWidth`. List/Table geometry is cached (`compactGeom`, invalidated by scroll and
+  ResizeObservers) so selecting or favouriting does not read layout; the toast measures itself at idle.
+- **Non-urgent work waits.** Facets are computed at idle and only while the Library is visible; the Downloads page
+  paints only while it is shown; the queue-stats poll skips hidden documents.
+- **Places survive.** A layout switch keeps the first visible post in place (measured before the switch); each
+  query remembers its scroll anchor, so returning to a search returns to the same post.
 
 ### Other pages
 
@@ -133,7 +162,10 @@ Home (`xv-home.js`), Explorer (`explorer.js`), Atlas (`xv-atlas.js` + `thread-ma
 - `aurora` — tokens, shell and every redesigned surface (`xv-aurora.css`, `xv-library5.css`, `xv-aurora-pages.css`).
 
 A later layer wins regardless of specificity, so redesigned surfaces need neither `!important` nor long selectors.
-v25 deleted `xv-library.css`, `xv-library3.css`, `xv-aurora-library.css` and `xv-keystone.css`.
+v25 deleted `xv-library.css`, `xv-library3.css`, `xv-aurora-library.css` and `xv-keystone.css`. Because of that
+rule, a `legacy` declaration is dead whenever an `aurora` rule with the same selector (and no narrower `@media`)
+sets the same property; v26 removed all 213 such declarations (and two rules for classes no code uses), checked
+with 83 before/after screenshots that differ only in clock text and loading timing.
 
 ## Phone Remote
 
@@ -152,7 +184,13 @@ v25 deleted `xv-library.css`, `xv-library3.css`, `xv-aurora-library.css` and `xv
 - **Routes** include `/api/library`, `/api/media/…`, `/api/downloads` + `/api/downloads/control`, `/api/capture` +
   `/api/capture/control`, `/api/avatar/<handle>`, `/api/favorite`, `/api/tag`, `/api/note`.
 - **Offline.** `remote-sw.js` caches the app shell; captures that cannot be sent wait in a small on-phone outbox.
-  Media is never cached by the service worker.
+  Media is never cached by the service worker. v26: losing the computer starts a reconnect loop (2 s doubling to
+  30 s while visible, immediately on `online`/wake, countdown in the banner) and coming back fires
+  `xvault-remote-reconnected` (the outbox flushes, an empty Library reloads). The outbox is re-read before it is
+  written (no link lost to a concurrent flush), syncs across tabs through `storage` events, retries with a 5 s →
+  2 min backoff, records `tries`/`lastTry`/`lastError` per link and says when the computer refused one for good.
+  Sending is idempotent on the computer (one inbox item per post id). Recent searches (8, this phone only, cleared
+  on unpair) live in `xvault.remote.recent-searches.v1`.
 - **Share target.** `manifest.webmanifest` registers `/share` so an installed Remote on Android can receive links
   from the X app's share sheet.
 

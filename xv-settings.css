@@ -15,12 +15,8 @@
   flex-direction: column;
   gap: 14px;
   min-height: 0;
-  padding: 18px 12px 16px 16px;
   border-right: 1px solid var(--line-soft);
   overflow: auto;
-}
-.settings-search input {
-  min-height: 34px;
 }
 .settings-links {
   display: grid;
@@ -29,17 +25,7 @@
 .settings-links button {
   justify-content: flex-start;
   width: 100%;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-weight: 500;
   text-align: left;
-}
-.settings-links button:hover {
-  background: var(--raised);
-  color: var(--text);
 }
 .settings-links button[aria-current='true'] {
   background: var(--raised-hi);
@@ -524,7 +510,6 @@ body.settings-searching .formgrid:has(> .search-miss:only-child) {
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    padding: 10px 14px;
     border-right: 0;
     border-bottom: 1px solid var(--line-soft);
   }
@@ -572,25 +557,15 @@ body.settings-searching .formgrid:has(> .search-miss:only-child) {
   min-height: 0;
   padding: 8px 8px 10px;
   border: 1px solid var(--line);
-  border-radius: var(--r-l);
   background: transparent;
   text-align: left;
   white-space: normal;
-  transition:
-    border-color var(--t-fast),
-    transform var(--t-med) var(--ease),
-    background-color var(--t-fast);
 }
 .theme-card:hover {
-  transform: translateY(-2px);
   background: var(--raised);
 }
 .theme-card:active {
   transform: translateY(0) scale(0.99);
-}
-.theme-card[aria-checked='true'] {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
 }
 .tc-name {
   display: flex;
@@ -1024,13 +999,9 @@ body[data-theme='terminal'] {
   .tc-mini {
     height: 112px;
   }
-  .theme-card:hover {
-    transform: none;
-  }
 }
 @media (max-width: 600px) {
   .topactions {
-    gap: 2px;
     max-width: calc(100vw - 150px);
     overflow-x: auto;
     scrollbar-width: thin;

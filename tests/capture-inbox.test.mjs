@@ -2,9 +2,25 @@
 // tabs API and an archive that records a post a moment after its page is opened.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { classifyCapture, createCaptureInbox, parseCaptureText, parseCaptureUrl, prune } from '../sw/capture-inbox.mjs';
+import {
+  AUTH_REASON,
+  classifyCapture,
+  classifyCapturePage,
+  createCaptureInbox,
+  parseCaptureText,
+  parseCaptureUrl,
+  prune,
+} from '../sw/capture-inbox.mjs';
 
-function harness({ gone = [], hidden = [], xTab = true, archived = {}, settings = {} } = {}) {
+function harness({
+  gone = [],
+  hidden = [],
+  login = [],
+  pageText = {},
+  xTab = true,
+  archived = {},
+  settings = {},
+} = {}) {
   let clock = 5_000_000,
     nextTab = 20;
   const store = {},
@@ -32,7 +48,10 @@ function harness({ gone = [], hidden = [], xTab = true, archived = {}, settings 
         tabs.get(id).url = url;
         const postId = /status\/(\d+)/.exec(url)[1];
         visits.push(postId);
-        if (gone.includes(postId))
+        if (login.includes(postId))
+          tabs.get(id).url = `https://x.com/i/flow/login?redirect_after_login=%2Fa%2Fstatus%2F${postId}`;
+        else if (pageText[postId]) tabs.get(id).text = pageText[postId];
+        else if (gone.includes(postId))
           posts.set(postId, { id: postId, availability: { state: 'deleted', checkedAt: clock + 1 } });
         else if (!hidden.includes(postId))
           posts.set(postId, {
@@ -56,8 +75,9 @@ function harness({ gone = [], hidden = [], xTab = true, archived = {}, settings 
     pollMs: 400,
     visitTimeoutMs: 2000,
     gapMs: [100, 100],
+    probePage: async id => ({ url: tabs.get(id)?.url || '', text: tabs.get(id)?.text || '' }),
   });
-  return { inbox, store, tabs, visits, posts };
+  return { inbox, store, tabs, visits, posts, advance: ms => (clock += ms) };
 }
 
 test('links: X, twitter and mirror URLs normalise to one canonical post; other links are refused', () => {
@@ -139,21 +159,31 @@ test('without an x.com tab items wait with a reason and start once X is open', a
 });
 
 test('outcomes: unavailable posts, retries, failure, retry, remove, clear and pause', async () => {
-  const { inbox, visits } = harness({ gone: ['11'], hidden: ['12'] });
+  const { inbox, visits, advance } = harness({ gone: ['11'], hidden: ['12'] });
   await inbox.add('https://x.com/a/status/11 https://x.com/b/status/12');
   await inbox.run();
   let items = Object.fromEntries((await inbox.list()).items.map(item => [item.id, item]));
   assert.equal(items['11'].state, 'unavailable');
+  // XVault 26: the second try came after a 20 s backoff; the third is scheduled 90 s later, not run at once.
+  assert.equal(items['12'].state, 'queued');
+  assert.match(items['12'].error, /trying again at/);
+  assert.ok(items['12'].nextAttemptAt > 0);
+  assert.deepEqual(visits, ['11', '12', '12']);
+  assert.equal(items['12'].log.length, 2, 'each attempt is logged for diagnostics');
+  assert.equal(items['12'].log[0].outcome, 'pending');
+  advance(91000);
+  await inbox.run();
+  items = Object.fromEntries((await inbox.list()).items.map(item => [item.id, item]));
   assert.equal(items['12'].state, 'failed');
   assert.match(items['12'].error, /signed in to X/);
-  assert.deepEqual(visits, ['11', '12', '12'], 'a post X did not show is tried twice');
+  assert.deepEqual(visits, ['11', '12', '12', '12'], 'a post X did not show is tried three times');
   await inbox.control('pause');
   await inbox.control('retry', '12');
   items = Object.fromEntries((await inbox.list()).items.map(item => [item.id, item]));
   assert.equal(items['12'].state, 'queued');
   assert.equal((await inbox.list()).paused, true);
   await inbox.run();
-  assert.equal(visits.length, 3, 'a paused inbox does not visit');
+  assert.equal(visits.length, 4, 'a paused inbox does not visit');
   await inbox.control('remove', '12');
   await inbox.control('clear');
   assert.equal((await inbox.list()).items.length, 0);
@@ -196,4 +226,68 @@ test('bounds: classification and pruning keep pending items and drop old finishe
   }));
   assert.equal(prune(many, now).length, 400);
   assert.equal(prune(many, now).at(-1).id, '399', 'the oldest finished items go first');
+});
+
+test('page classification: sign-in walls, rate limits, unavailable posts and X errors', () => {
+  assert.equal(classifyCapturePage({ url: 'https://x.com/i/flow/login?redirect_after_login=%2Fa' }), 'auth');
+  assert.equal(
+    classifyCapturePage({ url: 'https://x.com/a/status/1', text: 'Sign in to X\nDon’t miss what’s happening' }),
+    'auth'
+  );
+  assert.equal(classifyCapturePage({ url: 'https://x.com/a/status/1', text: 'Rate limit exceeded' }), 'rate-limited');
+  assert.equal(
+    classifyCapturePage({ text: 'Hmm...this page doesn’t exist. Try searching for something else.' }),
+    'unavailable'
+  );
+  assert.equal(classifyCapturePage({ text: 'This post is unavailable.' }), 'unavailable');
+  assert.equal(classifyCapturePage({ text: 'Something went wrong. Try reloading.' }), 'x-error');
+  assert.equal(classifyCapturePage({ url: 'https://x.com/a/status/1', text: 'Ada @ada Hello world' }), 'unknown');
+  assert.equal(classifyCapturePage({}), 'unknown');
+});
+
+test('a sign-in wall holds the whole inbox without spending attempts; Retry starts again', async () => {
+  const { inbox, visits, tabs } = harness({ login: ['31'] });
+  await inbox.add('https://x.com/a/status/31 https://x.com/a/status/32');
+  await inbox.run();
+  let list = await inbox.list();
+  const items = Object.fromEntries(list.items.map(item => [item.id, item]));
+  assert.deepEqual(visits, ['31'], 'nothing else is opened once X asks for a sign-in');
+  assert.equal(items['31'].state, 'waiting');
+  assert.equal(items['31'].attempts, 0, 'a sign-in wall does not count against the post');
+  assert.equal(items['31'].error, AUTH_REASON);
+  assert.equal(items['32'].state, 'waiting');
+  assert.equal(list.authBlocked, true);
+  assert.equal(items['31'].log.at(-1).detail, 'Sign-in wall');
+  await inbox.run();
+  assert.deepEqual(visits, ['31'], 'page loads do not hammer the sign-in wall');
+  assert.equal(tabs.size, 0, 'the capture tab is closed');
+  await inbox.control('retry-all');
+  await inbox.run();
+  list = await inbox.list();
+  assert.ok(visits.length >= 2, 'Retry lifts the hold');
+});
+
+test('X limiting requests pauses every capture until the cooldown ends', async () => {
+  const pageText = { 41: 'Rate limit exceeded' };
+  const { inbox, visits, advance } = harness({ pageText });
+  await inbox.add('https://x.com/a/status/41 https://x.com/a/status/42');
+  await inbox.run();
+  let list = await inbox.list();
+  let items = Object.fromEntries(list.items.map(item => [item.id, item]));
+  assert.deepEqual(visits, ['41']);
+  assert.ok(list.cooldownUntil > 0, 'a cooldown is reported');
+  assert.match(items['42'].error, /limiting requests/);
+  assert.equal(items['41'].attempts, 0);
+  await inbox.run();
+  assert.deepEqual(visits, ['41'], 'nothing runs during the cooldown');
+  // X stops limiting: the next visit to 41 loads normally.
+  delete pageText[41];
+  advance(5 * 60000 + 1000);
+  await inbox.run();
+  list = await inbox.list();
+  items = Object.fromEntries(list.items.map(item => [item.id, item]));
+  assert.ok(visits.includes('42'), 'captures resume after the cooldown');
+  assert.equal(items['42'].state, 'archived');
+  assert.equal(items['41'].state, 'archived', 'the limited capture is retried without spending an attempt');
+  assert.equal(list.cooldownUntil || 0, 0, 'the cooldown clears after a success');
 });

@@ -10,17 +10,10 @@
 .xv-has-nav-mark .nav.active::before {
   display: none;
 }
-.rail {
-  position: relative;
-}
 .xv-nav-mark {
   position: absolute;
   top: 0;
-  left: 0;
-  width: 3px;
   height: 18px;
-  border-radius: 0 3px 3px 0;
-  background: var(--accent);
   pointer-events: none;
   opacity: 0;
   transition:
@@ -65,14 +58,6 @@
   border-radius: var(--r-s);
   background: var(--raised);
 }
-.xv-skeleton::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 6%, transparent), transparent);
-  animation: xvShimmer 1.3s var(--ease-in-out) infinite;
-}
 @keyframes xvShimmer {
   to {
     transform: translateX(100%);
@@ -82,7 +67,6 @@
 /* View transitions for self-contained surfaces. */
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation-duration: calc(240ms * var(--motion-k, 1) / var(--motion-scale, 1));
   animation-timing-function: var(--xv-spring-gentle);
 }
 html[data-vt='forward']::view-transition-old(root) {
@@ -104,10 +88,6 @@ html[data-vt='back']::view-transition-new(root) {
   }
 }
 @keyframes xvVtInRight {
-  from {
-    opacity: 0;
-    transform: translateX(18px);
-  }
 }
 @keyframes xvVtOutRight {
   to {
@@ -116,10 +96,6 @@ html[data-vt='back']::view-transition-new(root) {
   }
 }
 @keyframes xvVtInLeft {
-  from {
-    opacity: 0;
-    transform: translateX(-18px);
-  }
 }
 
 /* Global constraints: nothing in this layer moves when motion is calmed. */

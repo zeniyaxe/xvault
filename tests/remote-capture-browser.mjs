@@ -1,4 +1,4 @@
-// Phone Remote 4.0 in a real browser: the Capture view (paste several links, live inbox states, retry, filters,
+// Phone Remote 4.0–5.0 in a real browser: the Capture view (paste several links, live inbox states, retry, filters,
 // remove, the on-phone outbox while the computer is unreachable, the Web Share Target /share route, the
 // permission-off state) and archived avatars served by the Companion (one request per author, monogram fallback).
 // Usage: node tests/remote-capture-browser.mjs [playwright module path] [chromium executable]
@@ -422,6 +422,21 @@ try {
   await saved.locator('[data-capture-action="open"]').click();
   await page.waitForFunction(() => !document.querySelector('#libraryView').hidden);
   assert.equal(await page.locator('#searchInput').inputValue(), 'id:1790000000000000102');
+
+  // ── XVault 26: recent searches ──
+  await page.locator('#searchInput').fill('fog lens');
+  await page.locator('#searchInput').press('Enter');
+  await page.locator('#clearQuery').click();
+  await page.locator('#searchInput').focus();
+  await page.locator('#recentSearches:not([hidden])').waitFor();
+  assert.deepEqual(await page.locator('#recentSearches .recent-chip').allTextContents(), ['fog lens']);
+  await page.screenshot({ path: path.join(out, 'remote5-recent-searches-390.png') });
+  await page.locator('#recentSearches .recent-chip').first().click();
+  assert.equal(await page.locator('#searchInput').inputValue(), 'fog lens', 'a recent search runs again');
+  await page.locator('#clearQuery').click();
+  await page.locator('#searchInput').focus();
+  await page.locator('#recentClear').click();
+  assert.equal(await page.evaluate(() => localStorage.getItem('xvault.remote.recent-searches.v1')), null);
   await page.locator('[data-view="captureView"]').click();
 
   // ── Computer unreachable: the link waits on the phone ──
@@ -438,10 +453,18 @@ try {
   );
   await quiet();
   await page.screenshot({ path: path.join(out, 'remote4-capture-offline-390.png') });
+  // XVault 26: still unreachable → Send now keeps the link and records the try; then the backoff retry sends it
+  // by itself once the computer answers (no tap needed).
+  await page.locator('#captureOutbox button', { hasText: 'Send now' }).click();
+  await page.locator('#captureOutbox small', { hasText: /last try/ }).waitFor();
+  assert.match(await page.locator('#captureOutbox small').textContent(), /computer unreachable/);
+  await page.screenshot({ path: path.join(out, 'remote5-outbox-retry-390.png') });
+  assert.ok(
+    (await page.evaluate(() => JSON.parse(localStorage.getItem('xvault.remote.capture-outbox.v1'))[0].tries)) >= 1
+  );
   offline = false;
   const before = captureCalls.length;
-  await page.locator('#captureOutbox button', { hasText: 'Send now' }).click();
-  await page.locator('.toast', { hasText: 'Waiting link sent to XVault' }).waitFor();
+  await page.locator('.toast', { hasText: 'Waiting link sent to XVault' }).waitFor({ timeout: 15000 });
   assert.equal(captureCalls.length, before + 1);
   await page.locator('#captureOutbox[hidden]').waitFor({ state: 'attached' });
   assert.equal(await page.evaluate(() => localStorage.getItem('xvault.remote.capture-outbox.v1')), null);
@@ -527,7 +550,7 @@ try {
   await audit('capture off', '#captureView');
 
   assert.deepEqual(errors, []);
-  console.log(`Phone Remote 4.0 capture checks passed · ${out}`);
+  console.log(`Phone Remote 5.0 capture checks passed · ${out}`);
 } finally {
   await browser.close();
 }

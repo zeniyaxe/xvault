@@ -326,6 +326,17 @@
             if (mutation.changed) settings.savedViews = mutation.savedViews;
             return { ok: true, settings: { ...settings }, ...mutation };
           }
+          case 'SEMANTIC_SIMILAR': {
+            // XVault 26: "similar" in the mock = other posts by the same author first, then posts with media.
+            const source = rowById.get(String(message.id));
+            if (!source) return { ok: true, results: [] };
+            const others = activeRows().filter(row => row.id !== source.id && (row.media || []).length);
+            const ranked = [
+              ...others.filter(row => row.author?.handle === source.author?.handle),
+              ...others.filter(row => row.author?.handle !== source.author?.handle),
+            ].slice(0, Math.max(1, Math.min(48, Number(message.limit) || 12)));
+            return { ok: true, results: ranked.map((row, index) => ({ id: row.id, score: 0.9 - index * 0.03 })) };
+          }
           case 'GET_LIBRARY_RECORDS': {
             const wanted = new Set((message.ids || []).map(String));
             if (wanted.size > 1000) return { ok: false, error: 'Library record reads require at most 1,000 post IDs' };
